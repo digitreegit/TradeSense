@@ -551,7 +551,7 @@ body {
 
 .stat-value {
   font-size: 28px;
-  font-weight: 800;
+  font-weight: 600;
   font-family: var(--font-mono);
   letter-spacing: -1px;
   line-height: 1.2;

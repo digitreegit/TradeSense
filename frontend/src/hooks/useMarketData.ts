@@ -15,8 +15,16 @@ export function useMarketData() {
   const fetchAll = async () => {
     // ── Bot status ────────────────────────────
     try {
-      const status = await api.getBotStatus() as { active?: boolean };
-      if (typeof status?.active === 'boolean') setBotActive(status.active);
+      const botStatus = await api.getBotStatus() as {
+        active: boolean;
+        strategy: string;
+        regime_reason?: string;
+      };
+      setBotActive(botStatus.active);
+      if (botStatus.regime_reason && botStatus.regime_reason !== '') {
+        // Only set notification if it's new
+        useAppStore.getState().setMarketNotification(botStatus.regime_reason);
+      }
     } catch {
       // ignore
     }

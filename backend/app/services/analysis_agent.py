@@ -205,32 +205,34 @@ Market Data: {str(market_data)}"""
                     "confidence": confidence,
                 })
         return signals
-    async def determine_market_regime(self, news: list[dict]) -> str:
-        """Analyze news sentiment to choose the best strategy: momentum or mean-reversion."""
+    async def determine_market_regime(self, news: list[dict]) -> tuple[str, str]:
+        """Analyze news sentiment and return (strategy, reasoning)."""
         if not self.is_ready or not news:
-            return "momentum"
+            return "momentum", "뉴스가 충분하지 않아 기본 모멘텀 전략을 유지합니다."
 
-        news_text = "\n".join([f"- {n['headline']}: {n['summary'][:100]}..." for n in news])
+        news_text = "\n".join([f"- {n['headline']}" for n in news])
         
         prompt = f"""
-        당신은 상위 1% 퀀트 분석가입니다. 아래의 최신 주식 뉴스들을 읽고 현재 시장의 분위기를 판단하세요.
+        당신은 상위 1% 퀀트 분석가입니다. 아래 뉴스 헤드라인들을 읽고 현재 시장 분위기를 한 문장으로 요약한 뒤, 최적의 전략을 선택하세요.
         
-        뉴스 리스트:
+        뉴스:
         {news_text}
         
-        판단 기준:
-        1. 강한 호재가 많고 추세가 뚜렷하면: 'momentum'
-        2. 특별한 방향성 없이 불확실성이 크거나 변동성이 심하면: 'mean-reversion'
-        
-        반드시 'momentum' 또는 'mean-reversion' 둘 중 한 단어만 답변하세요.
+        응답 형식 (반드시 이 JSON 형식으로만 답변하세요):
+        {{
+            "strategy": "momentum" 또는 "mean-reversion",
+            "reasoning": "현재 ~~한 상황이므로 ~~한 전략으로 대응합니다."
+        }}
         """
         
         try:
+            import json
             response = self.model.generate_content(prompt)
-            decision = response.text.strip().lower()
-            return "mean-reversion" if "mean-reversion" in decision else "momentum"
+            data = json.loads(response.text.strip().replace('```json', '').replace('```', ''))
+            return data.get("strategy", "momentum"), data.get("reasoning", "시장 흐름에 따라 전략을 운용합니다.")
         except Exception:
-            return "momentum"
+            return "momentum", "시장 데이터 분석을 통해 전략을 최적화합니다."
+
 
 
 # Singleton

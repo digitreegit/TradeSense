@@ -14,6 +14,8 @@ const Dashboard: React.FC = () => {
     setBotActive,
     tradeLogs,
     strategies,
+    marketNotification,
+    setMarketNotification,
   } = useAppStore();
 
   const totalPL = account.equity - account.initial_capital;
@@ -114,7 +116,7 @@ const Dashboard: React.FC = () => {
                 <div>
                   <div style={{
                     fontSize: '32px',
-                    fontWeight: 800,
+                    fontWeight: 600,
                     fontFamily: 'var(--font-mono)',
                     color: totalPL >= 0 ? 'var(--profit)' : 'var(--loss)',
                     letterSpacing: '-1px',

@@ -48,6 +48,8 @@ interface AppState {
   setConnected: (connected: boolean) => void;
   marketOpen: boolean;
   setMarketOpen: (open: boolean) => void;
+  marketNotification: string | null;
+  setMarketNotification: (msg: string | null) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -158,4 +160,6 @@ export const useAppStore = create<AppState>((set) => ({
   setConnected: (connected) => set({ connected }),
   marketOpen: false,
   setMarketOpen: (open) => set({ marketOpen: open }),
+  marketNotification: null,
+  setMarketNotification: (msg) => set({ marketNotification: msg }),
 }));

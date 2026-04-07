@@ -31,6 +31,7 @@ class TradingEngine:
     def __init__(self):
         self.active           = False
         self.active_strategy: Optional[str] = None
+        self.last_regime_reason: str = ""
         self.trade_logs: list = []
         self.session_stats = {
             "total_trades":   0,
@@ -58,17 +59,39 @@ class TradingEngine:
         return self.active
 
     async def run_cycle(self):
-        """Run one trading cycle."""
+        """Run one trading cycle with autonomous start/stop logic."""
+        now_et = datetime.now(ET)
+        is_weekend = now_et.weekday() >= 5
+        market_time = now_et.time()
+
+        # Autonomous logic: Start 5 mins before (9:25 AM), Stop at close (4:00 PM)
+        if not is_weekend:
+            # 1. AUTO START (at 9:25 AM ET)
+            if market_time >= time(9, 25) and market_time < time(16, 0):
+                if not self.active:
+                    from app.services.notification_service import notification_service
+                    self.active = True
+                    self.active_strategy = "momentum"
+                    self._log("info", "🤖 [Auto-Start] Market opening soon! Bot is now ACTIVE.")
+                    notification_service.send_alert("🚀 봇 자동 시작", "장 개장 5분 전입니다. 전략(Momentum)을 가동합니다.", "SUCCESS")
+            
+            # 2. AUTO STOP (at 4:00 PM ET)
+            if market_time >= time(16, 0) and self.active:
+                from app.services.notification_service import notification_service
+                self.active = False
+                self._log("info", "🛑 [Auto-Stop] Market closed. Bot is now IDLE.")
+                notification_service.send_alert("💤 봇 퇴근 완료", "오늘 장이 마감되었습니다. 수고하셨습니다!", "INFO")
+
         if not self.active:
             return
 
         self._scan_count += 1
 
         if not is_market_open():
-            now_et = datetime.now(ET)
-            if self._scan_count % 5 == 1:   # log every 5 scans
-                self._log("info", f"⏳ Market closed — scanning resumes at 9:30 AM ET | Now: {now_et.strftime('%H:%M ET %a')}")
+            if self._scan_count % 5 == 1:
+                self._log("info", f"⏳ Standby — Market opens at 9:30 AM ET | Now: {now_et.strftime('%H:%M ET')}")
             return
+
 
         # ─── AI Adaptive Strategy Selection (Every 10 scans) ───
         if self._scan_count % 10 == 1:
@@ -76,10 +99,12 @@ class TradingEngine:
                 from app.services.analysis_agent import analysis_agent
                 news = alpaca_service.get_latest_news(["AAPL", "NVDA", "SPY"], limit=5)
                 if news:
-                    new_strategy = await analysis_agent.determine_market_regime(news)
+                    new_strategy, reasoning = await analysis_agent.determine_market_regime(news)
+                    self.last_regime_reason = reasoning  # Store for API access
                     if new_strategy != self.active_strategy:
-                        self._log("info", f"🤖 AI Macro Analysis: Switching strategy to {new_strategy.upper()} based on latest news sentiment.")
+                        self._log("info", f"🤖 AI Macro Analysis: {reasoning}")
                         self.active_strategy = new_strategy
+
             except Exception as e:
                 logger.warning(f"AI strategy switching failed: {e}")
 
@@ -92,10 +117,27 @@ class TradingEngine:
 
             self._log("info", f"📡 Scan #{self._scan_count} | Equity: ${equity:,.2f} | Cash: ${cash:,.2f} | Positions: {len(positions)}")
 
+            # ─── Alert Monitoring (Monitoring Portfolio Changes) ─────
+            pl_pct = (equity - 100000.0) / 100000.0 * 100
+            
+            from app.services.notification_service import notification_service
+            
+            # 1. 🚨 포트폴리오 비상 알림 (±5% 이상)
+            if abs(pl_pct) >= 5.0 and self._scan_count % 60 == 0:   # 30분마다 알림
+                level = "CRITICAL" if pl_pct <= -5 else "SUCCESS"
+                title = "🚨 포트폴리오 비상" if pl_pct <= -5 else "🎉 포트폴리오 급등"
+                msg   = f"현재 총 자산: ${equity:,.2f} ({pl_pct:+.1f}%). {'시장이 폭망하고 있습니다. 대응이 필요합니다.' if pl_pct <= -5 else '시장이 아주 핫합니다! 수익을 즐기세요.' }"
+                notification_service.send_alert(title, msg, level)
+                self._log(level.lower(), f"🔔 [Alert] {title}: {pl_pct:+.1f}%")
+
+            # 2. 🧠 AI 분석가 시장 판세 변화 알림
+            # (앞서 구현한 strategy switching과 연동)
+
             if self.active_strategy == "momentum":
                 await self._run_momentum(account, positions)
             elif self.active_strategy == "mean-reversion":
                 await self._run_mean_reversion(account, positions)
+
             elif self.active_strategy == "ml-predict":
                 await self._run_ml_predict(account, positions)
 

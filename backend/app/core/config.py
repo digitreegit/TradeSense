@@ -4,22 +4,23 @@ from pathlib import Path
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 
-# Aggressively search for .env in every likely location
+# Primary search for .env in current and parent directory (backend/)
 _this_file = Path(__file__).resolve()
 _search_dirs = [
-    _this_file.parent.parent.parent.parent,  # project root (above backend/)
     _this_file.parent.parent.parent,          # backend/
     Path.cwd(),                               # CWD
-    Path.home() / "public_html" / "quant",    # InMotion deploy path
-    Path.home() / "public_html" / "trade",    # fallback
 ]
 _env_file_path = None
 for _d in _search_dirs:
-    _candidate = _d / ".env"
-    if _candidate.is_file():
-        _env_file_path = str(_candidate)
-        load_dotenv(_env_file_path, override=True)
-        break
+    try:
+        _candidate = _d / ".env"
+        if _candidate.is_file():
+            _env_file_path = str(_candidate)
+            load_dotenv(_env_file_path, override=True)
+            break
+    except Exception:
+        continue
+
 
 
 class Settings(BaseSettings):

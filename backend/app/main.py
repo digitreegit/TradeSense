@@ -31,13 +31,15 @@ trading_task = None
 
 
 async def trading_loop():
-    """Background task that runs the trading engine periodically."""
+    """Background loop that runs trading cycles periodically."""
+    logger.info("Starting background trading loop...")
     while True:
         try:
-            if trading_engine.is_active:
-                await trading_engine.run_cycle()
+            # 봇이 IDLE이어도 30초마다 run_cycle을 실행하여 자율 시작 여부를 체크합니다.
+            await trading_engine.run_cycle()
         except Exception as e:
-            logger.error(f"Trading loop error: {e}")
+            logger.error(f"Error in trading loop: {e}")
+        
         await asyncio.sleep(30)  # Run every 30 seconds
 
 
