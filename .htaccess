@@ -1,0 +1,3 @@
+PassengerAppRoot "/home/skyfac5/public_html/quant"
+PassengerBaseURI "/quant"
+PassengerPython "/home/skyfac5/virtualenv/public_html/quant/3.13/bin/python"

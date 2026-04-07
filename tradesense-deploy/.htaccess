@@ -1,0 +1,17 @@
+RewriteEngine On
+
+# Force HTTPS
+RewriteCond %{HTTPS} off
+RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# Proxy API requests to the Python backend (Passenger)
+RewriteCond %{REQUEST_URI} ^/tradesense/api/
+RewriteRule ^tradesense/api/(.*)$ /api/$1 [PT,L]
+
+# Serve static assets directly
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# SPA fallback: serve index.html for all other /tradesense/ routes
+RewriteRule ^tradesense(/.*)?$ /tradesense/index.html [L]
