@@ -66,14 +66,19 @@ class TradingEngine:
 
         # Autonomous logic: Start 5 mins before (9:25 AM), Stop at close (4:00 PM)
         if not is_weekend:
-            # 1. AUTO START (at 9:25 AM ET)
+            # 1. AUTO START (between 9:25 AM and 4:00 PM ET)
             if market_time >= time(9, 25) and market_time < time(16, 0):
                 if not self.active:
                     from app.services.notification_service import notification_service
                     self.active = True
                     self.active_strategy = "momentum"
-                    self._log("info", "[Auto-Start] Market opening soon! Bot is now ACTIVE.")
-                    notification_service.send_alert("봇 자동 시작", "장 개장 5분 전입니다. 전략(Momentum)을 가동합니다.", "SUCCESS")
+                    
+                    if market_time < time(9, 30):
+                        self._log("info", "[Auto-Start] Market opening soon! Bot is now ACTIVE.")
+                        notification_service.send_alert("봇 자동 시작", "장 개장 5분 전입니다. 전략(Momentum)을 가동합니다.", "SUCCESS")
+                    else:
+                        self._log("info", "[Auto-Start] Market is open. Bot is now ACTIVE.")
+                        notification_service.send_alert("봇 추격 시작", "장이 이미 열려있습니다. 전략(Momentum)을 가동합니다.", "SUCCESS")
             
             # 2. AUTO STOP (at 4:00 PM ET)
             if market_time >= time(16, 0) and self.active:

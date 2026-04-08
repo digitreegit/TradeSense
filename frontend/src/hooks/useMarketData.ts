@@ -9,7 +9,10 @@ const WATCHLIST_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'TSLA', 'MET
  * and keeps the store updated with live prices.
  */
 export function useMarketData() {
-  const { setWatchlist, setAccount, setPositions, setConnected, setMarketOpen, setBotActive } = useAppStore();
+  const { 
+    setWatchlist, setAccount, setPositions, setOrders, 
+    setConnected, setMarketOpen, setBotActive 
+  } = useAppStore();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchAll = async () => {
@@ -28,6 +31,17 @@ export function useMarketData() {
     } catch {
       // ignore
     }
+
+    // ── Trade History (Orders) ────────────────
+    try {
+      const data = await api.getOrders() as { orders?: unknown[] };
+      if (data?.orders) {
+        setOrders(data.orders as never[]);
+      }
+    } catch {
+      // ignore
+    }
+
     try {
       const account = await api.getAccount() as Record<string, unknown>;
       if (account && !('detail' in account)) {

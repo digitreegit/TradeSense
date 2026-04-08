@@ -93,17 +93,30 @@ const TradingBot: React.FC = () => {
   const [stopLossPercent, setStopLossPercent] = useState(2);
   const [takeProfitPercent, setTakeProfitPercent] = useState(5);
 
+  const [sessionStats, setSessionStats] = useState({
+    total_trades: 0,
+    winning_trades: 0,
+    losing_trades: 0,
+    total_pnl: 0,
+    win_rate: 0,
+    max_drawdown: 0,
+  });
+
   // Poll bot status & logs from backend every 5 seconds
   const pollBotStatus = useCallback(async () => {
     try {
       const data = await api.getBotStatus() as {
         active?: boolean;
         logs?: Array<{ time: string; type: string; message: string }>;
+        stats?: typeof sessionStats;
       };
       if (data) {
         if (typeof data.active === 'boolean') setBotActive(data.active);
         if (data.logs && data.logs.length > 0) {
           setTradeLogs(data.logs as typeof tradeLogs);
+        }
+        if (data.stats) {
+          setSessionStats(data.stats);
         }
       }
     } catch {
@@ -447,11 +460,11 @@ const TradingBot: React.FC = () => {
             </div>
             <div style={{ padding: 'var(--space-xl)' }}>
               {[
-                { label: 'Total Trades', value: '0', color: 'var(--text-primary)' },
-                { label: 'Win Rate', value: 'N/A', color: 'var(--text-tertiary)' },
-                { label: 'Profit Factor', value: 'N/A', color: 'var(--text-tertiary)' },
-                { label: 'Max Drawdown', value: '$0.00', color: 'var(--text-tertiary)' },
-                { label: 'Sharpe Ratio', value: 'N/A', color: 'var(--text-tertiary)' },
+                { label: 'Total Trades', value: sessionStats.total_trades.toString(), color: 'var(--text-primary)' },
+                { label: 'Win Rate', value: `${sessionStats.win_rate.toFixed(1)}%`, color: sessionStats.win_rate >= 50 ? 'var(--profit)' : 'var(--text-tertiary)' },
+                { label: 'Winning Trades', value: sessionStats.winning_trades.toString(), color: 'var(--profit)' },
+                { label: 'Losing Trades', value: sessionStats.losing_trades.toString(), color: 'var(--loss)' },
+                { label: 'Total P&L', value: formatCurrency(sessionStats.total_pnl), color: sessionStats.total_pnl >= 0 ? 'var(--profit)' : 'var(--loss)' },
               ].map((stat, i) => (
                 <div key={i} style={{
                   display: 'flex',
