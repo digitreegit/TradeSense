@@ -206,6 +206,51 @@ body {
   flex-shrink: 0;
 }
 
+.btn-start {
+  padding: 10px 16px;
+  background: linear-gradient(135deg, #059669 0%, #10b981 50%, #3b82f6 100%);
+  color: white;
+  border: none;
+  border-radius: var(--radius-lg);
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+}
+
+.btn-start:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.4);
+  filter: brightness(1.1);
+}
+
+.btn-stop {
+  padding: 10px 16px;
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1.5px solid rgba(239, 68, 68, 0.4);
+  border-radius: var(--radius-lg);
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  transition: all 0.2s ease;
+}
+
+.btn-stop:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
+  transform: translateY(-1px);
+}
+
 .sidebar-logo {
   display: flex;
   align-items: center;
@@ -278,7 +323,7 @@ body {
   color: var(--text-secondary);
   cursor: pointer;
   transition: all var(--transition-fast);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   border: none;
   background: none;
@@ -318,8 +363,14 @@ body {
 .sidebar-item .icon {
   width: 20px;
   height: 20px;
-  flex-shrink: 0;
-  opacity: 0.7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar-item .icon svg {
+  width: 100%;
+  height: 100%;
 }
 
 .sidebar-item.active .icon {
@@ -474,12 +525,19 @@ body {
 }
 
 .card-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.card-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
 }
 
 .card-body {
@@ -553,7 +611,7 @@ body {
   font-size: 28px;
   font-weight: 600;
   font-family: var(--font-mono);
-  letter-spacing: -1px;
+  letter-spacing: 0;
   line-height: 1.2;
 }
 

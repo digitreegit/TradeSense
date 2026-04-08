@@ -45,13 +45,13 @@ class TradingEngine:
     def start(self, strategy: str = "momentum"):
         self.active          = True
         self.active_strategy = strategy
-        self._log("info", f"🚀 Bot started — Strategy: {strategy.upper()} | Mode: PAPER TRADING")
-        self._log("info", f"💰 Risk per position: {settings.max_position_percent}% | Stop: {settings.stop_loss_percent}% | TP: {settings.take_profit_percent}%")
+        self._log("info", f"Bot started — Strategy: {strategy.upper()} | Mode: PAPER TRADING")
+        self._log("info", f"Risk per position: {settings.max_position_percent}% | Stop: {settings.stop_loss_percent}% | TP: {settings.take_profit_percent}%")
         logger.info(f"Trading engine started: {strategy}")
 
     def stop(self):
         self.active = False
-        self._log("info", "🛑 Trading engine stopped")
+        self._log("info", "Trading engine stopped")
         logger.info("Trading engine stopped")
 
     @property
@@ -72,15 +72,15 @@ class TradingEngine:
                     from app.services.notification_service import notification_service
                     self.active = True
                     self.active_strategy = "momentum"
-                    self._log("info", "🤖 [Auto-Start] Market opening soon! Bot is now ACTIVE.")
-                    notification_service.send_alert("🚀 봇 자동 시작", "장 개장 5분 전입니다. 전략(Momentum)을 가동합니다.", "SUCCESS")
+                    self._log("info", "[Auto-Start] Market opening soon! Bot is now ACTIVE.")
+                    notification_service.send_alert("봇 자동 시작", "장 개장 5분 전입니다. 전략(Momentum)을 가동합니다.", "SUCCESS")
             
             # 2. AUTO STOP (at 4:00 PM ET)
             if market_time >= time(16, 0) and self.active:
                 from app.services.notification_service import notification_service
                 self.active = False
-                self._log("info", "🛑 [Auto-Stop] Market closed. Bot is now IDLE.")
-                notification_service.send_alert("💤 봇 퇴근 완료", "오늘 장이 마감되었습니다. 수고하셨습니다!", "INFO")
+                self._log("info", "[Auto-Stop] Market closed. Bot is now IDLE.")
+                notification_service.send_alert("봇 퇴근 완료", "오늘 장이 마감되었습니다. 수고하셨습니다!", "INFO")
 
         if not self.active:
             return
@@ -89,7 +89,7 @@ class TradingEngine:
 
         if not is_market_open():
             if self._scan_count % 5 == 1:
-                self._log("info", f"⏳ Standby — Market opens at 9:30 AM ET | Now: {now_et.strftime('%H:%M ET')}")
+                self._log("info", f"Standby — Market opens at 9:30 AM ET | Now: {now_et.strftime('%H:%M ET')}")
             return
 
 
@@ -102,7 +102,7 @@ class TradingEngine:
                     new_strategy, reasoning = await analysis_agent.determine_market_regime(news)
                     self.last_regime_reason = reasoning  # Store for API access
                     if new_strategy != self.active_strategy:
-                        self._log("info", f"🤖 AI Macro Analysis: {reasoning}")
+                        self._log("info", f"AI Macro Analysis: {reasoning}")
                         self.active_strategy = new_strategy
 
             except Exception as e:
@@ -115,22 +115,22 @@ class TradingEngine:
             equity    = account["equity"]
             cash      = account["cash"]
 
-            self._log("info", f"📡 Scan #{self._scan_count} | Equity: ${equity:,.2f} | Cash: ${cash:,.2f} | Positions: {len(positions)}")
+            self._log("info", f"Scan #{self._scan_count} | Equity: ${equity:,.2f} | Cash: ${cash:,.2f} | Positions: {len(positions)}")
 
             # ─── Alert Monitoring (Monitoring Portfolio Changes) ─────
             pl_pct = (equity - 100000.0) / 100000.0 * 100
             
             from app.services.notification_service import notification_service
             
-            # 1. 🚨 포트폴리오 비상 알림 (±5% 이상)
+            # 1. 포트폴리오 비상 알림 (±5% 이상)
             if abs(pl_pct) >= 5.0 and self._scan_count % 60 == 0:   # 30분마다 알림
                 level = "CRITICAL" if pl_pct <= -5 else "SUCCESS"
-                title = "🚨 포트폴리오 비상" if pl_pct <= -5 else "🎉 포트폴리오 급등"
-                msg   = f"현재 총 자산: ${equity:,.2f} ({pl_pct:+.1f}%). {'시장이 폭망하고 있습니다. 대응이 필요합니다.' if pl_pct <= -5 else '시장이 아주 핫합니다! 수익을 즐기세요.' }"
+                title = "포트폴리오 비상" if pl_pct <= -5 else "포트폴리오 급등"
+                msg   = f"현재 총 자산: ${equity:,.2f} ({pl_pct:+.1f}%). {'시장이 하락하고 있습니다. 대응이 필요합니다.' if pl_pct <= -5 else '시장이 아주 상승 중입니다! 수익을 즐기세요.' }"
                 notification_service.send_alert(title, msg, level)
-                self._log(level.lower(), f"🔔 [Alert] {title}: {pl_pct:+.1f}%")
+                self._log(level.lower(), f"[Alert] {title}: {pl_pct:+.1f}%")
 
-            # 2. 🧠 AI 분석가 시장 판세 변화 알림
+            # 2. AI 분석가 시장 판세 변화 알림
             # (앞서 구현한 strategy switching과 연동)
 
             if self.active_strategy == "momentum":
@@ -174,10 +174,10 @@ class TradingEngine:
 
             # Stop loss
             if plpc <= -(settings.stop_loss_percent / 100):
-                self._log("sell", f"🛑 Stop loss: {symbol} {plpc*100:+.1f}% — selling")
+                self._log("sell", f"Stop loss: {symbol} {plpc*100:+.1f}% — selling")
                 res = alpaca_service.submit_market_order(symbol, abs(int(pos["qty"])), "sell")
                 if "error" not in res:
-                    self._log("sell", f"✅ Sold {abs(int(pos['qty']))} {symbol} (stop loss −{settings.stop_loss_percent}%)")
+                    self._log("sell", f"Sold {abs(int(pos['qty']))} {symbol} (stop loss -{settings.stop_loss_percent}%)")
                     self.session_stats["total_trades"]  += 1
                     self.session_stats["losing_trades"] += 1
                     self.session_stats["total_pnl"]     += pos["unrealized_pl"]
@@ -185,10 +185,10 @@ class TradingEngine:
 
             # Take profit
             if plpc >= (settings.take_profit_percent / 100):
-                self._log("sell", f"🎯 Take profit: {symbol} {plpc*100:+.1f}% — selling")
+                self._log("sell", f"Take profit: {symbol} {plpc*100:+.1f}% — selling")
                 res = alpaca_service.submit_market_order(symbol, abs(int(pos["qty"])), "sell")
                 if "error" not in res:
-                    self._log("sell", f"✅ Sold {abs(int(pos['qty']))} {symbol} (take profit +{settings.take_profit_percent}%)")
+                    self._log("sell", f"Sold {abs(int(pos['qty']))} {symbol} (take profit +{settings.take_profit_percent}%)")
                     self.session_stats["total_trades"]   += 1
                     self.session_stats["winning_trades"] += 1
                     self.session_stats["total_pnl"]      += pos["unrealized_pl"]
@@ -196,10 +196,10 @@ class TradingEngine:
 
             # RSI exit (momentum fading)
             if indicators["rsi"] < 35:
-                self._log("signal", f"📉 RSI exit: {symbol} RSI={indicators['rsi']:.1f} < 35 — closing")
+                self._log("signal", f"RSI exit: {symbol} RSI={indicators['rsi']:.1f} < 35 — closing")
                 res = alpaca_service.submit_market_order(symbol, abs(int(pos["qty"])), "sell")
                 if "error" not in res:
-                    self._log("sell", f"✅ Closed {symbol} (RSI={indicators['rsi']:.1f})")
+                    self._log("sell", f"Closed {symbol} (RSI={indicators['rsi']:.1f})")
                     self.session_stats["total_trades"] += 1
                     pnl_sign = 1 if plpc > 0 else 0
                     self.session_stats["winning_trades"] += pnl_sign
@@ -208,7 +208,7 @@ class TradingEngine:
 
         # ── Look for new entries ──────────────────────────────
         if slots_available <= 0 or cash < 500:
-            self._log("info", f"ℹ️ No entry slots (positions={len(current_symbols)}, cash=${cash:,.0f})")
+            self._log("info", f"No entry slots (positions={len(current_symbols)}, cash=${cash:,.0f})")
             return
 
         scored = []
@@ -267,14 +267,14 @@ class TradingEngine:
                 continue
 
             cost = qty * price
-            self._log("signal", f"🎯 BUY signal {symbol}: score={score} | {' + '.join(reasons)} | ${price:.2f} × {qty} = ${cost:,.0f}")
+            self._log("signal", f"BUY signal {symbol}: score={score} | {' + '.join(reasons)} | ${price:.2f} × {qty} = ${cost:,.0f}")
 
             res = alpaca_service.submit_market_order(symbol, qty, "buy")
             if "error" not in res:
-                self._log("buy", f"✅ BOUGHT {qty} × {symbol} @ ~${price:.2f} (${cost:,.0f})")
+                self._log("buy", f"BOUGHT {qty} × {symbol} @ ~${price:.2f} (${cost:,.0f})")
                 self.session_stats["total_trades"] += 1
             else:
-                self._log("error", f"❌ Order failed {symbol}: {res['error']}")
+                self._log("error", f"Order failed {symbol}: {res['error']}")
 
     async def _run_mean_reversion(self, account: dict, positions: list):
         """
@@ -297,7 +297,7 @@ class TradingEngine:
 
             # Stop loss override
             if plpc <= -(settings.stop_loss_percent / 100):
-                self._log("sell", f"🛑 Stop loss: {symbol} {plpc*100:+.1f}%")
+                self._log("sell", f"Stop loss: {symbol} {plpc*100:+.1f}%")
                 alpaca_service.submit_market_order(symbol, abs(int(pos["qty"])), "sell")
                 self.session_stats["total_trades"]  += 1
                 self.session_stats["losing_trades"] += 1
@@ -306,7 +306,7 @@ class TradingEngine:
             # Sell at upper band or take profit
             if price >= indicators["bb_upper"] or plpc >= (settings.take_profit_percent / 100):
                 reason = "BB upper" if price >= indicators["bb_upper"] else "Take profit"
-                self._log("sell", f"📤 {reason}: {symbol} @ ${price:.2f}")
+                self._log("sell", f"{reason}: {symbol} @ ${price:.2f}")
                 alpaca_service.submit_market_order(symbol, abs(int(pos["qty"])), "sell")
                 self.session_stats["total_trades"]   += 1
                 self.session_stats["winning_trades"] += 1
@@ -325,15 +325,15 @@ class TradingEngine:
                 max_val = equity * (settings.max_position_percent / 100)
                 qty     = int(min(max_val, cash * 0.9) / price)
                 if qty > 0:
-                    self._log("signal", f"📊 Mean Reversion BUY {symbol}: at lower BB, RSI={indicators['rsi']:.0f}")
+                    self._log("signal", f"Mean Reversion BUY {symbol}: at lower BB, RSI={indicators['rsi']:.0f}")
                     res = alpaca_service.submit_market_order(symbol, qty, "buy")
                     if "error" not in res:
-                        self._log("buy", f"✅ Bought {qty} {symbol} @ ${price:.2f}")
+                        self._log("buy", f"Bought {qty} {symbol} @ ${price:.2f}")
                         self.session_stats["total_trades"] += 1
 
     async def _run_ml_predict(self, account: dict, positions: list):
         """ML Prediction: combines momentum + mean-reversion signals with scoring."""
-        self._log("info", "🤖 ML hybrid scan: combining momentum + reversion signals...")
+        self._log("info", "ML hybrid scan: combining momentum + reversion signals...")
         await self._run_momentum(account, positions)
 
     # ─── Technical Indicators ──────────────────────────────────

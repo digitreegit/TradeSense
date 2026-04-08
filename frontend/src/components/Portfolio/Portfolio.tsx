@@ -2,6 +2,32 @@ import React from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import { formatCurrency, formatPercent, getChangeClass } from '../../utils/helpers';
 
+// Heroicons v2 Outline SVGs
+const BriefcaseIcon = (props: React.ComponentProps<'svg'>) => (
+  <svg {...props} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 14.15v4.25c0 .621-.504 1.125-1.125 1.125H4.875A1.125 1.125 0 0 1 3.75 18.4V14.15m16.5 0a5.122 5.122 0 0 0-4.75-4.65M16.5 14.15m16.5 0a1.125 1.125 0 0 1-1.125 1.125H4.875a1.125 1.125 0 0 1-1.125-1.125m16.5 0h-16.5" />
+  </svg>
+);
+
+const ChartPieIcon = (props: React.ComponentProps<'svg'>) => (
+  <svg {...props} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6a7.5 7.5 0 1 0 7.5 7.5h-7.5V6Z" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 10.5H21A7.5 7.5 0 0 0 13.5 3v7.5Z" />
+  </svg>
+);
+
+const CheckBadgeIcon = (props: React.ComponentProps<'svg'>) => (
+  <svg {...props} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 0 1-1.043 3.296 3.745 3.745 0 0 1-3.296 1.043A3.745 3.745 0 0 1 12 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 0 1-3.296-1.043 3.745 3.745 0 0 1-1.043-3.296A3.745 3.745 0 0 1 3 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 0 1 1.043-3.296 3.746 3.746 0 0 1 3.296-1.043A3.746 3.746 0 0 1 12 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 0 1 3.296 1.043 3.746 3.746 0 0 1 1.043 3.296A3.745 3.745 0 0 1 21 12Z" />
+  </svg>
+);
+
+const ArchiveBoxIcon = (props: React.ComponentProps<'svg'>) => (
+  <svg {...props} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 0 1-2.247 2.118H6.622a2.25 2.25 0 0 1-2.247-2.118L3.75 7.5m6 4.125l2.25 2.25m0 0l2.25-2.25M12 13.875V8.25M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+  </svg>
+);
+
 const Portfolio: React.FC = () => {
   const { account, positions } = useAppStore();
 
@@ -50,7 +76,9 @@ const Portfolio: React.FC = () => {
       {/* Holdings */}
       <div className="card" style={{ marginBottom: 'var(--space-xl)' }}>
         <div className="card-header">
-          <span className="card-title">💼 Holdings</span>
+          <span className="card-title">
+            <BriefcaseIcon className="card-icon" /> Holdings
+          </span>
           <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
             {positions.length} position{positions.length !== 1 ? 's' : ''}
           </span>
@@ -58,7 +86,9 @@ const Portfolio: React.FC = () => {
         <div>
           {positions.length === 0 ? (
             <div className="empty-state">
-              <div className="empty-state-icon">📭</div>
+              <div className="empty-state-icon">
+                <ArchiveBoxIcon style={{ width: '48px', height: '48px', color: 'var(--text-tertiary)' }} />
+              </div>
               <div className="empty-state-title">No Holdings</div>
               <div className="empty-state-text">
                 Your portfolio is all cash. Start the trading bot to begin automated trading with $1,000 paper money.
@@ -123,7 +153,9 @@ const Portfolio: React.FC = () => {
       <div className="dashboard-grid">
         <div className="card">
           <div className="card-header">
-            <span className="card-title">📊 Asset Allocation</span>
+            <span className="card-title">
+              <ChartPieIcon className="card-icon" /> Asset Allocation
+            </span>
           </div>
           <div className="card-body">
             <div style={{
@@ -246,7 +278,9 @@ const Portfolio: React.FC = () => {
 
         <div className="card">
           <div className="card-header">
-            <span className="card-title">🎯 Performance Metrics</span>
+            <span className="card-title">
+              <CheckBadgeIcon className="card-icon" /> Performance Metrics
+            </span>
           </div>
           <div style={{ padding: 'var(--space-xl)' }}>
             {[

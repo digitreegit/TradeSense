@@ -2,6 +2,19 @@ import React from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import { formatCurrency } from '../../utils/helpers';
 
+// Heroicons v2 Outline SVGs
+const ListBulletIcon = (props: React.ComponentProps<'svg'>) => (
+  <svg {...props} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 17.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+  </svg>
+);
+
+const HistoryIcon = (props: React.ComponentProps<'svg'>) => (
+  <svg {...props} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+  </svg>
+);
+
 const History: React.FC = () => {
   const { orders } = useAppStore();
 
@@ -9,7 +22,9 @@ const History: React.FC = () => {
     <div className="page-enter">
       <div className="card">
         <div className="card-header">
-          <span className="card-title">📋 Trade History</span>
+          <span className="card-title">
+            <ListBulletIcon className="card-icon" /> Trade History
+          </span>
           <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
             {orders.length} order{orders.length !== 1 ? 's' : ''}
           </span>
@@ -17,7 +32,9 @@ const History: React.FC = () => {
         <div>
           {orders.length === 0 ? (
             <div className="empty-state">
-              <div className="empty-state-icon">📜</div>
+              <div className="empty-state-icon">
+                <HistoryIcon style={{ width: '48px', height: '48px', color: 'var(--text-tertiary)' }} />
+              </div>
               <div className="empty-state-title">No Trade History</div>
               <div className="empty-state-text">
                 Your trade history will appear here once the bot starts executing trades in paper trading mode.
