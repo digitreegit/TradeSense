@@ -11,6 +11,14 @@ const DocumentCheckIcon = (props: React.ComponentProps<'svg'>) => (
 
 const Header: React.FC = () => {
   const { currentPage, marketOpen } = useAppStore();
+  const [time, setTime] = React.useState(new Date());
+
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      setTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const titles: Record<string, string> = {
     dashboard: 'Dashboard',
@@ -21,7 +29,7 @@ const Header: React.FC = () => {
     history: 'Trade History',
   };
 
-  const currentTime = new Date().toLocaleTimeString('en-US', {
+  const currentTime = time.toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
