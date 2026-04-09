@@ -34,6 +34,11 @@ export interface AccountInfo {
   profit_loss_pct: number;
   day_trade_count: number;
   initial_capital: number;
+  win_rate?: number;
+  avg_win?: number;
+  avg_loss?: number;
+  profit_factor?: number;
+  sharpe_ratio?: number;
 }
 
 export interface WatchlistItem {

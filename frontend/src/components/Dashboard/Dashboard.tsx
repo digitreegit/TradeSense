@@ -98,7 +98,7 @@ const Dashboard: React.FC = () => {
           <div className="stat-value" style={{ color: 'var(--text-primary)' }}>
             {formatCurrency(account.cash)}
           </div>
-          <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '6px' }}>
+          <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '6px' }}>
             Buying Power: {formatCurrency(account.buying_power)}
           </div>
         </div>
@@ -108,7 +108,7 @@ const Dashboard: React.FC = () => {
           <div className="stat-value" style={{ color: 'var(--accent-secondary)' }}>
             {activePositionCount}
           </div>
-          <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '6px' }}>
+          <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '6px' }}>
             {strategies.filter(s => s.active).length} strategies active
           </div>
         </div>
@@ -125,7 +125,7 @@ const Dashboard: React.FC = () => {
             <span style={{ fontSize: '14px', lineHeight: 1 }}>{botActive ? '●' : '○'}</span>
             <span>{botActive ? 'ACTIVE' : 'IDLE'}</span>
           </div>
-          <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '6px' }}>
+          <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '6px' }}>
             {tradeLogs.length} events logged
           </div>
         </div>
@@ -140,7 +140,7 @@ const Dashboard: React.FC = () => {
               <span className="card-title">
                 <ChartBarIcon className="card-icon" /> Portfolio Performance
               </span>
-              <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+              <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
                 Starting: {formatCurrency(account.initial_capital)}
               </span>
             </div>
@@ -200,7 +200,7 @@ const Dashboard: React.FC = () => {
                 borderRadius: 'var(--radius-md)',
               }}>
                 <div>
-                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
                     Initial Capital
                   </div>
                   <div style={{ fontSize: '16px', fontWeight: 700, fontFamily: 'var(--font-mono)', marginTop: '4px' }}>
@@ -208,7 +208,7 @@ const Dashboard: React.FC = () => {
                   </div>
                 </div>
                 <div>
-                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
                     Total P&L
                   </div>
                   <div style={{
@@ -222,7 +222,7 @@ const Dashboard: React.FC = () => {
                   </div>
                 </div>
                 <div>
-                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
                     Day Trades
                   </div>
                   <div style={{ fontSize: '16px', fontWeight: 700, fontFamily: 'var(--font-mono)', marginTop: '4px' }}>
@@ -298,7 +298,7 @@ const Dashboard: React.FC = () => {
                           color: pos.unrealized_pl >= 0 ? 'var(--profit)' : 'var(--loss)',
                         }}>
                           {pos.unrealized_pl >= 0 ? '+' : ''}{formatCurrency(pos.unrealized_pl)}
-                          <span style={{ fontSize: '10px', marginLeft: '4px' }}>
+                          <span style={{ fontSize: '12px', marginLeft: '4px' }}>
                             ({formatPercent(pos.unrealized_plpc * 100)})
                           </span>
                         </td>
@@ -319,7 +319,7 @@ const Dashboard: React.FC = () => {
               </span>
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <span style={{
-                  fontSize: '11px',
+                  fontSize: '12px',
                   fontWeight: 600,
                   color: botActive ? 'var(--profit)' : 'var(--text-tertiary)',
                 }}>

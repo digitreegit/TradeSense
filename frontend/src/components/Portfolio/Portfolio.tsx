@@ -67,7 +67,7 @@ const Portfolio: React.FC = () => {
           <div className="stat-value" style={{ color: 'var(--accent-gold)' }}>
             {account.day_trade_count}/3
           </div>
-          <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '6px' }}>
+          <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '6px' }}>
             PDT Rule (5-day rolling)
           </div>
         </div>
@@ -116,7 +116,7 @@ const Portfolio: React.FC = () => {
                       <span style={{
                         padding: '2px 8px',
                         borderRadius: 'var(--radius-full)',
-                        fontSize: '10px',
+                        fontSize: '12px',
                         fontWeight: 600,
                         textTransform: 'uppercase',
                         background: pos.side === 'long' ? 'var(--profit-dim)' : 'var(--loss-dim)',
@@ -186,7 +186,7 @@ const Portfolio: React.FC = () => {
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
-                              fontSize: '10px',
+                              fontSize: '12px',
                               fontWeight: 700,
                               color: 'white',
                             }}
@@ -201,7 +201,7 @@ const Portfolio: React.FC = () => {
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        fontSize: '10px',
+                        fontSize: '12px',
                         fontWeight: 600,
                         color: 'var(--text-tertiary)',
                       }}>
@@ -215,7 +215,7 @@ const Portfolio: React.FC = () => {
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      fontSize: '11px',
+                      fontSize: '12px',
                       fontWeight: 600,
                       color: 'var(--accent-primary)',
                     }}>
@@ -239,7 +239,7 @@ const Portfolio: React.FC = () => {
                         display: 'flex',
                         alignItems: 'center',
                         gap: '6px',
-                        fontSize: '11px',
+                        fontSize: '12px',
                       }}>
                         <span style={{
                           width: 8,
@@ -256,7 +256,7 @@ const Portfolio: React.FC = () => {
                     display: 'flex',
                     alignItems: 'center',
                     gap: '6px',
-                    fontSize: '11px',
+                    fontSize: '12px',
                   }}>
                     <span style={{
                       width: 8,
@@ -287,11 +287,11 @@ const Portfolio: React.FC = () => {
               { label: 'Total Return', value: formatPercent(totalPLPct), color: getChangeClass(totalPL) },
               { label: 'Total P&L', value: `${totalPL >= 0 ? '+' : ''}${formatCurrency(totalPL)}`, color: getChangeClass(totalPL) },
               { label: 'Initial Capital', value: formatCurrency(account.initial_capital), color: '' },
-              { label: 'Win Rate', value: 'N/A', color: '' },
-              { label: 'Avg Win', value: 'N/A', color: '' },
-              { label: 'Avg Loss', value: 'N/A', color: '' },
-              { label: 'Profit Factor', value: 'N/A', color: '' },
-              { label: 'Sharpe Ratio', value: 'N/A', color: '' },
+              { label: 'Win Rate', value: account.win_rate !== undefined ? `${account.win_rate}%` : '0%', color: '' },
+              { label: 'Avg Win', value: formatCurrency(account.avg_win || 0), color: '' },
+              { label: 'Avg Loss', value: formatCurrency(account.avg_loss || 0), color: '' },
+              { label: 'Profit Factor', value: (account.profit_factor || 0).toFixed(2), color: '' },
+              { label: 'Sharpe Ratio', value: (account.sharpe_ratio || 0).toFixed(2), color: '' },
             ].map((item, i) => (
               <div key={i} style={{
                 display: 'flex',

@@ -284,7 +284,7 @@ const TradingBot: React.FC = () => {
                 <ListIcon className="card-icon" /> Activity Log
               </span>
               <span style={{
-                fontSize: '11px',
+                fontSize: '12px',
                 color: 'var(--text-tertiary)',
                 fontFamily: 'var(--font-mono)',
               }}>
@@ -318,7 +318,7 @@ const TradingBot: React.FC = () => {
               {/* Risk Level */}
               <div>
                 <label style={{
-                  fontSize: '11px',
+                  fontSize: '12px',
                   textTransform: 'uppercase',
                   letterSpacing: '1px',
                   color: 'var(--text-muted)',
@@ -360,7 +360,7 @@ const TradingBot: React.FC = () => {
               {/* Max Position */}
               <div>
                 <label style={{
-                  fontSize: '11px',
+                  fontSize: '12px',
                   textTransform: 'uppercase',
                   letterSpacing: '1px',
                   color: 'var(--text-muted)',
@@ -383,7 +383,7 @@ const TradingBot: React.FC = () => {
               {/* Stop Loss */}
               <div>
                 <label style={{
-                  fontSize: '11px',
+                  fontSize: '12px',
                   textTransform: 'uppercase',
                   letterSpacing: '1px',
                   color: 'var(--text-muted)',
@@ -407,7 +407,7 @@ const TradingBot: React.FC = () => {
               {/* Take Profit */}
               <div>
                 <label style={{
-                  fontSize: '11px',
+                  fontSize: '12px',
                   textTransform: 'uppercase',
                   letterSpacing: '1px',
                   color: 'var(--text-muted)',

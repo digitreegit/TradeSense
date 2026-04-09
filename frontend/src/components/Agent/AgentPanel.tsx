@@ -64,7 +64,7 @@ const AgentPanel: React.FC = () => {
           <span className="card-title">
             🤖 TradeSense AI Agent
             <span style={{
-              fontSize: '10px',
+              fontSize: '12px',
               padding: '2px 8px',
               background: 'var(--accent-primary-dim)',
               color: 'var(--accent-primary)',
@@ -143,7 +143,7 @@ const AgentPanel: React.FC = () => {
                 borderRadius: 'var(--radius-full)',
                 background: 'none',
                 color: 'var(--text-tertiary)',
-                fontSize: '11px',
+                fontSize: '12px',
                 cursor: 'pointer',
                 whiteSpace: 'nowrap',
                 fontFamily: 'var(--font-sans)',

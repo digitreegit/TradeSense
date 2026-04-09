@@ -56,7 +56,7 @@ const History: React.FC = () => {
               <tbody>
                 {orders.map((order) => (
                   <tr key={order.id}>
-                    <td className="mono" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                    <td className="mono" style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
                       {new Date(order.submitted_at).toLocaleString()}
                     </td>
                     <td className="symbol">{order.symbol}</td>
@@ -64,7 +64,7 @@ const History: React.FC = () => {
                       <span style={{
                         padding: '2px 8px',
                         borderRadius: 'var(--radius-full)',
-                        fontSize: '10px',
+                        fontSize: '12px',
                         fontWeight: 600,
                         textTransform: 'uppercase',
                         background: order.side === 'buy' ? 'var(--profit-dim)' : 'var(--loss-dim)',
@@ -73,7 +73,7 @@ const History: React.FC = () => {
                         {order.side}
                       </span>
                     </td>
-                    <td style={{ fontSize: '11px', color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>
+                    <td style={{ fontSize: '12px', color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>
                       {order.type}
                     </td>
                     <td className="mono">{order.qty}</td>
@@ -84,7 +84,7 @@ const History: React.FC = () => {
                       <span style={{
                         padding: '2px 8px',
                         borderRadius: 'var(--radius-full)',
-                        fontSize: '10px',
+                        fontSize: '12px',
                         fontWeight: 600,
                         textTransform: 'uppercase',
                         background: order.status === 'filled' ? 'var(--profit-dim)' :

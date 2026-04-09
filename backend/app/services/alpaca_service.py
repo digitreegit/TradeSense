@@ -63,11 +63,12 @@ class AlpacaService:
 
     # ─── Account ───────────────────────────────────────────────
     def get_account(self) -> dict:
-        """Get account information."""
+        """Get account information with performance metrics."""
         if not self.is_ready:
             return self._demo_account()
 
         try:
+            import numpy as np
             account = self.trading_client.get_account()
             
             # Use raw Alpaca values directly ($100K base)
@@ -81,6 +82,103 @@ class AlpacaService:
             profit_loss = equity - initial
             profit_loss_pct = (profit_loss / initial) * 100 if initial > 0 else 0
 
+            # --- Calculate Advanced Metrics ---
+            metrics = {
+                "win_rate": 0.0,
+                "avg_win": 0.0,
+                "avg_loss": 0.0,
+                "profit_factor": 0.0,
+                "sharpe_ratio": 0.0
+            }
+
+            try:
+                # 1. Sharpe Ratio from Portfolio History
+                # Try intraday history first for more immediate feedback on new accounts
+                history = self.trading_client.get_portfolio_history(
+                    period="1D", 
+                    timeframe="5Min"
+                )
+                
+                # If intraday fails or is empty, try daily
+                if not history or not hasattr(history, "equity") or len(history.equity) < 5:
+                    history = self.trading_client.get_portfolio_history()
+
+                if history and hasattr(history, "equity") and len(history.equity) > 2:
+                    equities = np.array(history.equity, dtype=float)
+                    # Filter out zero/bad entries
+                    equities = equities[equities > 0]
+                    
+                    if len(equities) > 2:
+                        # Period-over-period returns
+                        returns = np.diff(equities) / equities[:-1]
+                        returns = returns[np.isfinite(returns)]
+                        
+                        if len(returns) > 1:
+                            avg_ret = np.mean(returns)
+                            std_ret = np.std(returns)
+                            
+                            if std_ret > 0:
+                                # Adjust annualization factor based on history length and timeframe
+                                # Standard 1-day/5-min has ~78 points (6.5 hours)
+                                # If it's intraday, we use a different annualization factor
+                                # but for simple display, we'll use a smoothed daily approximation
+                                factor = np.sqrt(252 * 78) if len(equities) < 100 else np.sqrt(252)
+                                metrics["sharpe_ratio"] = round((avg_ret / std_ret) * factor, 2)
+                                
+                                # Cap it at a reasonable range if it's extremely high due to low volatility
+                                if metrics["sharpe_ratio"] > 10: 
+                                    metrics["sharpe_ratio"] = 9.99
+                            elif avg_ret > 0:
+                                # If positive return but zero volatility (rare), show 1.0 or similar
+                                metrics["sharpe_ratio"] = 1.0
+
+                # 2. Trade-based metrics (Win Rate, etc.)
+                # We'll fetch the last 100 orders to approximate trade metrics
+                orders = self.get_orders(status="all", limit=100)
+                filled_orders = [o for o in orders if o["status"] == "filled" and o["filled_avg_price"]]
+                
+                # Simple logic: group by symbol and match buy/sell pairs
+                trades = []
+                # This is a simplification; in a real app we'd use account activities
+                symbols = set(o["symbol"] for o in filled_orders)
+                for sym in symbols:
+                    sym_orders = [o for o in filled_orders if o["symbol"] == sym]
+                    # Sort by time
+                    sym_orders.sort(key=lambda x: x["filled_at"] or x["submitted_at"])
+                    
+                    # Match pairs (buy then sell)
+                    open_qty = 0
+                    entry_value = 0
+                    for o in sym_orders:
+                        if o["side"] == "buy":
+                            open_qty += o["qty"]
+                            entry_value += o["qty"] * o["filled_avg_price"]
+                        elif o["side"] == "sell" and open_qty > 0:
+                            # Closing part of a position
+                            close_qty = min(o["qty"], open_qty)
+                            rel_entry_value = (entry_value / open_qty) * close_qty
+                            realized_pnl = (o["filled_avg_price"] * close_qty) - rel_entry_value
+                            trades.append(realized_pnl)
+                            
+                            # Update remaining
+                            entry_value -= rel_entry_value
+                            open_qty -= close_qty
+
+                if trades:
+                    wins = [t for t in trades if t > 0]
+                    losses = [t for t in trades if t <= 0]
+                    
+                    metrics["win_rate"] = round(len(wins) / len(trades) * 100, 1)
+                    metrics["avg_win"] = round(np.mean(wins), 2) if wins else 0.0
+                    metrics["avg_loss"] = round(np.mean(losses), 2) if losses else 0.0
+                    
+                    sum_win = sum(wins)
+                    sum_loss = abs(sum(losses))
+                    metrics["profit_factor"] = round(sum_win / sum_loss, 2) if sum_loss > 0 else (round(sum_win, 2) if sum_win > 0 else 0.0)
+
+            except Exception as me:
+                logger.warning(f"Error calculating detailed metrics: {me}")
+
             return {
                 "equity":          round(equity, 2),
                 "cash":            round(cash, 2),
@@ -90,6 +188,7 @@ class AlpacaService:
                 "profit_loss_pct": round(profit_loss_pct, 2),
                 "day_trade_count": int(account.daytrade_count or 0),
                 "initial_capital": initial,
+                **metrics
             }
 
         except Exception as e:

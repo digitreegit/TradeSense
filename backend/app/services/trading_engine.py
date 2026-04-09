@@ -37,6 +37,8 @@ class TradingEngine:
             "total_trades":   0,
             "winning_trades": 0,
             "losing_trades":  0,
+            "win_sum":        0.0,
+            "loss_sum":       0.0,
             "total_pnl":      0.0,
             "max_drawdown":   0.0,
         }
@@ -185,6 +187,7 @@ class TradingEngine:
                     self._log("sell", f"Sold {abs(int(pos['qty']))} {symbol} (stop loss -{settings.stop_loss_percent}%)")
                     self.session_stats["total_trades"]  += 1
                     self.session_stats["losing_trades"] += 1
+                    self.session_stats["loss_sum"]      += abs(pos["unrealized_pl"])
                     self.session_stats["total_pnl"]     += pos["unrealized_pl"]
                 continue
 
@@ -196,6 +199,7 @@ class TradingEngine:
                     self._log("sell", f"Sold {abs(int(pos['qty']))} {symbol} (take profit +{settings.take_profit_percent}%)")
                     self.session_stats["total_trades"]   += 1
                     self.session_stats["winning_trades"] += 1
+                    self.session_stats["win_sum"]        += pos["unrealized_pl"]
                     self.session_stats["total_pnl"]      += pos["unrealized_pl"]
                 continue
 
@@ -209,6 +213,10 @@ class TradingEngine:
                     pnl_sign = 1 if plpc > 0 else 0
                     self.session_stats["winning_trades"] += pnl_sign
                     self.session_stats["losing_trades"]  += (1 - pnl_sign)
+                    if plpc > 0:
+                        self.session_stats["win_sum"] += pos["unrealized_pl"]
+                    else:
+                        self.session_stats["loss_sum"] += abs(pos["unrealized_pl"])
                     self.session_stats["total_pnl"]      += pos["unrealized_pl"]
 
         # ── Look for new entries ──────────────────────────────
@@ -306,6 +314,7 @@ class TradingEngine:
                 alpaca_service.submit_market_order(symbol, abs(int(pos["qty"])), "sell")
                 self.session_stats["total_trades"]  += 1
                 self.session_stats["losing_trades"] += 1
+                self.session_stats["loss_sum"]      += abs(pos["unrealized_pl"])
                 continue
 
             # Sell at upper band or take profit
@@ -315,6 +324,7 @@ class TradingEngine:
                 alpaca_service.submit_market_order(symbol, abs(int(pos["qty"])), "sell")
                 self.session_stats["total_trades"]   += 1
                 self.session_stats["winning_trades"] += 1
+                self.session_stats["win_sum"]        += pos["unrealized_pl"]
 
         for symbol in symbols:
             if symbol in current_symbols:
@@ -411,10 +421,17 @@ class TradingEngine:
 
     def get_stats(self) -> dict:
         total = self.session_stats["total_trades"]
-        wins  = self.session_stats["winning_trades"]
+        wins = self.session_stats["winning_trades"]
+        losses = self.session_stats["losing_trades"]
+        win_sum = self.session_stats["win_sum"]
+        loss_sum = self.session_stats["loss_sum"]
+
         return {
             **self.session_stats,
             "win_rate": (wins / total * 100) if total > 0 else 0,
+            "avg_win": (win_sum / wins) if wins > 0 else 0,
+            "avg_loss": (loss_sum / losses) if losses > 0 else 0,
+            "profit_factor": (win_sum / loss_sum) if loss_sum > 0 else (win_sum if win_sum > 0 else 0),
         }
 
 

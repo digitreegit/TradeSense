@@ -46,14 +46,19 @@ export function useMarketData() {
       const account = await api.getAccount() as Record<string, unknown>;
       if (account && !('detail' in account)) {
         setAccount({
-          equity: Number(account.equity) || 1000,
-          cash: Number(account.cash) || 1000,
-          buying_power: Number(account.buying_power) || 1000,
-          portfolio_value: Number(account.portfolio_value) || 1000,
+          equity: Number(account.equity) || 0,
+          cash: Number(account.cash) || 0,
+          buying_power: Number(account.buying_power) || 0,
+          portfolio_value: Number(account.portfolio_value) || 0,
           profit_loss: Number(account.profit_loss) || 0,
           profit_loss_pct: Number(account.profit_loss_pct) || 0,
           day_trade_count: Number(account.day_trade_count) || 0,
-          initial_capital: Number(account.initial_capital) || 1000,
+          initial_capital: Number(account.initial_capital) || 100000.0,
+          win_rate: Number(account.win_rate) || 0,
+          avg_win: Number(account.avg_win) || 0,
+          avg_loss: Number(account.avg_loss) || 0,
+          profit_factor: Number(account.profit_factor) || 0,
+          sharpe_ratio: Number(account.sharpe_ratio) || 0,
         });
         setConnected(true);
       }

@@ -289,21 +289,21 @@ const ChartView: React.FC = () => {
               <button
                 className={`btn btn-sm ${indicators.ma20 ? 'btn-primary' : 'btn-secondary'}`}
                 onClick={() => setIndicators(prev => ({ ...prev, ma20: !prev.ma20 }))}
-                style={{ fontSize: '10px' }}
+                style={{ fontSize: '12px' }}
               >
                 MA20
               </button>
               <button
                 className={`btn btn-sm ${indicators.ma50 ? 'btn-primary' : 'btn-secondary'}`}
                 onClick={() => setIndicators(prev => ({ ...prev, ma50: !prev.ma50 }))}
-                style={{ fontSize: '10px' }}
+                style={{ fontSize: '12px' }}
               >
                 MA50
               </button>
               <button
                 className={`btn btn-sm ${indicators.volume ? 'btn-primary' : 'btn-secondary'}`}
                 onClick={() => setIndicators(prev => ({ ...prev, volume: !prev.volume }))}
-                style={{ fontSize: '10px' }}
+                style={{ fontSize: '12px' }}
               >
                 VOL
               </button>
@@ -317,7 +317,7 @@ const ChartView: React.FC = () => {
             display: 'flex',
             gap: '24px',
             padding: '8px 20px',
-            fontSize: '11px',
+            fontSize: '12px',
             fontFamily: 'var(--font-mono)',
             color: 'var(--text-tertiary)',
             borderBottom: '1px solid var(--border-secondary)',
