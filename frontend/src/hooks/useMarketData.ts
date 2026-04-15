@@ -21,9 +21,13 @@ export function useMarketData() {
       const botStatus = await api.getBotStatus() as {
         active: boolean;
         strategy: string;
+        regime_data?: any;
         regime_reason?: string;
       };
       setBotActive(botStatus.active);
+      if (botStatus.regime_data) {
+        useAppStore.getState().setRegimeData(botStatus.regime_data);
+      }
       if (botStatus.regime_reason && botStatus.regime_reason !== '') {
         // Only set notification if it's new
         useAppStore.getState().setMarketNotification(botStatus.regime_reason);
@@ -52,6 +56,8 @@ export function useMarketData() {
           portfolio_value: Number(account.portfolio_value) || 0,
           profit_loss: Number(account.profit_loss) || 0,
           profit_loss_pct: Number(account.profit_loss_pct) || 0,
+          daily_profit_loss: Number(account.daily_profit_loss) || 0,
+          daily_profit_loss_pct: Number(account.daily_profit_loss_pct) || 0,
           day_trade_count: Number(account.day_trade_count) || 0,
           initial_capital: Number(account.initial_capital) || 100000.0,
           win_rate: Number(account.win_rate) || 0,

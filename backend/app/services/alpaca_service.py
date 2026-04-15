@@ -29,6 +29,8 @@ class AlpacaService:
         self.trading_client: Optional[TradingClient] = None
         self.data_client: Optional[StockHistoricalDataClient] = None
         self._initialized = False
+        self.virtual_base_equity: float = 0.0  # Used for virtual re-base to $30k
+        self.is_virtual_reset = False
 
     def initialize(self):
         """Initialize Alpaca API clients."""
@@ -71,16 +73,52 @@ class AlpacaService:
             import numpy as np
             account = self.trading_client.get_account()
             
-            # Use raw Alpaca values directly ($100K base)
-            equity = float(account.equity)
-            cash = float(account.cash)
-            pv = float(account.portfolio_value or account.equity)
-            bp = float(account.buying_power)
-            initial = 100000.0  # Alpaca paper starting balance
+            # Use raw Alpaca values directly
+            real_equity = float(account.equity)
+            real_cash = float(account.cash)
             
-            # P&L calculation
-            profit_loss = equity - initial
-            profit_loss_pct = (profit_loss / initial) * 100 if initial > 0 else 0
+            # Virtual Reset Logic: Always start from settings.initial_capital ($3,000)
+            # This ignores legacy Alpaca paper trading remnants.
+            if self.virtual_base_equity == 0:
+                self.virtual_base_equity = real_equity
+                logger.info(f"🔄 Virtual Portfolio Reset: Real Equity ${real_equity} -> Displayed Start at ${settings.initial_capital}")
+
+            # Profit/Loss since we started the v3 bot
+            pl_since_reset = real_equity - self.virtual_base_equity
+            
+            # Current Displayed Equity = $3,000 + P&L since we started this version
+            equity = settings.initial_capital + pl_since_reset
+            
+            # --- Synchronized Daily/Total P&L ---
+            # To make Today and Total look the same for a "Fresh Start Today":
+            # We track the 'Virtual Daily Open'. For the first run today, it's just settings.initial_capital.
+            if not hasattr(self, 'virtual_daily_open') or self.virtual_daily_open == 0:
+                self.virtual_daily_open = settings.initial_capital
+                
+            daily_profit_loss = equity - self.virtual_daily_open
+            daily_profit_loss_pct = (daily_profit_loss / self.virtual_daily_open * 100) if self.virtual_daily_open > 0 else 0
+            
+            # Cash & Buying Power: 
+            # After v3 cleanup, all positions are new (bought by the $3K bot)
+            # so their market value is real and should not be scaled.
+            real_market_value = real_equity - real_cash
+            
+            # But we need to cap it so cash doesn't go negative in our virtual world
+            # (e.g., if there are leftover pre-cleanup positions)
+            capped_market_value = min(real_market_value, equity * 0.95)
+            
+            displayed_cash = equity - capped_market_value
+            displayed_bp = displayed_cash  # Buying power equals available virtual cash
+            
+            pv = equity
+            initial = settings.initial_capital
+            
+            # Total P&L calculations (Cumulative)
+            total_profit_loss = equity - initial
+            total_profit_loss_pct = (total_profit_loss / initial) * 100 if initial > 0 else 0
+            
+            # Virtual Scaling Factor for other metrics
+            v_scaling = initial / self.virtual_base_equity if self.virtual_base_equity > 0 else 1.0
 
             # --- Calculate Advanced Metrics ---
             metrics = {
@@ -93,23 +131,20 @@ class AlpacaService:
 
             try:
                 # 1. Sharpe Ratio from Portfolio History
-                # Try intraday history first for more immediate feedback on new accounts
+                # (Scales automatically as percentage-based)
                 history = self.trading_client.get_portfolio_history(
                     period="1D", 
                     timeframe="5Min"
                 )
                 
-                # If intraday fails or is empty, try daily
                 if not history or not hasattr(history, "equity") or len(history.equity) < 5:
                     history = self.trading_client.get_portfolio_history()
 
                 if history and hasattr(history, "equity") and len(history.equity) > 2:
                     equities = np.array(history.equity, dtype=float)
-                    # Filter out zero/bad entries
                     equities = equities[equities > 0]
                     
                     if len(equities) > 2:
-                        # Period-over-period returns
                         returns = np.diff(equities) / equities[:-1]
                         returns = returns[np.isfinite(returns)]
                         
@@ -118,35 +153,24 @@ class AlpacaService:
                             std_ret = np.std(returns)
                             
                             if std_ret > 0:
-                                # Adjust annualization factor based on history length and timeframe
-                                # Standard 1-day/5-min has ~78 points (6.5 hours)
-                                # If it's intraday, we use a different annualization factor
-                                # but for simple display, we'll use a smoothed daily approximation
                                 factor = np.sqrt(252 * 78) if len(equities) < 100 else np.sqrt(252)
                                 metrics["sharpe_ratio"] = round((avg_ret / std_ret) * factor, 2)
-                                
-                                # Cap it at a reasonable range if it's extremely high due to low volatility
                                 if metrics["sharpe_ratio"] > 10: 
                                     metrics["sharpe_ratio"] = 9.99
                             elif avg_ret > 0:
-                                # If positive return but zero volatility (rare), show 1.0 or similar
                                 metrics["sharpe_ratio"] = 1.0
-
-                # 2. Trade-based metrics (Win Rate, etc.)
-                # We'll fetch the last 100 orders to approximate trade metrics
+                                
+                # 2. Trade-based metrics
+                # (Remaining same, they are absolute dollar values from real trades)
+                # We scale them for the virtual display
                 orders = self.get_orders(status="all", limit=100)
                 filled_orders = [o for o in orders if o["status"] == "filled" and o["filled_avg_price"]]
                 
-                # Simple logic: group by symbol and match buy/sell pairs
                 trades = []
-                # This is a simplification; in a real app we'd use account activities
                 symbols = set(o["symbol"] for o in filled_orders)
                 for sym in symbols:
                     sym_orders = [o for o in filled_orders if o["symbol"] == sym]
-                    # Sort by time
                     sym_orders.sort(key=lambda x: x["filled_at"] or x["submitted_at"])
-                    
-                    # Match pairs (buy then sell)
                     open_qty = 0
                     entry_value = 0
                     for o in sym_orders:
@@ -154,24 +178,20 @@ class AlpacaService:
                             open_qty += o["qty"]
                             entry_value += o["qty"] * o["filled_avg_price"]
                         elif o["side"] == "sell" and open_qty > 0:
-                            # Closing part of a position
                             close_qty = min(o["qty"], open_qty)
                             rel_entry_value = (entry_value / open_qty) * close_qty
                             realized_pnl = (o["filled_avg_price"] * close_qty) - rel_entry_value
-                            trades.append(realized_pnl)
-                            
-                            # Update remaining
+                            # Scale trade P&L by simulation factor
+                            trades.append(realized_pnl * v_scaling)
                             entry_value -= rel_entry_value
                             open_qty -= close_qty
 
                 if trades:
                     wins = [t for t in trades if t > 0]
                     losses = [t for t in trades if t <= 0]
-                    
                     metrics["win_rate"] = round(len(wins) / len(trades) * 100, 1)
                     metrics["avg_win"] = round(np.mean(wins), 2) if wins else 0.0
                     metrics["avg_loss"] = round(np.mean(losses), 2) if losses else 0.0
-                    
                     sum_win = sum(wins)
                     sum_loss = abs(sum(losses))
                     metrics["profit_factor"] = round(sum_win / sum_loss, 2) if sum_loss > 0 else (round(sum_win, 2) if sum_win > 0 else 0.0)
@@ -180,16 +200,19 @@ class AlpacaService:
                 logger.warning(f"Error calculating detailed metrics: {me}")
 
             return {
-                "equity":          round(equity, 2),
-                "cash":            round(cash, 2),
-                "buying_power":    round(bp, 2),
-                "portfolio_value": round(pv, 2),
-                "profit_loss":     round(profit_loss, 2),
-                "profit_loss_pct": round(profit_loss_pct, 2),
-                "day_trade_count": int(account.daytrade_count or 0),
-                "initial_capital": initial,
+                "equity":                round(equity, 2),
+                "cash":                  round(displayed_cash, 2),
+                "buying_power":          round(displayed_bp, 2),
+                "portfolio_value":       round(pv, 2),
+                "profit_loss":           round(total_profit_loss, 2),
+                "profit_loss_pct":       round(total_profit_loss_pct, 2),
+                "daily_profit_loss":     round(daily_profit_loss, 2),
+                "daily_profit_loss_pct": round(daily_profit_loss_pct, 2),
+                "day_trade_count":       int(account.daytrade_count or 0),
+                "initial_capital":       initial,
                 **metrics
             }
+
 
         except Exception as e:
             logger.error(f"Error getting account: {e}")
@@ -283,26 +306,53 @@ class AlpacaService:
             return []
 
         try:
+            from datetime import datetime
+            import pytz
+            ET = pytz.timezone("America/New_York")
+            # Clear everything before the 10:30 AM update today
+            today_start = ET.localize(datetime(2026, 4, 15, 10, 30, 0))
+
             request = GetOrdersRequest(
                 status=QueryOrderStatus.ALL if status == "all" else QueryOrderStatus.OPEN,
                 limit=limit,
             )
             orders = self.trading_client.get_orders(request)
-            return [
-                {
-                    "id": str(o.id),
-                    "symbol": o.symbol,
-                    "side": str(o.side).split(".")[-1].lower(),
-                    "qty": float(o.qty),
-                    "type": str(o.order_type).split(".")[-1].lower(),
-                    "status": str(o.status).split(".")[-1].lower(),
-                    "filled_avg_price": float(o.filled_avg_price) if o.filled_avg_price else None,
-                    "filled_at": str(o.filled_at) if o.filled_at else None,
-                    "submitted_at": str(o.submitted_at),
-                    "limit_price": float(o.limit_price) if o.limit_price else None,
-                }
-                for o in orders
-            ]
+            
+            # Apply Today's filter ONLY if we are not explicitly looking for "open" orders
+            # This allows the trading engine to see its pending orders while keeping UI history clean.
+            if status == "open":
+                return [
+                    {
+                        "id": str(o.id),
+                        "symbol": o.symbol,
+                        "side": str(o.side).split(".")[-1].lower(),
+                        "qty": float(o.qty),
+                        "type": str(o.order_type).split(".")[-1].lower(),
+                        "status": str(o.status).split(".")[-1].lower(),
+                        "filled_avg_price": float(o.filled_avg_price) if o.filled_avg_price else None,
+                        "filled_at": str(o.filled_at) if o.filled_at else None,
+                        "submitted_at": str(o.submitted_at),
+                        "limit_price": float(o.limit_price) if o.limit_price else None,
+                    }
+                    for o in orders
+                ]
+            else:
+                return [
+                    {
+                        "id": str(o.id),
+                        "symbol": o.symbol,
+                        "side": str(o.side).split(".")[-1].lower(),
+                        "qty": float(o.qty),
+                        "type": str(o.order_type).split(".")[-1].lower(),
+                        "status": str(o.status).split(".")[-1].lower(),
+                        "filled_avg_price": float(o.filled_avg_price) if o.filled_avg_price else None,
+                        "filled_at": str(o.filled_at) if o.filled_at else None,
+                        "submitted_at": str(o.submitted_at),
+                        "limit_price": float(o.limit_price) if o.limit_price else None,
+                    }
+                    for o in orders
+                    if o.submitted_at and o.submitted_at.astimezone(ET) >= today_start
+                ]
         except Exception as e:
             logger.error(f"Error getting orders: {e}")
             return []

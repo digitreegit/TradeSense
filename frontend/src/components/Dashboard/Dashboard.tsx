@@ -35,6 +35,12 @@ const CheckBadgeIcon = (props: React.ComponentProps<'svg'>) => (
   </svg>
 );
 
+const XMarkIcon = (props: React.ComponentProps<'svg'>) => (
+  <svg {...props} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+  </svg>
+);
+
 const Dashboard: React.FC = () => {
   const {
     account,
@@ -48,6 +54,9 @@ const Dashboard: React.FC = () => {
     strategies,
     marketNotification,
     setMarketNotification,
+    regimeData,
+    dismissedRegimeTimestamp,
+    setDismissedRegimeTimestamp,
   } = useAppStore();
 
   const totalPL = account.equity - account.initial_capital;
@@ -81,10 +90,118 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="page-enter">
+      {/* Market Regime Notification */}
+      {regimeData && 
+       regimeData.timestamp &&
+       (dismissedRegimeTimestamp !== regimeData.timestamp) && (
+        <div className="card regime-notification" style={{
+          background: 'rgba(59, 130, 246, 0.1)',
+          border: '1px solid rgba(59, 130, 246, 0.3)',
+          color: 'var(--text-primary)',
+          marginBottom: '24px',
+          padding: '20px',
+          borderRadius: 'var(--radius-lg)',
+          position: 'relative',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '12px'
+        }}>
+          <button 
+            onClick={() => setDismissedRegimeTimestamp(regimeData.timestamp || null)}
+            style={{
+              position: 'absolute',
+              top: '12px',
+              right: '12px',
+              background: 'none',
+              border: 'none',
+              color: 'var(--text-tertiary)',
+              cursor: 'pointer',
+              padding: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '50%',
+              transition: 'all 0.2s'
+            }}
+            onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+            onMouseOut={(e) => e.currentTarget.style.background = 'none'}
+          >
+            <XMarkIcon style={{ width: 18, height: 18 }} />
+          </button>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--accent-primary)' }}>
+            <BoltIcon style={{ width: 20, height: 20 }} />
+            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>AI Market Adaptive System</h3>
+            <span style={{ fontSize: '12px', opacity: 0.6, marginLeft: 'auto', marginRight: '32px' }}>Last Updated: {regimeData.timestamp}</span>
+          </div>
+          
+          <p style={{ margin: 0, fontSize: '14px', lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+            <strong>Reasoning:</strong> {regimeData.reasoning}
+          </p>
+          
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', fontSize: '13px', marginTop: '4px' }}>
+            <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
+              <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Strategy:</span>
+              <strong style={{ color: 'var(--accent-primary)' }}>{regimeData.strategy?.toUpperCase()}</strong>
+            </div>
+            
+            <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
+              <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Risk:</span>
+              <strong style={{ color: regimeData.risk_level === 'aggressive' ? 'var(--loss)' : 'var(--profit)' }}>{regimeData.risk_level?.toUpperCase()}</strong>
+            </div>
+
+            <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
+              <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Stop Loss:</span>
+              <strong style={{ color: 'var(--loss)' }}>{regimeData.stop_loss_percent}%</strong>
+            </div>
+
+            {(regimeData as any).daily_pnl && (
+              <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
+                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Daily P&L:</span>
+                <strong style={{ color: String((regimeData as any).daily_pnl).includes('-') ? 'var(--loss)' : 'var(--profit)' }}>
+                  {(regimeData as any).daily_pnl}
+                </strong>
+              </div>
+            )}
+
+            {(regimeData as any).account_type && (
+              <div style={{ background: 'rgba(16, 185, 129, 0.1)', padding: '8px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Account:</span>
+                <strong style={{ color: 'var(--profit)' }}>{(regimeData as any).account_type?.toUpperCase()} (PDT-Free)</strong>
+              </div>
+            )}
+          </div>
+
+          {/* Focus Sectors & Symbols */}
+          {(regimeData as any).focus_symbols && (
+            <div style={{ marginTop: '4px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '6px' }}>
+                📡 Focus Sectors: <strong style={{ color: 'var(--text-secondary)' }}>{((regimeData as any).focus_sectors || []).join(', ')}</strong>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                {((regimeData as any).focus_symbols || []).map((sym: string) => (
+                  <span key={sym} style={{
+                    padding: '3px 10px',
+                    background: 'rgba(59, 130, 246, 0.15)',
+                    border: '1px solid rgba(59, 130, 246, 0.3)',
+                    borderRadius: 'var(--radius-full)',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    fontFamily: 'var(--font-mono)',
+                    color: 'var(--accent-primary)',
+                  }}>{sym}</span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Stats Grid */}
       <div className="stats-grid">
         <div className={`stat-card ${totalPL >= 0 ? 'profit' : 'loss'}`}>
-          <div className="stat-label">Portfolio Value</div>
+          <div className="stat-label">Portfolio Value (Total Return)</div>
           <div className={`stat-value ${getChangeClass(totalPL)}`}>
             {formatCurrency(account.equity)}
           </div>
@@ -163,11 +280,11 @@ const Dashboard: React.FC = () => {
                   </div>
                   <div style={{
                     fontSize: '13px',
-                    color: totalPL >= 0 ? 'var(--profit)' : 'var(--loss)',
+                    color: account.daily_profit_loss >= 0 ? 'var(--profit)' : 'var(--loss)',
                     fontWeight: 600,
                     marginTop: '4px',
                   }}>
-                    {totalPL >= 0 ? '▲' : '▼'} {formatCurrency(Math.abs(totalPL))} ({formatPercent(totalPLPct)}) today
+                    {account.daily_profit_loss >= 0 ? '▲' : '▼'} {formatCurrency(Math.abs(account.daily_profit_loss))} ({formatPercent(account.daily_profit_loss_pct)}) Today's Return
                   </div>
                 </div>
                 <svg width="120" height="32" viewBox="0 0 120 32">

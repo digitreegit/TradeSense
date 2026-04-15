@@ -34,12 +34,18 @@ class Settings(BaseSettings):
 
     # Trading
     trading_mode: str = os.getenv("TRADING_MODE", "paper")
-    initial_capital: float = float(os.getenv("INITIAL_CAPITAL", "100000"))
-    max_position_percent: float = float(os.getenv("MAX_POSITION_PERCENT", "20"))
-    stop_loss_percent: float = float(os.getenv("STOP_LOSS_PERCENT", "2"))
-    take_profit_percent: float = float(os.getenv("TAKE_PROFIT_PERCENT", "5"))
-    max_daily_trades: int = int(os.getenv("MAX_DAILY_TRADES", "3"))
+    initial_capital: float = float(os.getenv("INITIAL_CAPITAL", "3000"))
+    max_position_percent: float = float(os.getenv("MAX_POSITION_PERCENT", "15"))
+    stop_loss_percent: float = float(os.getenv("STOP_LOSS_PERCENT", "0.3"))
+    take_profit_percent: float = float(os.getenv("TAKE_PROFIT_PERCENT", "0.8"))
+    max_daily_trades: int = int(os.getenv("MAX_DAILY_TRADES", "200"))
     risk_level: str = os.getenv("RISK_LEVEL", "moderate")
+
+    # Cash account scalping
+    daily_target_percent: float = float(os.getenv("DAILY_TARGET_PERCENT", "1.0"))
+    daily_loss_limit_percent: float = float(os.getenv("DAILY_LOSS_LIMIT_PERCENT", "0.5"))
+    account_type: str = os.getenv("ACCOUNT_TYPE", "cash")
+    scan_interval_seconds: float = float(os.getenv("SCAN_INTERVAL_SECONDS", "1"))
 
     # AI
     ai_provider: str = os.getenv("AI_PROVIDER", "openai")

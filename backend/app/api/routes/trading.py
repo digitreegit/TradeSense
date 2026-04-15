@@ -19,6 +19,9 @@ class OrderRequest(BaseModel):
 
 class BotRequest(BaseModel):
     strategy: str = "momentum"
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    max_position: Optional[float] = None
 
 
 @router.get("/orders")
@@ -54,7 +57,12 @@ async def cancel_all_orders():
 @router.post("/bot/start")
 async def start_bot(req: BotRequest):
     """Start the trading bot."""
-    trading_engine.start(req.strategy)
+    trading_engine.start(
+        req.strategy,
+        stop_loss=req.stop_loss,
+        take_profit=req.take_profit,
+        max_position=req.max_position
+    )
     return {
         "status": "started",
         "strategy": req.strategy,
@@ -75,6 +83,7 @@ async def bot_status():
     return {
         "active": trading_engine.is_active,
         "strategy": trading_engine.active_strategy,
+        "regime_data": trading_engine.regime_data,
         "stats": trading_engine.get_stats(),
         "logs": trading_engine.get_logs(20),
     }

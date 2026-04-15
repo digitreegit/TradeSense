@@ -63,7 +63,9 @@ const Sidebar: React.FC = () => {
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <div className="sidebar-logo-icon">T</div>
+        <div className="sidebar-logo-icon">
+          <img src="/logo.svg" alt="TS" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+        </div>
         <div className="sidebar-logo-text">
           <h1>TradeSense</h1>
           <span>AI Quant Trading</span>

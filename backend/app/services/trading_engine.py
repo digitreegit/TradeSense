@@ -1,10 +1,13 @@
 """
-TradeSense - Trading Engine v2
-Smarter quant strategies with market hours check + AI signal confirmation.
+TradeSense - Trading Engine v3
+Cash Account Micro-Scalping Strategy
+─────────────────────────────────────
+$3,000 시작 → 매일 +1% 복리 → 한 달 후 $4,000 목표
+캐시 어카운트: PDT 면제, GFV 방지 로직 내장
 """
 import logging
 import asyncio
-from datetime import datetime, time
+from datetime import datetime, time, date, timedelta
 import pytz
 from typing import Optional
 from app.core.config import settings
@@ -18,7 +21,7 @@ ET = pytz.timezone("America/New_York")
 def is_market_open() -> bool:
     """Check if US stock market is currently open."""
     now_et = datetime.now(ET)
-    if now_et.weekday() >= 5:          # Saturday=5, Sunday=6
+    if now_et.weekday() >= 5:
         return False
     market_open  = time(9, 30)
     market_close = time(16, 0)
@@ -26,12 +29,52 @@ def is_market_open() -> bool:
 
 
 class TradingEngine:
-    """Core trading engine that executes strategies."""
+    """Cash Account Micro-Scalp Engine with GFV prevention."""
+
+    # ─── Liquid scalping candidates (tight spreads, high volume) ───
+    SCALP_UNIVERSE = [
+        "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "AMD", "TSLA",
+        "SPY", "QQQ", "INTC", "NFLX", "AVGO", "CRM", "UBER",
+    ]
 
     def __init__(self):
         self.active           = False
         self.active_strategy: Optional[str] = None
         self.last_regime_reason: str = ""
+
+        # AI-driven focus (can override SCALP_UNIVERSE)
+        self.focus_symbols: list = list(self.SCALP_UNIVERSE[:8])
+        self.focus_sectors: list = ["tech_ai", "tech_software"]
+
+        # ─── GFV Prevention (Cash Account) ─────────────────────
+        self._unsettled_funds: float = 0.0
+        self._unsettled_date: Optional[date] = None
+        self._positions_bought_with_unsettled: set = set()  # symbols bought with unsettled $
+
+        # ─── Daily P&L Tracking ────────────────────────────────
+        self._trading_date: Optional[date] = None
+        self._daily_pnl: float = 0.0
+        self._daily_trades: int = 0
+        self._daily_target_reached: bool = False
+        self._daily_loss_limit_hit: bool = False
+        self._day_start_equity: float = settings.initial_capital
+
+        # ─── Regime / UI data ─────────────────────────────────
+        self.regime_data: dict = {
+            "strategy": "scalp",
+            "reasoning": "Cash account micro-scalp: $3,000 → 매일 +1% 복리",
+            "risk_level": settings.risk_level,
+            "max_position_percent": settings.max_position_percent,
+            "stop_loss_percent": settings.stop_loss_percent,
+            "focus_sectors": self.focus_sectors,
+            "focus_symbols": self.focus_symbols,
+            "daily_target": f"+{settings.daily_target_percent}%",
+            "daily_pnl": "$0.00",
+            "account_type": settings.account_type,
+            "timestamp": datetime.now().strftime("%b %d, %Y, %-I:%M%p")
+        }
+
+        # ─── Session stats ────────────────────────────────────
         self.trade_logs: list = []
         self.session_stats = {
             "total_trades":   0,
@@ -43,13 +86,28 @@ class TradingEngine:
             "max_drawdown":   0.0,
         }
         self._scan_count = 0
+        self._v3_cleanup_done = False  # Flag: have we cleaned up legacy positions?
 
-    def start(self, strategy: str = "momentum"):
+    # ─── Control ──────────────────────────────────────────────
+
+    def start(self, strategy: str = "scalp", stop_loss: Optional[float] = None, take_profit: Optional[float] = None, max_position: Optional[float] = None):
         self.active          = True
         self.active_strategy = strategy
-        self._log("info", f"Bot started — Strategy: {strategy.upper()} | Mode: PAPER TRADING")
-        self._log("info", f"Risk per position: {settings.max_position_percent}% | Stop: {settings.stop_loss_percent}% | TP: {settings.take_profit_percent}%")
-        logger.info(f"Trading engine started: {strategy}")
+        self.regime_data["strategy"] = strategy
+        self.regime_data["timestamp"] = datetime.now().strftime("%b %d, %Y, %-I:%M%p")
+
+        # Apply custom settings if provided
+        if stop_loss is not None:
+            settings.stop_loss_percent = stop_loss
+        if take_profit is not None:
+            settings.take_profit_percent = take_profit
+        if max_position is not None:
+            settings.max_position_percent = max_position
+
+        self._log("info", f"🚀 Bot started — Strategy: MICRO-SCALP | Capital: ${settings.initial_capital:,.0f}")
+        self._log("info", f"📋 Cash Account | Target: +{settings.daily_target_percent}%/day | Stop: -{settings.daily_loss_limit_percent}%/day")
+        self._log("info", f"📊 Position: {settings.max_position_percent}% | TP: +{settings.take_profit_percent}% | SL: -{settings.stop_loss_percent}%")
+        logger.info(f"Trading engine started: {strategy} (SL: {settings.stop_loss_percent}%, TP: {settings.take_profit_percent}%)")
 
     def stop(self):
         self.active = False
@@ -60,34 +118,42 @@ class TradingEngine:
     def is_active(self) -> bool:
         return self.active
 
+    # ─── Main Loop ────────────────────────────────────────────
+
     async def run_cycle(self):
-        """Run one trading cycle with autonomous start/stop logic."""
+        """Run one trading cycle."""
         now_et = datetime.now(ET)
         is_weekend = now_et.weekday() >= 5
         market_time = now_et.time()
+        today = now_et.date()
 
-        # Autonomous logic: Start 5 mins before (9:25 AM), Stop at close (4:00 PM)
+        # ─── New Day Reset ────────────────────────────────────
+        if self._trading_date != today:
+            self._reset_daily(today)
+
+        # ─── Auto Start/Stop ─────────────────────────────────
         if not is_weekend:
-            # 1. AUTO START (between 9:25 AM and 4:00 PM ET)
             if market_time >= time(9, 25) and market_time < time(16, 0):
                 if not self.active:
                     from app.services.notification_service import notification_service
                     self.active = True
-                    self.active_strategy = "momentum"
-                    
-                    if market_time < time(9, 30):
-                        self._log("info", "[Auto-Start] Market opening soon! Bot is now ACTIVE.")
-                        notification_service.send_alert("봇 자동 시작", "장 개장 5분 전입니다. 전략(Momentum)을 가동합니다.", "SUCCESS")
-                    else:
-                        self._log("info", "[Auto-Start] Market is open. Bot is now ACTIVE.")
-                        notification_service.send_alert("봇 추격 시작", "장이 이미 열려있습니다. 전략(Momentum)을 가동합니다.", "SUCCESS")
-            
-            # 2. AUTO STOP (at 4:00 PM ET)
+                    self.active_strategy = "scalp"
+                    self._log("info", "[Auto-Start] Market opening — Scalp bot ACTIVE")
+                    notification_service.send_alert(
+                        "🚀 스캘핑 봇 시작",
+                        f"오늘 목표: +{settings.daily_target_percent}% (${self._day_start_equity * settings.daily_target_percent / 100:,.0f})",
+                        "SUCCESS"
+                    )
+
             if market_time >= time(16, 0) and self.active:
                 from app.services.notification_service import notification_service
                 self.active = False
-                self._log("info", "[Auto-Stop] Market closed. Bot is now IDLE.")
-                notification_service.send_alert("봇 퇴근 완료", "오늘 장이 마감되었습니다. 수고하셨습니다!", "INFO")
+                self._log("info", f"[Auto-Stop] Market closed | Today P&L: ${self._daily_pnl:+,.2f} ({self._daily_trades} trades)")
+                notification_service.send_alert(
+                    "📊 오늘의 성적표",
+                    f"P&L: ${self._daily_pnl:+,.2f} | Trades: {self._daily_trades}",
+                    "SUCCESS" if self._daily_pnl >= 0 else "CRITICAL"
+                )
 
         if not self.active:
             return
@@ -99,257 +165,383 @@ class TradingEngine:
                 self._log("info", f"Standby — Market opens at 9:30 AM ET | Now: {now_et.strftime('%H:%M ET')}")
             return
 
+        # ─── Check daily limits ───────────────────────────────
+        if self._daily_loss_limit_hit:
+            if self._scan_count % 10 == 1:
+                self._log("info", f"⛔ Daily loss limit hit (${self._daily_pnl:+,.2f}). No more trades today.")
+            return
 
-        # ─── AI Adaptive Strategy Selection (Every 10 scans) ───
+        # ─── AI Adaptive (every 10 scans) ─────────────────────
         if self._scan_count % 10 == 1:
-            try:
-                from app.services.analysis_agent import analysis_agent
-                news = alpaca_service.get_latest_news(["AAPL", "NVDA", "SPY"], limit=5)
-                if news:
-                    new_strategy, reasoning = await analysis_agent.determine_market_regime(news)
-                    self.last_regime_reason = reasoning  # Store for API access
-                    if new_strategy != self.active_strategy:
-                        self._log("info", f"AI Macro Analysis: {reasoning}")
-                        self.active_strategy = new_strategy
+            await self._ai_regime_check()
 
-            except Exception as e:
-                logger.warning(f"AI strategy switching failed: {e}")
+        # ─── One-time cleanup of legacy positions ─────────────
+        if not self._v3_cleanup_done:
+            await self._cleanup_legacy_positions()
+            self._v3_cleanup_done = True
+            return  # Skip this cycle, start fresh next cycle
 
-
+        # ─── Execute Strategy ─────────────────────────────────
         try:
             account   = alpaca_service.get_account()
             positions = alpaca_service.get_positions()
             equity    = account["equity"]
             cash      = account["cash"]
 
-            self._log("info", f"Scan #{self._scan_count} | Equity: ${equity:,.2f} | Cash: ${cash:,.2f} | Positions: {len(positions)}")
+            # Update daily P&L
+            self._daily_pnl = equity - self._day_start_equity
+            daily_pnl_pct = (self._daily_pnl / self._day_start_equity) * 100
 
-            # ─── Alert Monitoring (Monitoring Portfolio Changes) ─────
-            pl_pct = (equity - 100000.0) / 100000.0 * 100
-            
-            from app.services.notification_service import notification_service
-            
-            # 1. 포트폴리오 비상 알림 (±5% 이상)
-            if abs(pl_pct) >= 5.0 and self._scan_count % 60 == 0:   # 30분마다 알림
-                level = "CRITICAL" if pl_pct <= -5 else "SUCCESS"
-                title = "포트폴리오 비상" if pl_pct <= -5 else "포트폴리오 급등"
-                msg   = f"현재 총 자산: ${equity:,.2f} ({pl_pct:+.1f}%). {'시장이 하락하고 있습니다. 대응이 필요합니다.' if pl_pct <= -5 else '시장이 아주 상승 중입니다! 수익을 즐기세요.' }"
-                notification_service.send_alert(title, msg, level)
-                self._log(level.lower(), f"[Alert] {title}: {pl_pct:+.1f}%")
+            # Update regime_data for UI
+            self.regime_data["daily_pnl"] = f"${self._daily_pnl:+,.2f} ({daily_pnl_pct:+.2f}%)"
 
-            # 2. AI 분석가 시장 판세 변화 알림
-            # (앞서 구현한 strategy switching과 연동)
+            self._log("info",
+                f"Scan #{self._scan_count} | Equity: ${equity:,.2f} | "
+                f"Daily P&L: ${self._daily_pnl:+,.2f} ({daily_pnl_pct:+.2f}%) | "
+                f"Positions: {len(positions)} | Trades: {self._daily_trades}")
 
-            if self.active_strategy == "momentum":
-                await self._run_momentum(account, positions)
-            elif self.active_strategy == "mean-reversion":
-                await self._run_mean_reversion(account, positions)
+            # Check daily loss limit
+            if daily_pnl_pct <= -settings.daily_loss_limit_percent:
+                self._daily_loss_limit_hit = True
+                from app.services.notification_service import notification_service
+                self._log("info", f"⛔ DAILY LOSS LIMIT: {daily_pnl_pct:.2f}% — stopping trades for today")
+                notification_service.send_alert(
+                    "⛔ 일일 손실 한도 도달",
+                    f"P&L: ${self._daily_pnl:+,.2f} ({daily_pnl_pct:+.2f}%)\n오늘은 더 이상 매매하지 않습니다.",
+                    "CRITICAL"
+                )
+                return
 
-            elif self.active_strategy == "ml-predict":
-                await self._run_ml_predict(account, positions)
+            # Check daily target
+            if daily_pnl_pct >= settings.daily_target_percent and not self._daily_target_reached:
+                self._daily_target_reached = True
+                from app.services.notification_service import notification_service
+                self._log("info", f"🎯 DAILY TARGET REACHED: +{daily_pnl_pct:.2f}% — reducing aggressiveness")
+                notification_service.send_alert(
+                    "🎯 일일 목표 달성!",
+                    f"P&L: ${self._daily_pnl:+,.2f} (+{daily_pnl_pct:.2f}%)\n공격성을 줄이고 수익을 보호합니다.",
+                    "SUCCESS"
+                )
+
+            # Run scalp strategy
+            await self._run_scalp(account, positions)
 
         except Exception as e:
             self._log("error", f"Cycle error: {str(e)}")
             logger.error(f"Trading cycle error: {e}")
 
-    # ─── Strategies ────────────────────────────────────────────
+    # ── Legacy Position Cleanup ─────────────────────────────────
 
-    async def _run_momentum(self, account: dict, positions: list):
+    async def _cleanup_legacy_positions(self):
+        """Sell ALL existing positions from old strategy. V3 starts with a clean slate."""
+        try:
+            positions = alpaca_service.get_positions()
+            if not positions:
+                self._log("info", "✅ No legacy positions — clean start!")
+                return
+
+            self._log("info", f"🧹 Cleaning up {len(positions)} legacy positions from old strategy...")
+
+            for pos in positions:
+                symbol = pos["symbol"]
+                qty = abs(int(pos["qty"]))
+                if qty <= 0:
+                    continue
+                self._log("info", f"  Selling {qty}x {symbol} (legacy cleanup)")
+                res = alpaca_service.submit_market_order(symbol, qty, "sell")
+                if "error" in res:
+                    self._log("error", f"  Failed to close {symbol}: {res['error']}")
+                else:
+                    self._log("info", f"  ✅ Closed {symbol}")
+
+            self._log("info", "🧹 Legacy cleanup complete — ready for $3,000 scalping!")
+
+        except Exception as e:
+            self._log("error", f"Legacy cleanup error: {e}")
+            logger.error(f"Legacy cleanup error: {e}")
+
+    # ─── Daily Reset ──────────────────────────────────────────
+
+    def _reset_daily(self, today: date):
+        """Reset daily tracking for a new trading day."""
+        # Settle yesterday's unsettled funds
+        if self._unsettled_date and self._unsettled_date < today:
+            self._log("info", f"💰 Settled ${self._unsettled_funds:,.2f} from {self._unsettled_date}")
+            self._unsettled_funds = 0.0
+            self._unsettled_date = None
+            self._positions_bought_with_unsettled.clear()
+
+        self._trading_date = today
+        self._daily_pnl = 0.0
+        self._daily_trades = 0
+        self._daily_target_reached = False
+        self._daily_loss_limit_hit = False
+
+        # Get current equity as day start
+        try:
+            account = alpaca_service.get_account()
+            self._day_start_equity = account["equity"]
+        except Exception:
+            self._day_start_equity = settings.initial_capital
+
+        self._log("info", f"📅 New trading day: {today} | Start equity: ${self._day_start_equity:,.2f}")
+        self._log("info", f"🎯 Today's target: +${self._day_start_equity * settings.daily_target_percent / 100:,.2f} (+{settings.daily_target_percent}%)")
+
+    # ─── GFV Prevention ───────────────────────────────────────
+
+    def _get_settled_cash(self, total_cash: float) -> float:
+        """Return only settled (available) cash for new buys."""
+        settled = total_cash - self._unsettled_funds
+        return max(settled, 0.0)
+
+    def _record_sell(self, proceeds: float):
+        """After a sell, mark proceeds as unsettled (T+1)."""
+        today = datetime.now(ET).date()
+        if self._unsettled_date != today:
+            # New day of unsettled funds
+            self._unsettled_funds = proceeds
+            self._unsettled_date = today
+        else:
+            self._unsettled_funds += proceeds
+
+    def _can_sell(self, symbol: str) -> bool:
+        """Check if we can sell this position without causing a GFV."""
+        # If we bought with unsettled funds, can't sell until settled
+        if symbol in self._positions_bought_with_unsettled:
+            self._log("info", f"⚠️ GFV prevention: {symbol} bought with unsettled funds, holding until settlement")
+            return False
+        return True
+
+    # ─── AI Regime Check ──────────────────────────────────────
+
+    async def _ai_regime_check(self):
+        """Use AI to analyze news and adjust focus symbols."""
+        try:
+            from app.services.analysis_agent import analysis_agent
+            news = alpaca_service.get_latest_news(
+                ["AAPL", "NVDA", "SPY", "QQQ", "GLD", "USO"], limit=10
+            )
+            if news:
+                regime = await analysis_agent.determine_market_regime(news)
+                self.last_regime_reason = regime["reasoning"]
+
+                old_strat = self.active_strategy
+                old_risk = settings.risk_level
+
+                # Apply focus symbols from AI
+                new_symbols = regime.get("focus_symbols", self.focus_symbols)
+                new_sectors = regime.get("focus_sectors", self.focus_sectors)
+                if new_symbols != self.focus_symbols:
+                    self._log("info", f"🔄 AI Focus Shift: {', '.join(new_sectors)} → {', '.join(new_symbols[:5])}...")
+                    self.focus_symbols = new_symbols
+                    self.focus_sectors = new_sectors
+
+                # Apply risk settings (but keep scalp-appropriate bounds)
+                settings.risk_level = regime["risk_level"]
+                ai_sl = float(regime.get("stop_loss_percent", 0.3))
+                settings.stop_loss_percent = max(0.2, min(ai_sl, 1.0))  # Clamp 0.2-1.0% for scalping
+
+                ai_pos = float(regime.get("max_position_percent", 15))
+                settings.max_position_percent = max(10, min(ai_pos, 20))  # Clamp 10-20%
+
+                self.regime_data = {
+                    **regime,
+                    "prev_strategy": old_strat,
+                    "prev_risk_level": old_risk,
+                    "daily_target": f"+{settings.daily_target_percent}%",
+                    "daily_pnl": self.regime_data.get("daily_pnl", "$0.00"),
+                    "account_type": settings.account_type,
+                    "timestamp": datetime.now().strftime("%b %d, %Y, %-I:%M%p")
+                }
+
+                if old_risk != settings.risk_level:
+                    from app.services.notification_service import notification_service
+                    notification_service.send_alert(
+                        "🔄 Market Regime Update",
+                        f"Risk: {old_risk} → {settings.risk_level}\nReason: {regime['reasoning']}",
+                        "INFO"
+                    )
+
+        except Exception as e:
+            logger.warning(f"AI regime check failed: {e}")
+
+    # ─── Scalping Strategy ────────────────────────────────────
+
+    async def _run_scalp(self, account: dict, positions: list):
         """
-        Momentum Breakout Strategy:
-        Buy:  RSI 45-70 AND MACD bullish AND price above MA50
-        Sell: RSI < 35 OR stop loss (−2%) OR take profit (+5%)
+        Micro-Scalp Strategy (5-min bars):
+        ─ Buy:  RSI bounce + VWAP support + volume spike
+        ─ Sell:  +0.5~1.0% take profit  OR  -0.3% stop loss
+        ─ GFV:   Only buy with settled cash
         """
-        symbols = ["AAPL", "MSFT", "NVDA", "AMZN", "AMD", "META", "GOOGL", "TSLA"]
         equity  = account["equity"]
         cash    = account["cash"]
-        max_positions = 4   # hold up to 4 stocks at once
+        settled = self._get_settled_cash(cash)
+        max_positions = 4
 
         current_symbols = [p["symbol"] for p in positions]
         slots_available = max_positions - len(current_symbols)
 
-        # ── Manage existing positions ─────────────────────────
+        # Raise entry threshold if daily target already reached
+        entry_score_threshold = 50 if not self._daily_target_reached else 70
+
+        # ── 1. Manage existing positions (tight scalp exits) ──
         for pos in positions:
             symbol = pos["symbol"]
-            plpc   = pos["unrealized_plpc"]  # e.g. -0.023 = -2.3%
+            plpc   = pos["unrealized_plpc"]   # e.g. -0.003 = -0.3%
+            pl_usd = pos["unrealized_pl"]
 
-            bars   = alpaca_service.get_bars(symbol, "1Day", 50)
-            if len(bars) < 20:
+            # GFV check: can we sell this?
+            if not self._can_sell(symbol):
                 continue
-            closes     = [b["close"] for b in bars]
-            indicators = self._calculate_indicators(closes)
 
-            # Stop loss
+            # Stop loss (tight for scalping)
             if plpc <= -(settings.stop_loss_percent / 100):
-                self._log("sell", f"Stop loss: {symbol} {plpc*100:+.1f}% — selling")
+                self._log("sell", f"🔴 STOP LOSS: {symbol} {plpc*100:+.2f}% (${pl_usd:+,.2f})")
                 res = alpaca_service.submit_market_order(symbol, abs(int(pos["qty"])), "sell")
                 if "error" not in res:
-                    self._log("sell", f"Sold {abs(int(pos['qty']))} {symbol} (stop loss -{settings.stop_loss_percent}%)")
+                    proceeds = abs(int(pos["qty"])) * pos.get("current_price", pos.get("avg_entry_price", 0))
+                    self._record_sell(proceeds)
+                    self._daily_trades += 1
                     self.session_stats["total_trades"]  += 1
                     self.session_stats["losing_trades"] += 1
-                    self.session_stats["loss_sum"]      += abs(pos["unrealized_pl"])
-                    self.session_stats["total_pnl"]     += pos["unrealized_pl"]
+                    self.session_stats["loss_sum"]      += abs(pl_usd)
+                    self.session_stats["total_pnl"]     += pl_usd
                 continue
 
             # Take profit
             if plpc >= (settings.take_profit_percent / 100):
-                self._log("sell", f"Take profit: {symbol} {plpc*100:+.1f}% — selling")
+                self._log("sell", f"🟢 TAKE PROFIT: {symbol} {plpc*100:+.2f}% (${pl_usd:+,.2f})")
                 res = alpaca_service.submit_market_order(symbol, abs(int(pos["qty"])), "sell")
                 if "error" not in res:
-                    self._log("sell", f"Sold {abs(int(pos['qty']))} {symbol} (take profit +{settings.take_profit_percent}%)")
+                    proceeds = abs(int(pos["qty"])) * pos.get("current_price", pos.get("avg_entry_price", 0))
+                    self._record_sell(proceeds)
+                    self._daily_trades += 1
                     self.session_stats["total_trades"]   += 1
                     self.session_stats["winning_trades"] += 1
-                    self.session_stats["win_sum"]        += pos["unrealized_pl"]
-                    self.session_stats["total_pnl"]      += pos["unrealized_pl"]
+                    self.session_stats["win_sum"]        += pl_usd
+                    self.session_stats["total_pnl"]      += pl_usd
                 continue
 
-            # RSI exit (momentum fading)
-            if indicators["rsi"] < 35:
-                self._log("signal", f"RSI exit: {symbol} RSI={indicators['rsi']:.1f} < 35 — closing")
+            # Trailing stop: if we were up but now falling back toward breakeven
+            if 0.003 <= plpc < 0.005:
+                self._log("sell", f"🟡 TRAIL EXIT: {symbol} {plpc*100:+.2f}%")
                 res = alpaca_service.submit_market_order(symbol, abs(int(pos["qty"])), "sell")
                 if "error" not in res:
-                    self._log("sell", f"Closed {symbol} (RSI={indicators['rsi']:.1f})")
-                    self.session_stats["total_trades"] += 1
-                    pnl_sign = 1 if plpc > 0 else 0
-                    self.session_stats["winning_trades"] += pnl_sign
-                    self.session_stats["losing_trades"]  += (1 - pnl_sign)
+                    proceeds = abs(int(pos["qty"])) * pos.get("current_price", pos.get("avg_entry_price", 0))
+                    self._record_sell(proceeds)
+                    self._daily_trades += 1
+                    self.session_stats["total_trades"]   += 1
                     if plpc > 0:
-                        self.session_stats["win_sum"] += pos["unrealized_pl"]
+                        self.session_stats["winning_trades"] += 1
+                        self.session_stats["win_sum"]        += pl_usd
                     else:
-                        self.session_stats["loss_sum"] += abs(pos["unrealized_pl"])
-                    self.session_stats["total_pnl"]      += pos["unrealized_pl"]
+                        self.session_stats["losing_trades"]  += 1
+                        self.session_stats["loss_sum"]       += abs(pl_usd)
+                    self.session_stats["total_pnl"]      += pl_usd
 
-        # ── Look for new entries ──────────────────────────────
-        if slots_available <= 0 or cash < 500:
-            self._log("info", f"No entry slots (positions={len(current_symbols)}, cash=${cash:,.0f})")
+        # ── 2. Check if we can enter new positions ────────────
+        if slots_available <= 0:
             return
+        if settled < 100:  # Need at least $100 settled cash
+            self._log("info", f"💤 Settled cash too low: ${settled:,.2f} (unsettled: ${self._unsettled_funds:,.2f})")
+            return
+        # Unrestricted scalping: Trading count limit removed as per user request
 
+        # ── 3. Scan for scalp entries ─────────────────────────
+        symbols_to_scan = self.focus_symbols[:10]  # AI-selected focus
         scored = []
-        for symbol in symbols:
+
+        for symbol in symbols_to_scan:
             if symbol in current_symbols:
                 continue
             try:
-                bars = alpaca_service.get_bars(symbol, "1Day", 50)
-                if len(bars) < 26:
-                    continue
-                closes     = [b["close"] for b in bars]
-                indicators = self._calculate_indicators(closes)
-                price      = closes[-1]
+                # Use 5-min bars for scalp signals
+                bars = alpaca_service.get_bars(symbol, "5Min", 50)
+                if len(bars) < 20:
+                    # Fallback to daily bars
+                    bars = alpaca_service.get_bars(symbol, "1Day", 30)
+                    if len(bars) < 14:
+                        continue
 
-                # Score: RSI momentum + MACD + above MA50
+                closes  = [b["close"] for b in bars]
+                volumes = [b.get("volume", 0) for b in bars]
+                indicators = self._calculate_indicators(closes)
+                price = closes[-1]
+
+                # ── Score the entry signal ─────────────────
                 score = 0
                 reasons = []
 
-                if 45 <= indicators["rsi"] <= 70:
+                # RSI oversold bounce (strongest scalp signal)
+                if indicators["rsi"] < 35:
                     score += 30
+                    reasons.append(f"RSI↓{indicators['rsi']:.0f}")
+                elif 35 <= indicators["rsi"] <= 45:
+                    score += 15
                     reasons.append(f"RSI={indicators['rsi']:.0f}")
 
+                # MACD bullish crossover
                 if indicators["macd_signal"] == "bullish":
-                    score += 30
+                    score += 25
                     reasons.append("MACD↑")
 
-                if price > indicators["ma50"]:
-                    score += 20
-                    reasons.append("Price>MA50")
+                # Bollinger Band: near lower band = buy zone
+                if indicators["bb_lower"] > 0:
+                    bb_pct = (price - indicators["bb_lower"]) / (indicators["bb_upper"] - indicators["bb_lower"] + 0.001)
+                    if bb_pct < 0.2:
+                        score += 25
+                        reasons.append("BB-low")
+                    elif bb_pct < 0.4:
+                        score += 10
+                        reasons.append("BB-mid")
 
-                if price > indicators["ma20"]:
-                    score += 10
-                    reasons.append("Price>MA20")
+                # Price above short MA (micro trend up)
+                if len(closes) >= 10:
+                    ma10 = sum(closes[-10:]) / 10
+                    if price > ma10:
+                        score += 10
+                        reasons.append("P>MA10")
 
-                # Bollinger band position (not overbought)
-                bb_pct = (price - indicators["bb_lower"]) / (indicators["bb_upper"] - indicators["bb_lower"] + 0.001)
-                if 0.3 <= bb_pct <= 0.8:
-                    score += 10
-                    reasons.append("BB-mid")
+                # Volume surge (2x avg = institutional interest)
+                if volumes and len(volumes) >= 10:
+                    avg_vol = sum(volumes[-10:]) / 10
+                    if avg_vol > 0 and volumes[-1] > avg_vol * 2:
+                        score += 15
+                        reasons.append("Vol🔥")
 
-                if score >= 50:
+                if score >= entry_score_threshold:
                     scored.append((score, symbol, price, indicators, reasons))
 
             except Exception as e:
-                logger.warning(f"Signal calc error for {symbol}: {e}")
+                logger.warning(f"Scan error for {symbol}: {e}")
 
-        # Sort by score, take top candidates
+        # ── 4. Execute top entries ────────────────────────────
         scored.sort(key=lambda x: -x[0])
         entries = scored[:slots_available]
 
         for score, symbol, price, indicators, reasons in entries:
+            # Position sizing: max 15% of equity, only use settled cash
             max_position_value = equity * (settings.max_position_percent / 100)
-            qty = int(min(max_position_value, cash * 0.95) / price)
+            buy_power = min(max_position_value, settled * 0.95)
+            qty = int(buy_power / price)
 
             if qty <= 0:
                 continue
 
             cost = qty * price
-            self._log("signal", f"BUY signal {symbol}: score={score} | {' + '.join(reasons)} | ${price:.2f} × {qty} = ${cost:,.0f}")
+            self._log("signal",
+                f"📊 BUY signal {symbol}: score={score} | {' + '.join(reasons)} | "
+                f"${price:.2f} × {qty} = ${cost:,.0f}")
 
             res = alpaca_service.submit_market_order(symbol, qty, "buy")
             if "error" not in res:
-                self._log("buy", f"BOUGHT {qty} × {symbol} @ ~${price:.2f} (${cost:,.0f})")
+                self._log("buy", f"✅ BOUGHT {qty} × {symbol} @ ~${price:.2f} (${cost:,.0f})")
+                self._daily_trades += 1
                 self.session_stats["total_trades"] += 1
+                settled -= cost  # Reduce available settled cash
             else:
                 self._log("error", f"Order failed {symbol}: {res['error']}")
-
-    async def _run_mean_reversion(self, account: dict, positions: list):
-        """
-        Mean Reversion: buy at lower Bollinger Band, sell at upper BB.
-        """
-        symbols = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL"]
-        equity  = account["equity"]
-        cash    = account["cash"]
-        current_symbols = [p["symbol"] for p in positions]
-
-        for pos in positions:
-            symbol = pos["symbol"]
-            bars   = alpaca_service.get_bars(symbol, "1Day", 30)
-            if len(bars) < 20:
-                continue
-            closes     = [b["close"] for b in bars]
-            indicators = self._calculate_indicators(closes)
-            price      = closes[-1]
-            plpc       = pos["unrealized_plpc"]
-
-            # Stop loss override
-            if plpc <= -(settings.stop_loss_percent / 100):
-                self._log("sell", f"Stop loss: {symbol} {plpc*100:+.1f}%")
-                alpaca_service.submit_market_order(symbol, abs(int(pos["qty"])), "sell")
-                self.session_stats["total_trades"]  += 1
-                self.session_stats["losing_trades"] += 1
-                self.session_stats["loss_sum"]      += abs(pos["unrealized_pl"])
-                continue
-
-            # Sell at upper band or take profit
-            if price >= indicators["bb_upper"] or plpc >= (settings.take_profit_percent / 100):
-                reason = "BB upper" if price >= indicators["bb_upper"] else "Take profit"
-                self._log("sell", f"{reason}: {symbol} @ ${price:.2f}")
-                alpaca_service.submit_market_order(symbol, abs(int(pos["qty"])), "sell")
-                self.session_stats["total_trades"]   += 1
-                self.session_stats["winning_trades"] += 1
-                self.session_stats["win_sum"]        += pos["unrealized_pl"]
-
-        for symbol in symbols:
-            if symbol in current_symbols:
-                continue
-            bars = alpaca_service.get_bars(symbol, "1Day", 30)
-            if len(bars) < 20:
-                continue
-            closes     = [b["close"] for b in bars]
-            indicators = self._calculate_indicators(closes)
-            price      = closes[-1]
-
-            if price <= indicators["bb_lower"] and indicators["rsi"] < 35:
-                max_val = equity * (settings.max_position_percent / 100)
-                qty     = int(min(max_val, cash * 0.9) / price)
-                if qty > 0:
-                    self._log("signal", f"Mean Reversion BUY {symbol}: at lower BB, RSI={indicators['rsi']:.0f}")
-                    res = alpaca_service.submit_market_order(symbol, qty, "buy")
-                    if "error" not in res:
-                        self._log("buy", f"Bought {qty} {symbol} @ ${price:.2f}")
-                        self.session_stats["total_trades"] += 1
-
-    async def _run_ml_predict(self, account: dict, positions: list):
-        """ML Prediction: combines momentum + mean-reversion signals with scoring."""
-        self._log("info", "ML hybrid scan: combining momentum + reversion signals...")
-        await self._run_momentum(account, positions)
 
     # ─── Technical Indicators ──────────────────────────────────
 
@@ -360,20 +552,22 @@ class TradingEngine:
         rsi = self._calculate_rsi(arr, 14)
 
         ema12 = self._ema(arr, 12)
-        ema26 = self._ema(arr, 26)
-        macd  = ema12 - ema26
-        sig   = self._ema(macd, 9)
-        macd_signal = "bullish" if macd[-1] > sig[-1] else "bearish"
+        ema26 = self._ema(arr, 26) if len(arr) >= 26 else self._ema(arr, len(arr))
+        macd  = ema12[:len(ema26)] - ema26 if len(ema12) >= len(ema26) else ema12 - ema26[:len(ema12)]
+        sig   = self._ema(macd, 9) if len(macd) >= 9 else self._ema(macd, max(len(macd), 1))
+        macd_signal = "bullish" if len(macd) > 0 and len(sig) > 0 and macd[-1] > sig[-1] else "bearish"
 
-        ma20    = float(np.mean(arr[-20:])) if len(arr) >= 20 else float(np.mean(arr))
-        ma50    = float(np.mean(arr[-50:])) if len(arr) >= 50 else float(np.mean(arr))
-        std20   = float(np.std(arr[-20:]))  if len(arr) >= 20 else float(np.std(arr))
+        n = min(20, len(arr))
+        ma20    = float(np.mean(arr[-n:]))
+        std20   = float(np.std(arr[-n:]))
         bb_upper = ma20 + 2 * std20
         bb_lower = ma20 - 2 * std20
 
+        ma50 = float(np.mean(arr[-min(50, len(arr)):])) if len(arr) >= 10 else float(np.mean(arr))
+
         return {
             "rsi":         rsi,
-            "macd_line":   float(macd[-1]),
+            "macd_line":   float(macd[-1]) if len(macd) > 0 else 0,
             "macd_signal": macd_signal,
             "bb_upper":    bb_upper,
             "bb_lower":    bb_lower,
@@ -385,11 +579,14 @@ class TradingEngine:
 
     def _calculate_rsi(self, prices, period: int = 14) -> float:
         import numpy as np
+        if len(prices) < 2:
+            return 50.0
         deltas   = np.diff(prices)
-        gains    = np.where(deltas > 0, deltas, 0.0)
-        losses   = np.where(deltas < 0, -deltas, 0.0)
-        avg_gain = np.mean(gains[-period:])
-        avg_loss = np.mean(losses[-period:])
+        p = min(period, len(deltas))
+        gains    = np.where(deltas[-p:] > 0, deltas[-p:], 0.0)
+        losses   = np.where(deltas[-p:] < 0, -deltas[-p:], 0.0)
+        avg_gain = np.mean(gains)
+        avg_loss = np.mean(losses)
         if avg_loss == 0:
             return 100.0
         rs = avg_gain / avg_loss
@@ -397,6 +594,8 @@ class TradingEngine:
 
     def _ema(self, data, period: int):
         import numpy as np
+        if len(data) == 0:
+            return np.array([0.0])
         alpha = 2 / (period + 1)
         ema   = np.zeros_like(data, dtype=float)
         ema[0] = data[0]
@@ -432,6 +631,10 @@ class TradingEngine:
             "avg_win": (win_sum / wins) if wins > 0 else 0,
             "avg_loss": (loss_sum / losses) if losses > 0 else 0,
             "profit_factor": (win_sum / loss_sum) if loss_sum > 0 else (win_sum if win_sum > 0 else 0),
+            "daily_pnl": self._daily_pnl,
+            "daily_trades": self._daily_trades,
+            "daily_target_reached": self._daily_target_reached,
+            "settled_cash_available": self._get_settled_cash(0),  # approximate
         }
 
 

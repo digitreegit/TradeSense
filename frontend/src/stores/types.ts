@@ -32,6 +32,8 @@ export interface AccountInfo {
   portfolio_value: number;
   profit_loss: number;
   profit_loss_pct: number;
+  daily_profit_loss: number;
+  daily_profit_loss_pct: number;
   day_trade_count: number;
   initial_capital: number;
   win_rate?: number;
@@ -80,6 +82,17 @@ export interface BarData {
   low: number;
   close: number;
   volume?: number;
+}
+
+export interface RegimeData {
+  strategy: string;
+  reasoning: string;
+  risk_level: string;
+  max_position_percent: number;
+  stop_loss_percent: number;
+  prev_strategy?: string;
+  prev_risk_level?: string;
+  timestamp?: string;
 }
 
 export type PageId = 'dashboard' | 'chart' | 'agent' | 'trading' | 'portfolio' | 'history';

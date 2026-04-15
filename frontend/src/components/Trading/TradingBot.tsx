@@ -89,9 +89,9 @@ const TradingBot: React.FC = () => {
   } = useAppStore();
 
   const [riskLevel, setRiskLevel] = useState<'conservative' | 'moderate' | 'aggressive'>('moderate');
-  const [maxPositionSize, setMaxPositionSize] = useState(20);
-  const [stopLossPercent, setStopLossPercent] = useState(2);
-  const [takeProfitPercent, setTakeProfitPercent] = useState(5);
+  const [maxPositionSize, setMaxPositionSize] = useState(15);
+  const [stopLossPercent, setStopLossPercent] = useState(0.3);
+  const [takeProfitPercent, setTakeProfitPercent] = useState(0.8);
 
   const [sessionStats, setSessionStats] = useState({
     total_trades: 0,
@@ -133,7 +133,11 @@ const TradingBot: React.FC = () => {
   const handleToggleBot = async () => {
     try {
       if (!botActive) {
-        await api.startBot(activeStrategy || 'momentum');
+        await api.startBot(activeStrategy || 'momentum', {
+          stop_loss: stopLossPercent,
+          take_profit: takeProfitPercent,
+          max_position: maxPositionSize,
+        });
         setBotActive(true);
       } else {
         await api.stopBot();
@@ -337,16 +341,16 @@ const TradingBot: React.FC = () => {
                         setRiskLevel(level);
                         if (level === 'conservative') {
                           setMaxPositionSize(10);
-                          setStopLossPercent(1);
-                          setTakeProfitPercent(2);
+                          setStopLossPercent(0.2);
+                          setTakeProfitPercent(0.4);
                         } else if (level === 'moderate') {
-                          setMaxPositionSize(20);
-                          setStopLossPercent(2);
-                          setTakeProfitPercent(5);
+                          setMaxPositionSize(15);
+                          setStopLossPercent(0.3);
+                          setTakeProfitPercent(0.8);
                         } else if (level === 'aggressive') {
-                          setMaxPositionSize(40);
-                          setStopLossPercent(5);
-                          setTakeProfitPercent(10);
+                          setMaxPositionSize(20);
+                          setStopLossPercent(0.5);
+                          setTakeProfitPercent(1.5);
                         }
                       }}
                       style={{ flex: 1, textTransform: 'capitalize' }}
@@ -373,7 +377,8 @@ const TradingBot: React.FC = () => {
                 <input
                   type="range"
                   min={5}
-                  max={50}
+                  max={25}
+                  step={1}
                   value={maxPositionSize}
                   onChange={(e) => setMaxPositionSize(parseInt(e.target.value))}
                   style={{ width: '100%', accentColor: 'var(--accent-primary)' }}
@@ -395,9 +400,9 @@ const TradingBot: React.FC = () => {
                 </label>
                 <input
                   type="range"
-                  min={1}
-                  max={10}
-                  step={0.5}
+                  min={0.1}
+                  max={2.0}
+                  step={0.05}
                   value={stopLossPercent}
                   onChange={(e) => setStopLossPercent(parseFloat(e.target.value))}
                   style={{ width: '100%', accentColor: 'var(--loss)' }}
@@ -419,9 +424,9 @@ const TradingBot: React.FC = () => {
                 </label>
                 <input
                   type="range"
-                  min={2}
-                  max={20}
-                  step={0.5}
+                  min={0.2}
+                  max={5.0}
+                  step={0.05}
                   value={takeProfitPercent}
                   onChange={(e) => setTakeProfitPercent(parseFloat(e.target.value))}
                   style={{ width: '100%', accentColor: 'var(--profit)' }}

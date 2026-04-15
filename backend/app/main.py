@@ -40,7 +40,7 @@ async def trading_loop():
         except Exception as e:
             logger.error(f"Error in trading loop: {e}")
         
-        await asyncio.sleep(30)  # Run every 30 seconds
+        await asyncio.sleep(settings.scan_interval_seconds)
 
 
 @asynccontextmanager

@@ -50,6 +50,10 @@ interface AppState {
   setMarketOpen: (open: boolean) => void;
   marketNotification: string | null;
   setMarketNotification: (msg: string | null) => void;
+  regimeData: RegimeData | null;
+  setRegimeData: (data: RegimeData | null) => void;
+  dismissedRegimeTimestamp: string | null;
+  setDismissedRegimeTimestamp: (ts: string | null) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -57,16 +61,24 @@ export const useAppStore = create<AppState>((set) => ({
   currentPage: 'dashboard',
   setCurrentPage: (page) => set({ currentPage: page }),
 
-  // Account - $1000 paper trading
+  // Regime
+  regimeData: null,
+  setRegimeData: (data) => set({ regimeData: data }),
+  dismissedRegimeTimestamp: null,
+  setDismissedRegimeTimestamp: (ts) => set({ dismissedRegimeTimestamp: ts }),
+
+  // Account - $3000 paper trading
   account: {
-    equity: 1000.00,
-    cash: 1000.00,
-    buying_power: 1000.00,
-    portfolio_value: 1000.00,
+    equity: 3000.00,
+    cash: 3000.00,
+    buying_power: 3000.00,
+    portfolio_value: 3000.00,
     profit_loss: 0,
     profit_loss_pct: 0,
+    daily_profit_loss: 0,
+    daily_profit_loss_pct: 0,
     day_trade_count: 0,
-    initial_capital: 1000.00,
+    initial_capital: 3000.00,
   },
   setAccount: (account) => set({ account }),
 
@@ -97,9 +109,9 @@ export const useAppStore = create<AppState>((set) => ({
   botActive: false,
   setBotActive: (active) => set({ botActive: active }),
   tradeLogs: [
-    { time: '15:30:01', type: 'info', message: 'TradeSense Bot initialized — Paper Trading mode ($1,000)' },
-    { time: '15:30:02', type: 'info', message: 'Connected to Alpaca Markets API' },
-    { time: '15:30:03', type: 'signal', message: 'Scanning market for opportunities...' },
+    { time: new Date().toLocaleTimeString(), type: 'info', message: 'TradeSense v3 — Cash Account Scalp Engine Initialized ($3,000)' },
+    { time: new Date().toLocaleTimeString(), type: 'info', message: 'PDT-Exempt mode active. GFV monitoring enabled.' },
+    { time: new Date().toLocaleTimeString(), type: 'signal', message: 'Scanning 5-Min bars for AI Scalp opportunities...' },
   ],
   addTradeLog: (log) => set((state) => ({
     tradeLogs: [...state.tradeLogs.slice(-100), log],
@@ -111,7 +123,7 @@ export const useAppStore = create<AppState>((set) => ({
     {
       id: '1',
       role: 'ai',
-      content: '안녕하세요! 저는 TradeSense AI 분석 에이전트입니다. 📊\n\n$1,000 페이퍼 트레이딩 포트폴리오를 관리하겠습니다. 주식 분석, 매매 시그널, 전략 추천 등 무엇이든 물어보세요!\n\n현재 모니터링 중인 전략:\n• 모멘텀 전략 (RSI + MACD)\n• 평균회귀 전략 (Bollinger Bands)\n• ML 예측 모델 (Gradient Boosting)',
+      content: '안녕하세요! 저는 TradeSense v3 마이크로 스캘핑 에이전트입니다. ⚡️\n\n**$3,000 캐시 어카운트**를 활용해 매일 **+1% 수익**을 목표로 복리 투자를 진행합니다.\n\n현재 모니터링 중인 스캘핑 전략:\n• RSI 과매도 반등 스캘핑 (5-min)\n• VWAP 지지/저항 돌파\n• AI 기반 섹터 순환 (Paid Tier)',
       timestamp: new Date().toISOString(),
     },
   ],
@@ -124,20 +136,20 @@ export const useAppStore = create<AppState>((set) => ({
   // Strategies
   strategies: [
     {
-      id: 'momentum',
-      name: 'Momentum Breakout',
-      description: 'RSI + MACD 크로스오버를 이용한 모멘텀 전략. 강한 상승/하락 추세를 포착합니다.',
+      id: 'scalp',
+      name: 'Micro-Scalping v3',
+      description: '5분봉 기준 RSI/VWAP 지표를 활용한 빠른 단타 전략. 매일 1% 수익을 목표로 합니다.',
       active: true,
-      winRate: 62.5,
+      winRate: 0,
       trades: 0,
       pnl: 0,
     },
     {
-      id: 'mean-reversion',
-      name: 'Mean Reversion',
-      description: 'Bollinger Bands를 이용한 평균회귀 전략. 과매수/과매도 구간에서 진입합니다.',
-      active: false,
-      winRate: 58.3,
+      id: 'regime-adaptive',
+      name: 'AI Sector Adaptive',
+      description: '실시간 시장 이슈(전쟁, 금리 등)에 따라 집중 섹터와 종목을 AI가 자동으로 변경합니다.',
+      active: true,
+      winRate: 0,
       trades: 0,
       pnl: 0,
     },

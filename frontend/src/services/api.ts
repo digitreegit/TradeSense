@@ -81,10 +81,10 @@ class ApiService {
   }
 
   // Trading Bot
-  async startBot(strategy: string) {
+  async startBot(strategy: string, riskSettings?: { stop_loss?: number; take_profit?: number; max_position?: number }) {
     return this.request('/trading/bot/start', {
       method: 'POST',
-      body: JSON.stringify({ strategy }),
+      body: JSON.stringify({ strategy, ...riskSettings }),
     });
   }
 
