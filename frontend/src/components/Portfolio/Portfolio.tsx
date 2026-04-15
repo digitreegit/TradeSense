@@ -62,13 +62,13 @@ const Portfolio: React.FC = () => {
           </div>
         </div>
 
-        <div className="stat-card accent">
-          <div className="stat-label">Day Trades Used</div>
-          <div className="stat-value" style={{ color: 'var(--accent-gold)' }}>
-            {account.day_trade_count}/3
+        <div className={`stat-card ${account.daily_profit_loss >= 0 ? 'profit' : 'loss'}`}>
+          <div className="stat-label">Daily P&L</div>
+          <div className={`stat-value ${getChangeClass(account.daily_profit_loss)}`}>
+            {account.daily_profit_loss >= 0 ? '+' : ''}{formatCurrency(account.daily_profit_loss)}
           </div>
-          <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '6px' }}>
-            PDT Rule (5-day rolling)
+          <div className={`stat-change ${getChangeClass(account.daily_profit_loss)}`}>
+            {formatPercent(account.daily_profit_loss_pct)}
           </div>
         </div>
       </div>

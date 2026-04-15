@@ -340,10 +340,16 @@ const Dashboard: React.FC = () => {
                 </div>
                 <div>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                    Day Trades
+                    Daily P&L
                   </div>
-                  <div style={{ fontSize: '16px', fontWeight: 700, fontFamily: 'var(--font-mono)', marginTop: '4px' }}>
-                    {account.day_trade_count}/3
+                  <div style={{ 
+                    fontSize: '16px', 
+                    fontWeight: 700, 
+                    fontFamily: 'var(--font-mono)', 
+                    marginTop: '4px',
+                    color: account.daily_profit_loss >= 0 ? 'var(--profit)' : 'var(--loss)'
+                  }}>
+                    {account.daily_profit_loss >= 0 ? '+' : ''}{formatCurrency(account.daily_profit_loss)}
                   </div>
                 </div>
               </div>
