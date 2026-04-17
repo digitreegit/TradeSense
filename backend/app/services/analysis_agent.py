@@ -17,9 +17,9 @@ class AnalysisAgent:
         self.gemini_client = None
         self._initialized = False
         self.gemini_version = "new"
-        # Rate limiting: minimum 5 seconds between Gemini calls
+        # Rate limiting: minimum 1 second between Gemini calls
         self._last_gemini_call = 0.0
-        self._min_call_interval = 5.0
+        self._min_call_interval = 1.0
         self._last_response_cache: dict = {}  # prompt_hash -> response
 
     def initialize(self):
@@ -57,10 +57,8 @@ class AnalysisAgent:
         except Exception as e:
             logger.error(f"❌ Failed to initialize AI Agent: {e}")
 
-    # Models to try in order — newest first, fallback to older stable ones
+    # Models to try in order — newest verified first
     GEMINI_MODEL_CANDIDATES = [
-        "gemini-2.5-flash-preview-04-17",
-        "gemini-2.5-flash",
         "gemini-2.0-flash-001",
         "gemini-2.0-flash",
         "gemini-1.5-flash-002",
