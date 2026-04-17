@@ -146,9 +146,31 @@ const Dashboard: React.FC = () => {
                 <strong style={{ color: 'var(--accent-primary)' }}>{regimeData.strategy?.toUpperCase()}</strong>
               </div>
 
+               <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
+                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Market Status:</span>
+                <strong style={{ 
+                  color: (regimeData.market_level?.toUpperCase() === 'EXCELLENT' || regimeData.risk_level?.toUpperCase() === 'LOW') ? 'var(--profit)' : 
+                         (regimeData.market_level?.toUpperCase() === 'GOOD') ? '#34d399' :
+                         (regimeData.market_level?.toUpperCase() === 'NORMAL' || regimeData.risk_level?.toUpperCase() === 'MODERATE') ? '#fef08a' :
+                         (regimeData.market_level?.toUpperCase() === 'BAD') ? '#f97316' : 
+                         (regimeData.market_level?.toUpperCase() === 'DANGEROUS' || regimeData.risk_level?.toUpperCase() === 'AGGRESSIVE') ? 'var(--loss)' : '#ffffff',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  background: 'rgba(255,255,255,0.05)',
+                  fontSize: '14px'
+                }}>
+                  {(regimeData.market_level || 'NORMAL').toUpperCase()} ({(regimeData.market_score || 50)})
+                </strong>
+              </div>
+
               <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
-                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Risk:</span>
-                <strong style={{ color: regimeData.risk_level === 'aggressive' ? 'var(--loss)' : 'var(--profit)' }}>{regimeData.risk_level?.toUpperCase()}</strong>
+                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Risk Setting:</span>
+                <strong style={{ 
+                  color: regimeData.risk_level === 'aggressive' ? 'var(--loss)' : 
+                         regimeData.risk_level === 'moderate' ? '#fef08a' : 'var(--profit)' 
+                }}>
+                  {regimeData.risk_level?.toUpperCase() || 'MODERATE'}
+                </strong>
               </div>
 
               <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
@@ -164,14 +186,38 @@ const Dashboard: React.FC = () => {
                   </strong>
                 </div>
               )}
-
-              {(regimeData as any).account_type && (
-                <div style={{ background: 'rgba(16, 185, 129, 0.1)', padding: '8px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
-                  <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Account:</span>
-                  <strong style={{ color: 'var(--profit)' }}>{(regimeData as any).account_type?.toUpperCase()} (PDT-Free)</strong>
-                </div>
-              )}
             </div>
+ 
+            {/* 6 Core Indicators Grid (Market Adaptive) */}
+            {(regimeData as any).market_scores && (
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', 
+                gap: '8px', 
+                marginTop: '12px',
+                paddingTop: '12px',
+                borderTop: '1px solid rgba(255,255,255,0.08)'
+              }}>
+                {Object.entries((regimeData as any).market_scores).map(([key, val]) => (
+                  <div key={key} style={{ 
+                    fontSize: '11px', 
+                    display: 'flex', 
+                    justifyContent: 'space-between',
+                    padding: '6px 10px',
+                    background: 'rgba(255,255,255,0.03)',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid rgba(255,255,255,0.05)'
+                  }}>
+                    <span style={{ color: 'var(--text-tertiary)', textTransform: 'capitalize' }}>
+                      {key === 'fed' ? 'Fed Policy' : key === 'war' ? 'Geopolitical' : key}
+                    </span>
+                    <strong style={{ 
+                      color: (val as number) >= 70 ? 'var(--profit)' : (val as number) >= 40 ? '#f59e0b' : 'var(--loss)'
+                    }}>{val}</strong>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Focus Sectors & Symbols */}
             {(regimeData as any).focus_symbols && (

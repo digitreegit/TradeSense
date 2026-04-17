@@ -178,15 +178,27 @@ class TradingEngine:
         # ─── One-time cleanup of legacy positions ─────────────
         if not self._v3_cleanup_done:
             await self._cleanup_legacy_positions()
-            self._v3_cleanup_done = True
-            return  # Skip this cycle, start fresh next cycle
+            
+            # Wait until all cleanup orders are fulfilled before proceeding to main scalp
+            pending = alpaca_service.get_orders(status="open")
+            if not pending:
+                self._v3_cleanup_done = True
+                self._log("info", "✅ Legacy cleanup confirmed — ready for $3,000 scalping!")
+            else:
+                if self._scan_count % 5 == 1:
+                    self._log("info", f"🧹 Waiting for {len(pending)} cleanup orders to fill...")
+                return # Keep waiting
 
         # ─── Execute Strategy ─────────────────────────────────
         try:
             account   = alpaca_service.get_account()
             positions = alpaca_service.get_positions()
+            pending   = alpaca_service.get_orders(status="open")
+            
             equity    = account["equity"]
             cash      = account["cash"]
+            
+            pending_symbols = [o["symbol"] for o in pending]
 
             # Update daily P&L
             self._daily_pnl = equity - self._day_start_equity
@@ -224,7 +236,7 @@ class TradingEngine:
                 )
 
             # Run scalp strategy
-            await self._run_scalp(account, positions)
+            await self._run_scalp(account, positions, pending)
 
         except Exception as e:
             self._log("error", f"Cycle error: {str(e)}")
@@ -376,7 +388,7 @@ class TradingEngine:
 
     # ─── Scalping Strategy ────────────────────────────────────
 
-    async def _run_scalp(self, account: dict, positions: list):
+    async def _run_scalp(self, account: dict, positions: list, pending: list):
         """
         Micro-Scalp Strategy (5-min bars):
         ─ Buy:  RSI bounce + VWAP support + volume spike
@@ -388,6 +400,7 @@ class TradingEngine:
         settled = self._get_settled_cash(cash)
         max_positions = 4
 
+        pending_symbols = [o["symbol"] for o in pending]
         current_symbols = [p["symbol"] for p in positions]
         slots_available = max_positions - len(current_symbols)
 
@@ -403,6 +416,8 @@ class TradingEngine:
             # --- Short Position Protection (Emergency Cover) ---
             # 캐시 계좌에서는 발생하면 안 되는 마이너스 수량 처리
             if int(pos["qty"]) < 0:
+                if symbol in pending_symbols:
+                    continue # Already covering
                 cover_qty = abs(int(pos["qty"]))
                 self._log("error", f"⚠️ EMERGENCY COVER: {symbol} has negative qty ({pos['qty']})! Fixing...")
                 alpaca_service.submit_market_order(symbol, cover_qty, "buy")
@@ -461,6 +476,10 @@ class TradingEngine:
                     self.session_stats["total_pnl"]      += pl_usd
 
         # ── 2. Check if we can enter new positions ────────────
+        # Account for pending buy orders in slots
+        pending_buys = [o["symbol"] for o in pending if o["side"] == "buy"]
+        slots_available = max_positions - (len(current_symbols) + len(set(pending_buys)))
+        
         if slots_available <= 0:
             return
         if settled < 100:  # Need at least $100 settled cash
@@ -541,6 +560,10 @@ class TradingEngine:
         entries = scored[:slots_available]
 
         for score, symbol, price, indicators, reasons in entries:
+            # Skip if already in pending
+            if symbol in pending_symbols:
+                continue
+                
             # Position sizing: max 15% of equity, only use settled cash
             max_position_value = equity * (settings.max_position_percent / 100)
             buy_power = min(max_position_value, settled * 0.95)

@@ -336,7 +336,7 @@ class AlpacaService:
             import pytz
             ET = pytz.timezone("America/New_York")
             # Clear everything before the 10:30 AM update today
-            today_start = ET.localize(datetime(2026, 4, 15, 10, 30, 0))
+            today_start = ET.localize(datetime.now().replace(hour=0, minute=0, second=0, microsecond=0))
 
             request = GetOrdersRequest(
                 status=QueryOrderStatus.ALL if status == "all" else QueryOrderStatus.OPEN,
