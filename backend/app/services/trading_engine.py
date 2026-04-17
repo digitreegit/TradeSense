@@ -171,8 +171,8 @@ class TradingEngine:
                 self._log("info", f"⛔ Daily loss limit hit (${self._daily_pnl:+,.2f}). No more trades today.")
             return
 
-        # ─── AI Adaptive (every 10 scans) ─────────────────────
-        if self._scan_count % 10 == 1:
+        # ─── AI Adaptive (every 30 scans to save tokens for chat) ─────
+        if self._scan_count % 30 == 1:
             await self._ai_regime_check()
 
         # ─── One-time cleanup of legacy positions ─────────────
