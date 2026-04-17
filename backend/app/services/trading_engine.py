@@ -244,11 +244,20 @@ class TradingEngine:
 
             for pos in positions:
                 symbol = pos["symbol"]
-                qty = abs(int(pos["qty"]))
-                if qty <= 0:
+                raw_qty = int(pos["qty"])
+                
+                if raw_qty == 0:
                     continue
-                self._log("info", f"  Selling {qty}x {symbol} (legacy cleanup)")
-                res = alpaca_service.submit_market_order(symbol, qty, "sell")
+                
+                if raw_qty > 0:
+                    self._log("info", f"  Selling {raw_qty}x {symbol} (legacy cleanup)")
+                    res = alpaca_service.submit_market_order(symbol, raw_qty, "sell")
+                else:
+                    # 마이너스 수량(공매도)인 경우 매수로 청산
+                    cover_qty = abs(raw_qty)
+                    self._log("info", f"  Covering {cover_qty}x {symbol} short position (legacy cleanup)")
+                    res = alpaca_service.submit_market_order(symbol, cover_qty, "buy")
+
                 if "error" in res:
                     self._log("error", f"  Failed to close {symbol}: {res['error']}")
                 else:
@@ -391,16 +400,27 @@ class TradingEngine:
             plpc   = pos["unrealized_plpc"]   # e.g. -0.003 = -0.3%
             pl_usd = pos["unrealized_pl"]
 
+            # --- Short Position Protection (Emergency Cover) ---
+            # 캐시 계좌에서는 발생하면 안 되는 마이너스 수량 처리
+            if int(pos["qty"]) < 0:
+                cover_qty = abs(int(pos["qty"]))
+                self._log("error", f"⚠️ EMERGENCY COVER: {symbol} has negative qty ({pos['qty']})! Fixing...")
+                alpaca_service.submit_market_order(symbol, cover_qty, "buy")
+                continue
+
             # GFV check: can we sell this?
             if not self._can_sell(symbol):
                 continue
+            
+            qty_to_sell = int(pos["qty"])
+            if qty_to_sell <= 0: continue
 
             # Stop loss (tight for scalping)
             if plpc <= -(settings.stop_loss_percent / 100):
                 self._log("sell", f"🔴 STOP LOSS: {symbol} {plpc*100:+.2f}% (${pl_usd:+,.2f})")
-                res = alpaca_service.submit_market_order(symbol, abs(int(pos["qty"])), "sell")
+                res = alpaca_service.submit_market_order(symbol, qty_to_sell, "sell")
                 if "error" not in res:
-                    proceeds = abs(int(pos["qty"])) * pos.get("current_price", pos.get("avg_entry_price", 0))
+                    proceeds = qty_to_sell * pos.get("current_price", pos.get("avg_entry_price", 0))
                     self._record_sell(proceeds)
                     self._daily_trades += 1
                     self.session_stats["total_trades"]  += 1
@@ -412,9 +432,9 @@ class TradingEngine:
             # Take profit
             if plpc >= (settings.take_profit_percent / 100):
                 self._log("sell", f"🟢 TAKE PROFIT: {symbol} {plpc*100:+.2f}% (${pl_usd:+,.2f})")
-                res = alpaca_service.submit_market_order(symbol, abs(int(pos["qty"])), "sell")
+                res = alpaca_service.submit_market_order(symbol, qty_to_sell, "sell")
                 if "error" not in res:
-                    proceeds = abs(int(pos["qty"])) * pos.get("current_price", pos.get("avg_entry_price", 0))
+                    proceeds = qty_to_sell * pos.get("current_price", pos.get("avg_entry_price", 0))
                     self._record_sell(proceeds)
                     self._daily_trades += 1
                     self.session_stats["total_trades"]   += 1
@@ -426,9 +446,9 @@ class TradingEngine:
             # Trailing stop: if we were up but now falling back toward breakeven
             if 0.003 <= plpc < 0.005:
                 self._log("sell", f"🟡 TRAIL EXIT: {symbol} {plpc*100:+.2f}%")
-                res = alpaca_service.submit_market_order(symbol, abs(int(pos["qty"])), "sell")
+                res = alpaca_service.submit_market_order(symbol, qty_to_sell, "sell")
                 if "error" not in res:
-                    proceeds = abs(int(pos["qty"])) * pos.get("current_price", pos.get("avg_entry_price", 0))
+                    proceeds = qty_to_sell * pos.get("current_price", pos.get("avg_entry_price", 0))
                     self._record_sell(proceeds)
                     self._daily_trades += 1
                     self.session_stats["total_trades"]   += 1

@@ -246,11 +246,24 @@ class AlpacaService:
 
     # ─── Orders ────────────────────────────────────────────────
     def submit_market_order(self, symbol: str, qty: float, side: str) -> dict:
-        """Submit a market order."""
+        """Submit a market order with cash-account protection."""
         if not self.is_ready:
             return {"error": "Alpaca not initialized"}
 
         try:
+            # --- Cash Account Protection: Prevent Short Selling ---
+            if side == "sell":
+                positions = self.get_positions()
+                pos = next((p for p in positions if p["symbol"] == symbol), None)
+                
+                if not pos or pos["qty"] <= 0:
+                    logger.warning(f"🚫 Blocked 'sell' order for {symbol}: No long position held (Cash Account)")
+                    return {"error": f"Cannot sell {symbol}: No long position held (Cash Account)"}
+                
+                if qty > pos["qty"]:
+                    logger.warning(f"⚠️ Adjusted 'sell' order for {symbol}: {qty} -> {pos['qty']} (Cannot over-sell)")
+                    qty = pos["qty"]
+
             order_side = OrderSide.BUY if side == "buy" else OrderSide.SELL
             request = MarketOrderRequest(
                 symbol=symbol,
@@ -273,11 +286,24 @@ class AlpacaService:
             return {"error": str(e)}
 
     def submit_limit_order(self, symbol: str, qty: float, side: str, limit_price: float) -> dict:
-        """Submit a limit order."""
+        """Submit a limit order with cash-account protection."""
         if not self.is_ready:
             return {"error": "Alpaca not initialized"}
 
         try:
+            # --- Cash Account Protection: Prevent Short Selling ---
+            if side == "sell":
+                positions = self.get_positions()
+                pos = next((p for p in positions if p["symbol"] == symbol), None)
+                
+                if not pos or pos["qty"] <= 0:
+                    logger.warning(f"🚫 Blocked 'limit sell' for {symbol}: No long position held")
+                    return {"error": f"Cannot sell {symbol}: No long position held"}
+                
+                if qty > pos["qty"]:
+                    logger.warning(f"⚠️ Adjusted 'limit sell' for {symbol}: {qty} -> {pos['qty']}")
+                    qty = pos["qty"]
+
             order_side = OrderSide.BUY if side == "buy" else OrderSide.SELL
             request = LimitOrderRequest(
                 symbol=symbol,
