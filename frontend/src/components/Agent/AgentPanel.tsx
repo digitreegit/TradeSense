@@ -36,15 +36,14 @@ const AgentPanel: React.FC = () => {
 
     try {
       const result = await api.chat(query) as { response: string };
-      let content = result.response || "⚠️ 답변을 생성할 수 없습니다.";
+      let content = result.response || "⚠️ Could not generate a response.";
       
       // Filter out raw API error dumps from Gemini quota issues
       if (content.includes('RESOURCE_EXHAUSTED') || content.includes('429') || content.includes('quota')) {
-        content = "⚠️ AI 분석 요청이 일시적으로 제한되었습니다.\n\n" +
-          "Google Gemini 무료 API의 분당 호출 제한에 도달했습니다.\n" +
-          "약 1분 후에 다시 시도해 주세요.\n\n" +
-          "💡 TIP: Trading Bot이 실행 중이면 봇도 AI를 사용하므로,\n" +
-          "채팅 전에 봇을 잠시 멈추면 더 원활하게 대화할 수 있습니다.";
+        content = "⚠️ AI requests are temporarily limited.\n\n" +
+          "The Gemini API rate or quota limit was hit.\n" +
+          "Try again in about a minute.\n\n" +
+          "💡 TIP: If the Trading Bot is running it also uses AI — pause the bot for smoother chat.";
       }
       
       addAgentMessage({
@@ -58,7 +57,7 @@ const AgentPanel: React.FC = () => {
       addAgentMessage({
         id: generateId(),
         role: 'ai',
-        content: "⚠️ 서버와 연결할 수 없습니다.\n\n서버가 실행 중인지 확인해 주세요.\n(터미널에서 backend 폴더로 이동 후 `python -m uvicorn app.main:app --reload` 실행)",
+        content: "⚠️ Cannot reach the server.\n\nMake sure the backend is running:\n`cd backend && python -m uvicorn app.main:app --reload`",
         timestamp: new Date().toISOString(),
       });
     } finally {
@@ -67,11 +66,11 @@ const AgentPanel: React.FC = () => {
   };
 
   const quickActions = [
-    { label: `Analyze ${selectedSymbol}`, msg: `${selectedSymbol} 종합 분석해줘` },
-    { label: 'Market Overview', msg: '현재 시장 상황 분석해줘' },
-    { label: 'Trading Signal', msg: '지금 매매 시그널 있어?' },
-    { label: 'Portfolio Review', msg: '내 포트폴리오 리뷰해줘' },
-    { label: 'Risk Report', msg: '리스크 리포트 보여줘' },
+    { label: `Analyze ${selectedSymbol}`, msg: `Give a full analysis of ${selectedSymbol}` },
+    { label: 'Market Overview', msg: 'Summarize current market conditions' },
+    { label: 'Trading Signal', msg: 'Any trading signals right now?' },
+    { label: 'Portfolio Review', msg: 'Review my portfolio' },
+    { label: 'Risk Report', msg: 'Show a risk report' },
   ];
 
   return (

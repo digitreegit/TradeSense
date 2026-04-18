@@ -35,7 +35,7 @@ async def trading_loop():
     logger.info("Starting background trading loop...")
     while True:
         try:
-            # 봇이 IDLE이어도 30초마다 run_cycle을 실행하여 자율 시작 여부를 체크합니다.
+            # Even when the bot is IDLE, run_cycle checks auto-start conditions each interval.
             await trading_engine.run_cycle()
         except Exception as e:
             logger.error(f"Error in trading loop: {e}")

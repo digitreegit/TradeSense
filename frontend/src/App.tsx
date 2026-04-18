@@ -12,7 +12,7 @@ import { useMarketData } from './hooks/useMarketData';
 
 const App: React.FC = () => {
   const { currentPage } = useAppStore();
-  useMarketData(); // ← 실시간 Alpaca 데이터 fetch (15초마다 갱신)
+  useMarketData(); // Poll Alpaca-backed data (~15s)
 
   const renderPage = () => {
     switch (currentPage) {

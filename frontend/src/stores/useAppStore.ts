@@ -143,7 +143,7 @@ export const useAppStore = create<AppState>((set) => ({
     {
       id: '1',
       role: 'ai',
-      content: '안녕하세요! 저는 TradeSense v3 마이크로 스캘핑 에이전트입니다. ⚡️\n\n**$3,000 캐시 어카운트**를 활용해 매일 **+1% 수익**을 목표로 복리 투자를 진행합니다.\n\n현재 모니터링 중인 스캘핑 전략:\n• RSI 과매도 반등 스캘핑 (5-min)\n• VWAP 지지/저항 돌파\n• AI 기반 섹터 순환 (Paid Tier)',
+      content: 'Hi — I\'m the TradeSense v3 micro-scalping agent. ⚡️\n\n**$3,000 cash account** — targeting **+1% per day** compounded.\n\nActive playbook ideas:\n• RSI oversold bounce scalps (5-min)\n• VWAP support / resistance breaks\n• AI-driven sector rotation (paid tier)',
       timestamp: new Date().toISOString(),
     },
   ],
@@ -158,7 +158,7 @@ export const useAppStore = create<AppState>((set) => ({
     {
       id: 'scalp',
       name: 'Micro-Scalping v3',
-      description: '5분봉 기준 RSI/VWAP 지표를 활용한 빠른 단타 전략. 매일 1% 수익을 목표로 합니다.',
+      description: 'Fast intraday scalps on 5-min bars using RSI/VWAP. Targets ~1% per day.',
       active: true,
       winRate: 0,
       trades: 0,
@@ -167,7 +167,7 @@ export const useAppStore = create<AppState>((set) => ({
     {
       id: 'regime-adaptive',
       name: 'AI Sector Adaptive',
-      description: '실시간 시장 이슈(전쟁, 금리 등)에 따라 집중 섹터와 종목을 AI가 자동으로 변경합니다.',
+      description: 'AI rotates focus sectors and symbols as macro headlines shift (war, rates, etc.).',
       active: true,
       winRate: 0,
       trades: 0,
@@ -176,7 +176,7 @@ export const useAppStore = create<AppState>((set) => ({
     {
       id: 'ml-predict',
       name: 'ML Prediction',
-      description: 'Gradient Boosting 모델을 이용한 가격 예측 전략. 기술적 지표를 feature로 사용.',
+      description: 'Gradient-boosting price outlook using technical features as inputs.',
       active: false,
       winRate: 55.8,
       trades: 0,

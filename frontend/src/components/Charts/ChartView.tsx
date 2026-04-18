@@ -342,7 +342,7 @@ const ChartView: React.FC = () => {
               fontSize: '13px', color: 'var(--text-tertiary)',
             }}>
               <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span>
-              Alpaca에서 차트 데이터 로딩 중...
+              Loading chart data from Alpaca...
             </div>
           )}
           {!loading && candleData.length === 0 && (
@@ -353,7 +353,7 @@ const ChartView: React.FC = () => {
               fontSize: '13px', color: 'var(--text-tertiary)',
             }}>
               <span style={{ fontSize: '32px' }}>📭</span>
-              <span>이 종목의 차트 데이터가 없습니다</span>
+              <span>No chart data for this symbol</span>
             </div>
           )}
           <canvas

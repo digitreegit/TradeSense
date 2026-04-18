@@ -85,7 +85,7 @@ class TradingEngine:
         # Regime / UI data
         self.regime_data: dict = {
             "strategy": "scalp",
-            "reasoning": "Cash-account micro-scalp: $3,000 → 매일 +1% 복리",
+            "reasoning": "Cash-account micro-scalp: $3,000 → +1%/day compounding target",
             "risk_level": self._preset.level,
             "market_score": 50.0,
             "market_level": "NORMAL",
@@ -198,8 +198,8 @@ class TradingEngine:
                     self.active_strategy = "scalp"
                     self._log("info", "[Auto-Start] Market opening — Scalp bot ACTIVE")
                     notification_service.send_alert(
-                        "🚀 스캘핑 봇 시작",
-                        f"오늘 목표: +{self._preset.daily_target_percent}% "
+                        "🚀 Scalp bot started",
+                        f"Today's target: +{self._preset.daily_target_percent}% "
                         f"(${self._day_start_equity * self._preset.daily_target_percent / 100:,.0f})",
                         "SUCCESS",
                     )
@@ -213,7 +213,7 @@ class TradingEngine:
                     f"({self._daily_trades} trades)",
                 )
                 notification_service.send_alert(
-                    "📊 오늘의 성적표",
+                    "📊 Today's summary",
                     f"P&L: ${self._daily_pnl:+,.2f} | Trades: {self._daily_trades}",
                     "SUCCESS" if self._daily_pnl >= 0 else "CRITICAL",
                 )
@@ -283,8 +283,8 @@ class TradingEngine:
                 from app.services.notification_service import notification_service
                 self._log("info", f"⛔ DAILY LOSS LIMIT: {daily_pnl_pct:.2f}% — stopping trades for today")
                 notification_service.send_alert(
-                    "⛔ 일일 손실 한도 도달",
-                    f"P&L: ${self._daily_pnl:+,.2f} ({daily_pnl_pct:+.2f}%)\n오늘은 더 이상 매매하지 않습니다.",
+                    "⛔ Daily loss limit hit",
+                    f"P&L: ${self._daily_pnl:+,.2f} ({daily_pnl_pct:+.2f}%)\nNo more trades today.",
                     "CRITICAL"
                 )
                 return
@@ -295,8 +295,8 @@ class TradingEngine:
                 from app.services.notification_service import notification_service
                 self._log("info", f"🎯 DAILY TARGET REACHED: +{daily_pnl_pct:.2f}% — reducing aggressiveness")
                 notification_service.send_alert(
-                    "🎯 일일 목표 달성!",
-                    f"P&L: ${self._daily_pnl:+,.2f} (+{daily_pnl_pct:.2f}%)\n공격성을 줄이고 수익을 보호합니다.",
+                    "🎯 Daily target reached",
+                    f"P&L: ${self._daily_pnl:+,.2f} (+{daily_pnl_pct:.2f}%)\nReducing aggressiveness to protect gains.",
                     "SUCCESS"
                 )
 
@@ -351,7 +351,7 @@ class TradingEngine:
                     self._log("info", f"  Selling {raw_qty}x {symbol} (legacy cleanup)")
                     res = alpaca_service.submit_market_order(symbol, raw_qty, "sell")
                 else:
-                    # 마이너스 수량(공매도)인 경우 매수로 청산
+                    # Negative qty (short): cover with a buy
                     cover_qty = abs(raw_qty)
                     self._log("info", f"  Covering {cover_qty}x {symbol} short position (legacy cleanup)")
                     res = alpaca_service.submit_market_order(symbol, cover_qty, "buy")
