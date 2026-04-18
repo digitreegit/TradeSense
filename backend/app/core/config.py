@@ -4,11 +4,14 @@ from pathlib import Path
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 
-# Primary search for .env in current and parent directory (backend/)
+# Load .env from the first existing path (many users keep .env at repo root).
 _this_file = Path(__file__).resolve()
+_backend_dir = _this_file.parent.parent.parent       # .../backend
+_repo_root = _backend_dir.parent                     # parent of backend (project root)
 _search_dirs = [
-    _this_file.parent.parent.parent,          # backend/
-    Path.cwd(),                               # CWD
+    _backend_dir,          # backend/.env
+    _repo_root,            # TradeSense/.env (README often says cp .env.example here)
+    Path.cwd(),            # wherever uvicorn was started from
 ]
 _env_file_path = None
 for _d in _search_dirs:
