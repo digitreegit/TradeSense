@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.core.config import settings
 from app.services.alpaca_service import alpaca_service
@@ -139,6 +139,17 @@ async def health():
     }
 
 
+@app.get("/api/health/alpaca-usage")
+async def health_alpaca_usage():
+    """
+    Alpaca REST rate-limit snapshot (same payload as /api/alpaca/usage).
+
+    Registered on the root app next to /api/health so production SPA catch-all
+    routes cannot accidentally return index.html for this path.
+    """
+    return alpaca_service.get_api_usage()
+
+
 # --- Serve frontend static files in production ---
 # In deployment, frontend files sit alongside backend (not in frontend/dist)
 _app_root = Path(__file__).resolve().parent.parent.parent  # project root
@@ -154,7 +165,18 @@ if STATIC_DIR.is_dir() and (STATIC_DIR / "index.html").is_file():
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        """Serve the SPA; fall back to index.html for client-side routes."""
+        """Serve the SPA; fall back to index.html for client-side routes.
+
+        Never swallow real API routes: the catch-all is registered after routers,
+        but some ASGI stacks still prefer this handler for unknown paths. If the
+        path looks like an API call, return 404 JSON instead of index.html so
+        clients don't get HTML where they expect JSON.
+        """
+        if full_path == "api" or full_path.startswith("api/"):
+            return JSONResponse(
+                status_code=404,
+                content={"detail": "Not Found", "hint": "Unknown API path"},
+            )
         file = STATIC_DIR / full_path
         if file.is_file():
             return FileResponse(str(file))

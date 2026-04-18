@@ -108,7 +108,8 @@ export const api = {
 
   getRiskPresets: () => request<Record<string, Record<string, unknown>>>('/regime/presets'),
 
-  getAlpacaUsage: () => request<AlpacaApiUsage>('/alpaca/usage'),
+  /** Prefer health path so SPA catch-all in production never returns HTML here */
+  getAlpacaUsage: () => request<AlpacaApiUsage>('/health/alpaca-usage'),
 
   getStrategies: () => request<unknown>('/trading/strategies'),
 
