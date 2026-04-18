@@ -114,6 +114,23 @@ export interface RegimeData {
   blackout?: boolean;
   blackout_reason?: string;
   news_score?: number;
+  /** Currently enabled playbooks in engine (AUTO or MANUAL routing) */
+  active_playbooks?: string[];
+  playbook_mode?: 'auto' | 'manual';
+}
+
+/** `/api/trading/playbooks` payload */
+export interface PlaybookConfig {
+  auto: boolean;
+  manual: string[];
+  active: string[];
+  playbooks: Array<{
+    id: string;
+    name: string;
+    description: string;
+    manual_enabled: boolean;
+    active_now: boolean;
+  }>;
 }
 
 /** Alpaca REST rate-limit snapshot (from response headers via /v2/clock probe). */

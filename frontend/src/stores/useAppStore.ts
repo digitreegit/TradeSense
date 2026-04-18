@@ -70,6 +70,14 @@ interface AppState {
   setCompliance: (c: ComplianceStatus | null) => void;
   alpacaUsage: AlpacaApiUsage | null;
   setAlpacaUsage: (u: AlpacaApiUsage | null) => void;
+
+  // Playbook routing (AUTO vs MANUAL set + currently-active list)
+  playbookAuto: boolean;
+  setPlaybookAuto: (v: boolean) => void;
+  manualPlaybooks: string[];
+  setManualPlaybooks: (ids: string[]) => void;
+  activePlaybooks: string[];
+  setActivePlaybooks: (ids: string[]) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -86,6 +94,13 @@ export const useAppStore = create<AppState>((set) => ({
   setCompliance: (c) => set({ compliance: c }),
   alpacaUsage: null,
   setAlpacaUsage: (u) => set({ alpacaUsage: u }),
+
+  playbookAuto: true,
+  setPlaybookAuto: (v) => set({ playbookAuto: v }),
+  manualPlaybooks: ['scalp', 'vwap', 'orb', 'eod'],
+  setManualPlaybooks: (ids) => set({ manualPlaybooks: ids }),
+  activePlaybooks: [],
+  setActivePlaybooks: (ids) => set({ activePlaybooks: ids }),
 
   // Account - $3000 paper trading
   account: {
@@ -184,7 +199,7 @@ export const useAppStore = create<AppState>((set) => ({
     },
   ],
   setStrategies: (strategies) => set({ strategies }),
-  activeStrategy: 'momentum',
+  activeStrategy: 'scalp',
   setActiveStrategy: (id) => set({ activeStrategy: id }),
 
   // Connection

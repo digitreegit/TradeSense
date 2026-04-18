@@ -144,7 +144,18 @@ const Dashboard: React.FC = () => {
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', fontSize: '13px', marginTop: '4px' }}>
               <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
                 <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Strategy:</span>
-                <strong style={{ color: 'var(--accent-primary)' }}>{regimeData.strategy?.toUpperCase()}</strong>
+                <strong style={{ color: 'var(--accent-primary)' }}>
+                  {regimeData.playbook_mode
+                    ? `${regimeData.playbook_mode.toUpperCase()} · ${
+                        (regimeData.active_playbooks && regimeData.active_playbooks.length
+                          ? regimeData.active_playbooks
+                          : [regimeData.strategy || 'scalp']
+                        )
+                          .map((s) => s.toUpperCase())
+                          .join(' + ')
+                      }`
+                    : regimeData.strategy?.toUpperCase()}
+                </strong>
               </div>
 
                <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>

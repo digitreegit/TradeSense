@@ -2,6 +2,7 @@ import type {
   AlpacaApiUsage,
   BotStatusResponse,
   ComplianceStatus,
+  PlaybookConfig,
   RegimeData,
 } from '../stores/types';
 
@@ -113,8 +114,25 @@ export const api = {
 
   getStrategies: () =>
     request<{
-      strategies: Array<{ id: string; name: string; description: string; enabled?: boolean }>;
+      auto?: boolean;
+      manual?: string[];
+      active?: string[];
+      strategies: Array<{
+        id: string;
+        name: string;
+        description: string;
+        enabled?: boolean;
+        manual_enabled?: boolean;
+      }>;
     }>('/trading/strategies'),
+
+  getPlaybookConfig: () => request<PlaybookConfig>('/trading/playbooks'),
+
+  setPlaybookConfig: (body: { auto?: boolean; manual?: string[] }) =>
+    request<PlaybookConfig>('/trading/playbooks', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   backtestStrategy: (strategy: string, params: Record<string, unknown>) =>
     request<unknown>('/trading/backtest', {

@@ -59,6 +59,36 @@ class TradingEngine:
         "SPY", "QQQ", "INTC", "NFLX", "AVGO", "CRM", "UBER",
     ]
 
+    # ─── Playbook metadata (shared with /trading/strategies route) ───
+    PLAYBOOKS: list = [
+        {
+            "id": "scalp",
+            "name": "Micro-Scalping v4",
+            "description": "RSI/MACD/BB + volume surge on 5-min bars",
+        },
+        {
+            "id": "vwap",
+            "name": "VWAP Mean-Reversion",
+            "description": "Fade deviations below VWAP during RTH",
+        },
+        {
+            "id": "orb",
+            "name": "Opening Range Breakout",
+            "description": "Buy break above 9:30–9:35 range, valid until 11:00 ET",
+        },
+        {
+            "id": "eod",
+            "name": "End-of-Day Drift",
+            "description": "Favor up-trending names into 15:50–15:58 close",
+        },
+        {
+            "id": "news-fade",
+            "name": "News Spike Fade",
+            "description": "Fade exhaustion after AI-detected panic",
+        },
+    ]
+    PLAYBOOK_IDS: list = [p["id"] for p in PLAYBOOKS]
+
     def __init__(self):
         self.active           = False
         self.active_strategy: Optional[str] = None
@@ -115,6 +145,14 @@ class TradingEngine:
         }
         self._scan_count = 0
         self._v3_cleanup_done = False  # Flag: have we cleaned up legacy positions?
+
+        # ─── Playbook routing ────────────────────────────────
+        # auto_playbooks=True → engine decides which playbooks participate
+        # based on time-of-day / regime; user edits the MANUAL list instead,
+        # which is only consulted when auto is OFF.
+        self.auto_playbooks: bool = True
+        self.manual_playbooks: list = ["scalp", "vwap", "orb", "eod"]
+        self._last_active_playbooks: list = list(self.manual_playbooks)
 
     # ─── Control ──────────────────────────────────────────────
 
@@ -175,6 +213,99 @@ class TradingEngine:
     @property
     def is_active(self) -> bool:
         return self.active
+
+    # ─── Playbook configuration ───────────────────────────────
+
+    def get_playbook_config(self) -> dict:
+        """Return current playbook routing state (for the API / UI)."""
+        active = self._choose_active_playbooks(datetime.now(ET))
+        return {
+            "auto": self.auto_playbooks,
+            "manual": list(self.manual_playbooks),
+            "active": active,
+            "playbooks": [
+                {
+                    **p,
+                    "manual_enabled": p["id"] in self.manual_playbooks,
+                    "active_now": p["id"] in active,
+                }
+                for p in self.PLAYBOOKS
+            ],
+        }
+
+    def set_playbook_config(
+        self,
+        auto: Optional[bool] = None,
+        manual: Optional[list] = None,
+    ) -> dict:
+        """Update AUTO flag and/or the manual enabled set. Unknown ids are ignored."""
+        if auto is not None:
+            self.auto_playbooks = bool(auto)
+        if manual is not None:
+            cleaned = [pid for pid in manual if pid in self.PLAYBOOK_IDS]
+            self.manual_playbooks = cleaned
+        if not self.auto_playbooks and not self.manual_playbooks:
+            self.manual_playbooks = ["scalp"]
+            self._log(
+                "info",
+                "Manual playbook list was empty — defaulted to ['scalp'] to keep the bot functional.",
+            )
+        self._log(
+            "info",
+            f"Playbooks updated — AUTO={self.auto_playbooks} | "
+            f"manual={','.join(self.manual_playbooks) or '∅'}",
+        )
+        return self.get_playbook_config()
+
+    def _choose_active_playbooks(self, now_et: datetime) -> list:
+        """AUTO → time-of-day + regime driven routing.
+        MANUAL → respect whatever the user ticked."""
+        if not self.auto_playbooks:
+            return list(self.manual_playbooks)
+
+        t = now_et.time()
+        score = float(self.regime_data.get("market_score", 50.0) or 50.0)
+        news = float(self.regime_data.get("news_score", 0.0) or 0.0)
+
+        active: list = []
+
+        # Opening auction window (9:30 – 9:35) already blacked out upstream,
+        # but as soon as the range prints we enable ORB until late morning.
+        if time(9, 35) <= t < time(11, 0):
+            active.append("orb")
+
+        # VWAP mean-reversion is most useful after the first impulse.
+        if time(10, 0) <= t < time(15, 30):
+            active.append("vwap")
+
+        # Core scalp across RTH except the very last minutes where spreads widen.
+        if time(9, 35) <= t < time(15, 45):
+            active.append("scalp")
+
+        # EOD drift into the close window.
+        if time(15, 30) <= t < time(15, 58):
+            active.append("eod")
+
+        # News-fade is only trusted when a strong panic signal is in regime.
+        if news <= -0.6:
+            active.append("news-fade")
+
+        # In clearly risk-off regimes, fall back to news-fade only.
+        if score < 25:
+            active = [p for p in active if p in ("news-fade",)] or ["news-fade"]
+
+        # If nothing matched (e.g. pre-market / after-hours), keep at least the scalp.
+        if not active:
+            active = ["scalp"]
+
+        # De-dup while preserving order.
+        seen = set()
+        uniq = []
+        for p in active:
+            if p not in seen:
+                uniq.append(p)
+                seen.add(p)
+        return uniq
 
     # ─── Main Loop ────────────────────────────────────────────
 
@@ -614,6 +745,13 @@ class TradingEngine:
         if self._daily_target_reached:
             entry_threshold = max(entry_threshold, 70)
 
+        # Runtime-decided playbook set (AUTO or MANUAL).
+        now_et_for_pb = datetime.now(ET)
+        active_playbooks = self._choose_active_playbooks(now_et_for_pb)
+        self._last_active_playbooks = active_playbooks
+        self.regime_data["active_playbooks"] = active_playbooks
+        self.regime_data["playbook_mode"] = "auto" if self.auto_playbooks else "manual"
+
         # ── 3. Scan universe ────────────────────────────────────
         scored = []
         for symbol in self.focus_symbols[: preset.universe_size]:
@@ -645,7 +783,7 @@ class TradingEngine:
                     volumes=volumes,
                     now=now_et,
                     news_score=self.regime_data.get("news_score", 0.0) or 0.0,
-                    enabled=["scalp", "vwap", "orb", "eod"],
+                    enabled=active_playbooks,
                 )
 
                 if len(closes) >= 10:

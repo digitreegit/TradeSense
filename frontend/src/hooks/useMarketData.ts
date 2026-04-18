@@ -23,10 +23,11 @@ export function useMarketData() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchAll = async () => {
-    // ── Strategy playbooks (English copy from API; overwrites stale store) ──
+    // ── Strategy playbooks (AUTO/MANUAL routing from engine) ──
     try {
-      const { strategies: playbook } = await api.getStrategies();
-      if (playbook?.length) {
+      const res = await api.getStrategies();
+      const playbook = res.strategies ?? [];
+      if (playbook.length) {
         const mapped: Strategy[] = playbook.map((s) => ({
           id: s.id,
           name: s.name,
@@ -38,10 +39,14 @@ export function useMarketData() {
           pnl: 0,
         }));
         useAppStore.getState().setStrategies(mapped);
-        const ids = mapped.map((m) => m.id);
-        const cur = useAppStore.getState().activeStrategy;
-        if (!cur || !ids.includes(cur)) {
-          useAppStore.getState().setActiveStrategy(ids[0] ?? 'scalp');
+        if (typeof res.auto === 'boolean') {
+          useAppStore.getState().setPlaybookAuto(res.auto);
+        }
+        if (Array.isArray(res.manual)) {
+          useAppStore.getState().setManualPlaybooks(res.manual);
+        }
+        if (Array.isArray(res.active)) {
+          useAppStore.getState().setActivePlaybooks(res.active);
         }
       }
     } catch {
