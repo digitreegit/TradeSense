@@ -1,4 +1,9 @@
-import type { BotStatusResponse, ComplianceStatus, RegimeData } from '../stores/types';
+import type {
+  AlpacaApiUsage,
+  BotStatusResponse,
+  ComplianceStatus,
+  RegimeData,
+} from '../stores/types';
 
 /**
  * HTTP client for the FastAPI backend.
@@ -102,6 +107,8 @@ export const api = {
     }>('/regime/status'),
 
   getRiskPresets: () => request<Record<string, Record<string, unknown>>>('/regime/presets'),
+
+  getAlpacaUsage: () => request<AlpacaApiUsage>('/alpaca/usage'),
 
   getStrategies: () => request<unknown>('/trading/strategies'),
 

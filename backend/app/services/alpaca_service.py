@@ -4,7 +4,9 @@ Handles all communication with Alpaca Markets API for paper trading.
 """
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Dict, Optional
+
+import httpx
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import (
@@ -606,7 +608,85 @@ class AlpacaService:
             logger.warning(f"Error getting news: {e}")
             return []
 
+    # ─── REST API usage (rate-limit headers) ───────────────────
+    def get_api_usage(self) -> Dict[str, Any]:
+        """
+        Return Alpaca REST rate-limit snapshot from a lightweight /v2/clock call.
 
+        Alpaca includes X-RateLimit-Limit / X-RateLimit-Remaining / X-RateLimit-Reset
+        on many responses. Values are per rolling window (see Alpaca docs).
+        """
+        if not settings.alpaca_api_key or not settings.alpaca_secret_key:
+            return {
+                "ok": False,
+                "connected": False,
+                "error": "Alpaca keys not configured",
+            }
+
+        base = (settings.alpaca_base_url or "").rstrip("/")
+        url = f"{base}/v2/clock"
+        headers = {
+            "APCA-API-KEY-ID": settings.alpaca_api_key,
+            "APCA-API-SECRET-KEY": settings.alpaca_secret_key,
+        }
+
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                resp = client.head(url, headers=headers)
+                if resp.status_code == 405 or resp.status_code == 404:
+                    resp = client.get(url, headers=headers)
+                resp.raise_for_status()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Alpaca usage probe failed: %s", e)
+            return {
+                "ok": False,
+                "connected": self._initialized,
+                "error": str(e),
+            }
+
+        norm = {k.lower(): v for k, v in resp.headers.items()}
+        limit_raw = norm.get("x-ratelimit-limit")
+        remain_raw = norm.get("x-ratelimit-remaining")
+        reset_raw = norm.get("x-ratelimit-reset")
+
+        def _to_int(val: Optional[str]) -> Optional[int]:
+            if val is None or val == "":
+                return None
+            try:
+                return int(float(val))
+            except (TypeError, ValueError):
+                return None
+
+        limit = _to_int(limit_raw)
+        remaining = _to_int(remain_raw)
+        reset_epoch = _to_int(reset_raw)
+        # Alpaca may return seconds or ms
+        if reset_epoch and reset_epoch > 10_000_000_000:
+            reset_epoch = reset_epoch // 1000
+
+        used = None
+        if limit is not None and remaining is not None:
+            used = max(0, limit - remaining)
+
+        pct_used = None
+        if limit and limit > 0 and remaining is not None:
+            pct_used = round((1.0 - remaining / limit) * 100.0, 1)
+
+        now = datetime.utcnow().timestamp()
+        reset_in_s = None
+        if reset_epoch:
+            reset_in_s = max(0, int(reset_epoch - now))
+
+        return {
+            "ok": True,
+            "connected": self._initialized,
+            "limit": limit,
+            "remaining": remaining,
+            "used": used,
+            "reset_epoch": reset_epoch,
+            "reset_in_seconds": reset_in_s,
+            "percent_used": pct_used,
+        }
 
 
 # Singleton instance

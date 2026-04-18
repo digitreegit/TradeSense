@@ -114,6 +114,19 @@ export interface RegimeData {
   news_score?: number;
 }
 
+/** Alpaca REST rate-limit snapshot (from response headers via /v2/clock probe). */
+export interface AlpacaApiUsage {
+  ok: boolean;
+  connected?: boolean;
+  error?: string;
+  limit?: number | null;
+  remaining?: number | null;
+  used?: number | null;
+  reset_epoch?: number | null;
+  reset_in_seconds?: number | null;
+  percent_used?: number | null;
+}
+
 export interface ComplianceStatus {
   unsettled_cash: number;
   open_unsettled_lots: number;

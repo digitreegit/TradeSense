@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAppStore } from '../../stores/useAppStore';
-import type { PageId } from '../../stores/types';
+import type { AlpacaApiUsage, PageId } from '../../stores/types';
 
 // Heroicons v2 Outline SVGs directly as components
 const SquaresIcon = (props: React.ComponentProps<'svg'>) => (
@@ -57,8 +57,21 @@ const navItems: NavItem[] = [
   { id: 'history', label: 'History', icon: HistoryIcon },
 ];
 
+function formatUsageLine(u: AlpacaApiUsage | null): string | null {
+  if (!u || !u.ok) return null;
+  if (u.remaining != null && u.limit != null) {
+    const pct = u.percent_used != null ? ` · ${u.percent_used}% used` : '';
+    return `API ${u.remaining}/${u.limit} left${pct}`;
+  }
+  if (u.remaining != null) {
+    return `API ${u.remaining} left (window)`;
+  }
+  return null;
+}
+
 const Sidebar: React.FC = () => {
-  const { currentPage, setCurrentPage, connected, botActive } = useAppStore();
+  const { currentPage, setCurrentPage, connected, botActive, alpacaUsage } = useAppStore();
+  const usageLine = formatUsageLine(alpacaUsage);
 
   let currentSection = '';
 
@@ -114,7 +127,38 @@ const Sidebar: React.FC = () => {
       <div className="sidebar-footer">
         <div className={`sidebar-status ${connected ? '' : 'disconnected'}`}>
           <span className="status-dot" />
-          <span>{connected ? 'Connected to Alpaca' : 'Disconnected'}</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+            <span>{connected ? 'Connected to Alpaca' : 'Disconnected'}</span>
+            {usageLine && connected && (
+              <span
+                style={{
+                  fontSize: '10px',
+                  lineHeight: 1.3,
+                  color: 'var(--text-tertiary)',
+                  fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+                  wordBreak: 'break-word',
+                }}
+                title={
+                  alpacaUsage?.reset_in_seconds != null
+                    ? `Quota window resets in ~${alpacaUsage.reset_in_seconds}s`
+                    : 'Alpaca REST rate limit (rolling window)'
+                }
+              >
+                {usageLine}
+                {alpacaUsage?.reset_in_seconds != null && alpacaUsage.reset_in_seconds > 0
+                  ? ` · reset ~${alpacaUsage.reset_in_seconds}s`
+                  : ''}
+              </span>
+            )}
+            {connected && alpacaUsage && !alpacaUsage.ok && (
+              <span
+                style={{ fontSize: '10px', color: 'var(--text-tertiary)', opacity: 0.85 }}
+                title={alpacaUsage.error}
+              >
+                API quota unavailable
+              </span>
+            )}
+          </div>
         </div>
       </div>
     </aside>

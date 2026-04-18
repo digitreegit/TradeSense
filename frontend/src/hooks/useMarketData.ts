@@ -37,6 +37,14 @@ export function useMarketData() {
       // ignore
     }
 
+    // ── Alpaca REST quota (rate-limit headers) ────────────────
+    try {
+      const usage = await api.getAlpacaUsage();
+      useAppStore.getState().setAlpacaUsage(usage);
+    } catch {
+      useAppStore.getState().setAlpacaUsage(null);
+    }
+
     // ── Regime + compliance (Market Status + GFV/cooldown) ────
     try {
       const status = await api.getRegimeStatus();

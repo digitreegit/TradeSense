@@ -10,6 +10,7 @@ import type {
   PageId,
   RegimeData,
   ComplianceStatus,
+  AlpacaApiUsage,
 } from './types';
 
 interface AppState {
@@ -67,6 +68,8 @@ interface AppState {
   setDismissedRegimeTimestamp: (ts: string | null) => void;
   compliance: ComplianceStatus | null;
   setCompliance: (c: ComplianceStatus | null) => void;
+  alpacaUsage: AlpacaApiUsage | null;
+  setAlpacaUsage: (u: AlpacaApiUsage | null) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -81,6 +84,8 @@ export const useAppStore = create<AppState>((set) => ({
   setDismissedRegimeTimestamp: (ts) => set({ dismissedRegimeTimestamp: ts }),
   compliance: null,
   setCompliance: (c) => set({ compliance: c }),
+  alpacaUsage: null,
+  setAlpacaUsage: (u) => set({ alpacaUsage: u }),
 
   // Account - $3000 paper trading
   account: {
