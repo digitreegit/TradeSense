@@ -58,7 +58,19 @@ const Dashboard: React.FC = () => {
     dismissedRegimeTimestamp,
     setDismissedRegimeTimestamp,
     compliance,
+    playbookAuto,
+    activePlaybooks,
+    manualPlaybooks,
   } = useAppStore();
+
+  const strategyBanner = useMemo(() => {
+    const mode = playbookAuto ? 'AUTO' : 'MANUAL';
+    const ids = playbookAuto
+      ? (activePlaybooks.length ? activePlaybooks : [])
+      : manualPlaybooks;
+    const upper = ids.map((s) => s.toUpperCase());
+    return `${mode} · ${upper.join(' + ') || '—'}`;
+  }, [playbookAuto, activePlaybooks, manualPlaybooks]);
 
   const totalPL = account.equity - account.initial_capital;
   const totalPLPct = ((account.equity - account.initial_capital) / account.initial_capital) * 100;
@@ -145,16 +157,11 @@ const Dashboard: React.FC = () => {
               <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
                 <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Strategy:</span>
                 <strong style={{ color: 'var(--accent-primary)' }}>
-                  {regimeData.playbook_mode
-                    ? `${regimeData.playbook_mode.toUpperCase()} · ${
-                        (regimeData.active_playbooks && regimeData.active_playbooks.length
-                          ? regimeData.active_playbooks
-                          : [regimeData.strategy || 'scalp']
-                        )
-                          .map((s) => s.toUpperCase())
-                          .join(' + ')
-                      }`
-                    : regimeData.strategy?.toUpperCase()}
+                  {regimeData.playbook_mode && regimeData.active_playbooks?.length
+                    ? `${regimeData.playbook_mode.toUpperCase()} · ${regimeData.active_playbooks
+                        .map((s) => s.toUpperCase())
+                        .join(' + ')}`
+                    : strategyBanner}
                 </strong>
               </div>
 

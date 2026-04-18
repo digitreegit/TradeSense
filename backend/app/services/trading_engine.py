@@ -153,6 +153,7 @@ class TradingEngine:
         self.auto_playbooks: bool = True
         self.manual_playbooks: list = ["scalp", "vwap", "orb", "eod"]
         self._last_active_playbooks: list = list(self.manual_playbooks)
+        self._sync_regime_playbook_display()
 
     # ─── Control ──────────────────────────────────────────────
 
@@ -166,8 +167,8 @@ class TradingEngine:
     ):
         self.active          = True
         self.active_strategy = strategy
-        self.regime_data["strategy"] = strategy
         self.regime_data["timestamp"] = datetime.now().strftime("%b %d, %Y, %-I:%M%p")
+        self._sync_regime_playbook_display()
 
         if risk_level:
             from app.core.risk_presets import preset_for_level
@@ -255,6 +256,7 @@ class TradingEngine:
             f"Playbooks updated — AUTO={self.auto_playbooks} | "
             f"manual={','.join(self.manual_playbooks) or '∅'}",
         )
+        self._sync_regime_playbook_display()
         return self.get_playbook_config()
 
     def _choose_active_playbooks(self, now_et: datetime) -> list:
@@ -307,6 +309,17 @@ class TradingEngine:
                 seen.add(p)
         return uniq
 
+    def _sync_regime_playbook_display(self, now_et: Optional[datetime] = None) -> None:
+        """Keep regime_data in sync for the dashboard even when the bot is idle
+        or the market is closed (not only inside _run_scalp)."""
+        when = now_et or datetime.now(ET)
+        active = self._choose_active_playbooks(when)
+        self._last_active_playbooks = list(active)
+        self.regime_data["active_playbooks"] = active
+        self.regime_data["playbook_mode"] = "auto" if self.auto_playbooks else "manual"
+        # Human-readable combo for any legacy UI still reading `strategy`
+        self.regime_data["strategy"] = " + ".join(p.upper() for p in active)
+
     # ─── Main Loop ────────────────────────────────────────────
 
     async def run_cycle(self):
@@ -348,6 +361,9 @@ class TradingEngine:
                     f"P&L: ${self._daily_pnl:+,.2f} | Trades: {self._daily_trades}",
                     "SUCCESS" if self._daily_pnl >= 0 else "CRITICAL",
                 )
+
+        # Dashboard playbook line updates every scan, even when bot is off / market closed.
+        self._sync_regime_playbook_display(now_et)
 
         if not self.active:
             return
@@ -651,6 +667,8 @@ class TradingEngine:
         cash    = account["cash"]
         settled = compliance_service.settled_cash(cash)
         now_et = datetime.now(ET)
+        self._sync_regime_playbook_display(now_et)
+        active_playbooks = list(self.regime_data.get("active_playbooks") or self._last_active_playbooks)
 
         pending_symbols = [o["symbol"] for o in pending]
         current_symbols = [p["symbol"] for p in positions]
@@ -744,13 +762,6 @@ class TradingEngine:
         entry_threshold = preset.entry_score_threshold
         if self._daily_target_reached:
             entry_threshold = max(entry_threshold, 70)
-
-        # Runtime-decided playbook set (AUTO or MANUAL).
-        now_et_for_pb = datetime.now(ET)
-        active_playbooks = self._choose_active_playbooks(now_et_for_pb)
-        self._last_active_playbooks = active_playbooks
-        self.regime_data["active_playbooks"] = active_playbooks
-        self.regime_data["playbook_mode"] = "auto" if self.auto_playbooks else "manual"
 
         # ── 3. Scan universe ────────────────────────────────────
         scored = []
