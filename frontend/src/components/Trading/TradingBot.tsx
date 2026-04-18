@@ -133,7 +133,7 @@ const TradingBot: React.FC = () => {
   const handleToggleBot = async () => {
     try {
       if (!botActive) {
-        await api.startBot(activeStrategy || 'momentum', {
+        await api.startBot(activeStrategy || 'scalp', {
           stop_loss: stopLossPercent,
           take_profit: takeProfitPercent,
           max_position: maxPositionSize,

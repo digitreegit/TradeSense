@@ -70,6 +70,8 @@ export interface Strategy {
   name: string;
   description: string;
   active: boolean;
+  /** Optional: from API playbook list */
+  enabled?: boolean;
   winRate: number;
   trades: number;
   pnl: number;

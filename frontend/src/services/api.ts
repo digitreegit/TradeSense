@@ -111,7 +111,10 @@ export const api = {
   /** Prefer health path so SPA catch-all in production never returns HTML here */
   getAlpacaUsage: () => request<AlpacaApiUsage>('/health/alpaca-usage'),
 
-  getStrategies: () => request<unknown>('/trading/strategies'),
+  getStrategies: () =>
+    request<{
+      strategies: Array<{ id: string; name: string; description: string; enabled?: boolean }>;
+    }>('/trading/strategies'),
 
   backtestStrategy: (strategy: string, params: Record<string, unknown>) =>
     request<unknown>('/trading/backtest', {
