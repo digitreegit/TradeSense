@@ -1,115 +1,106 @@
-// API service for communicating with FastAPI backend
+import type { BotStatusResponse } from '../stores/types';
 
-const isDev = import.meta.env.DEV;
-const BASE_URL = isDev ? '/api' : '/quant/api';
+/**
+ * HTTP client for the FastAPI backend.
+ *
+ * - Local dev: Vite proxies `/api` → http://localhost:8000 (see vite.config.ts).
+ * - Production: set `VITE_API_BASE` to the public API prefix (e.g. `/quant/api`).
+ */
+const API_PREFIX =
+  (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ??
+  (import.meta.env.DEV ? '/api' : '/quant/api');
 
-class ApiService {
-  private baseUrl: string;
+type ErrorBody = { detail?: string; message?: string };
 
-  constructor(baseUrl: string = BASE_URL) {
-    this.baseUrl = baseUrl;
+async function parseError(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as ErrorBody;
+    if (typeof body.detail === 'string') return body.detail;
+    if (Array.isArray(body.detail)) return JSON.stringify(body.detail);
+    if (typeof body.message === 'string') return body.message;
+  } catch {
+    /* ignore */
+  }
+  return `HTTP ${response.status}`;
+}
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const url = `${API_PREFIX}${path.startsWith('/') ? path : `/${path}`}`;
+  const response = await fetch(url, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    },
+    ...options,
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseError(response));
   }
 
-  private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
-      ...options,
-    });
+  return response.json() as Promise<T>;
+}
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-      throw new Error(error.detail || `HTTP ${response.status}`);
-    }
+export const api = {
+  getAccount: () => request<Record<string, unknown>>('/account'),
 
-    return response.json();
-  }
+  getPositions: () => request<{ positions?: unknown[] }>('/portfolio/positions'),
 
-  // Account
-  async getAccount() {
-    return this.request('/account');
-  }
+  getOrders: () => request<{ orders?: unknown[] }>('/trading/orders'),
 
-  // Positions
-  async getPositions() {
-    return this.request('/portfolio/positions');
-  }
-
-  // Orders
-  async getOrders() {
-    return this.request('/trading/orders');
-  }
-
-  async submitOrder(order: {
+  submitOrder: (order: {
     symbol: string;
     qty: number;
     side: 'buy' | 'sell';
     type: 'market' | 'limit';
     limit_price?: number;
-  }) {
-    return this.request('/trading/order', {
+  }) =>
+    request<unknown>('/trading/order', {
       method: 'POST',
       body: JSON.stringify(order),
-    });
-  }
+    }),
 
-  // Market Data
-  async getBars(symbol: string, timeframe: string = '1Day', limit: number = 100) {
-    return this.request(`/market/bars?symbol=${symbol}&timeframe=${timeframe}&limit=${limit}`);
-  }
+  getBars: (symbol: string, timeframe = '1Day', limit = 100) =>
+    request<unknown>(`/market/bars?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`),
 
-  async getQuote(symbol: string) {
-    return this.request(`/market/quote?symbol=${symbol}`);
-  }
+  getQuote: (symbol: string) =>
+    request<unknown>(`/market/quote?symbol=${encodeURIComponent(symbol)}`),
 
-  async getSnapshot(symbol: string) {
-    return this.request(`/market/snapshot?symbol=${symbol}`);
-  }
+  getSnapshot: (symbol: string) =>
+    request<unknown>(`/market/snapshot?symbol=${encodeURIComponent(symbol)}`),
 
-  // AI Agent
-  async analyzeStock(symbol: string) {
-    return this.request(`/agent/analyze?symbol=${symbol}`);
-  }
+  analyzeStock: (symbol: string) =>
+    request<unknown>(`/agent/analyze?symbol=${encodeURIComponent(symbol)}`),
 
-  async chat(message: string) {
-    return this.request('/agent/chat', {
+  chat: (message: string) =>
+    request<unknown>('/agent/chat', {
       method: 'POST',
       body: JSON.stringify({ message }),
-    });
-  }
+    }),
 
-  // Trading Bot
-  async startBot(strategy: string, riskSettings?: { stop_loss?: number; take_profit?: number; max_position?: number }) {
-    return this.request('/trading/bot/start', {
+  startBot: (
+    strategy: string,
+    riskSettings?: { stop_loss?: number; take_profit?: number; max_position?: number },
+  ) =>
+    request<unknown>('/trading/bot/start', {
       method: 'POST',
       body: JSON.stringify({ strategy, ...riskSettings }),
-    });
-  }
+    }),
 
-  async stopBot() {
-    return this.request('/trading/bot/stop', {
+  stopBot: () =>
+    request<unknown>('/trading/bot/stop', {
       method: 'POST',
-    });
-  }
+    }),
 
-  async getBotStatus() {
-    return this.request('/trading/bot/status');
-  }
+  getBotStatus: () => request<BotStatusResponse>('/trading/bot/status'),
 
-  // Strategies
-  async getStrategies() {
-    return this.request('/trading/strategies');
-  }
+  getStrategies: () => request<unknown>('/trading/strategies'),
 
-  async backtestStrategy(strategy: string, params: Record<string, unknown>) {
-    return this.request('/trading/backtest', {
+  backtestStrategy: (strategy: string, params: Record<string, unknown>) =>
+    request<unknown>('/trading/backtest', {
       method: 'POST',
       body: JSON.stringify({ strategy, params }),
-    });
-  }
-}
+    }),
+} as const;
 
-export const api = new ApiService();
 export default api;

@@ -49,7 +49,7 @@ npm run dev
 
 ### 4. 브라우저에서 접속
 ```
-http://localhost:3000
+http://localhost:5173
 ```
 
 ---

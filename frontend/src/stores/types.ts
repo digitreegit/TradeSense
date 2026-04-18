@@ -93,6 +93,22 @@ export interface RegimeData {
   prev_strategy?: string;
   prev_risk_level?: string;
   timestamp?: string;
+  focus_sectors?: string[];
+  focus_symbols?: string[];
+  daily_target?: string;
+  daily_pnl?: string;
+  account_type?: string;
+  /** Optional UI fields from adaptive regime logic */
+  market_level?: string;
+  market_score?: number;
+  market_scores?: Record<string, number>;
+}
+
+export interface BotStatusResponse {
+  active: boolean;
+  strategy?: string;
+  regime_data?: RegimeData;
+  regime_reason?: string;
 }
 
 export type PageId = 'dashboard' | 'chart' | 'agent' | 'trading' | 'portfolio' | 'history';

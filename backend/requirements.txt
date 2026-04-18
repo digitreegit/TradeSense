@@ -17,7 +17,9 @@ numpy==2.2.4
 scikit-learn==1.6.1
 
 # AI / LLM
+openai==1.59.9
 google-genai==1.10.0
+google-generativeai==0.8.4
 
 # Technical Analysis
 ta==0.11.0

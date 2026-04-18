@@ -1,5 +1,15 @@
 import { create } from 'zustand';
-import type { AccountInfo, Position, WatchlistItem, TradeLog, AgentMessage, Strategy, Order, PageId } from './types';
+import type {
+  AccountInfo,
+  Position,
+  WatchlistItem,
+  TradeLog,
+  AgentMessage,
+  Strategy,
+  Order,
+  PageId,
+  RegimeData,
+} from './types';
 
 interface AppState {
   // Navigation
