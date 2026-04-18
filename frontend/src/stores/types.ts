@@ -90,6 +90,7 @@ export interface RegimeData {
   risk_level: string;
   max_position_percent: number;
   stop_loss_percent: number;
+  take_profit_percent?: number;
   prev_strategy?: string;
   prev_risk_level?: string;
   timestamp?: string;
@@ -98,10 +99,30 @@ export interface RegimeData {
   daily_target?: string;
   daily_pnl?: string;
   account_type?: string;
-  /** Optional UI fields from adaptive regime logic */
+  /** AI regime sub-scores (war/earnings/fed/gold/crypto/others) */
   market_level?: string;
   market_score?: number;
+  ai_market_score?: number;
   market_scores?: Record<string, number>;
+  /** Quantitative regime sub-scores (vix/bonds/dxy/gold/energy/crypto/spy) */
+  quant_scores?: Record<string, number>;
+  quant_changes_5d_pct?: Record<string, number | null>;
+  vix_proxy_level?: number;
+  sector_tilt?: string | null;
+  blackout?: boolean;
+  blackout_reason?: string;
+  news_score?: number;
+}
+
+export interface ComplianceStatus {
+  unsettled_cash: number;
+  open_unsettled_lots: number;
+  gfv_count_12mo: number;
+  gfv_level: 'OK' | 'NOTICE' | 'WARNING' | 'RESTRICTED';
+  loss_streak: number;
+  cooling_down: boolean;
+  cooldown_remaining_s: number;
+  wash_sale_cooldowns: Record<string, string>;
 }
 
 export interface BotStatusResponse {

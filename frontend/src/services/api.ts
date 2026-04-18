@@ -1,4 +1,4 @@
-import type { BotStatusResponse } from '../stores/types';
+import type { BotStatusResponse, ComplianceStatus, RegimeData } from '../stores/types';
 
 /**
  * HTTP client for the FastAPI backend.
@@ -93,6 +93,15 @@ export const api = {
     }),
 
   getBotStatus: () => request<BotStatusResponse>('/trading/bot/status'),
+
+  getRegimeStatus: () =>
+    request<{
+      regime: RegimeData;
+      active_preset: Record<string, unknown>;
+      compliance: ComplianceStatus;
+    }>('/regime/status'),
+
+  getRiskPresets: () => request<Record<string, Record<string, unknown>>>('/regime/presets'),
 
   getStrategies: () => request<unknown>('/trading/strategies'),
 

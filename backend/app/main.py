@@ -16,7 +16,7 @@ from app.core.config import settings
 from app.services.alpaca_service import alpaca_service
 from app.services.analysis_agent import analysis_agent
 from app.services.trading_engine import trading_engine
-from app.api.routes import trading, market, agent, portfolio
+from app.api.routes import agent, market, portfolio, regime, trading
 
 # Configure logging
 logging.basicConfig(
@@ -104,6 +104,7 @@ app.include_router(trading.router, prefix="/api")
 app.include_router(market.router, prefix="/api")
 app.include_router(agent.router, prefix="/api")
 app.include_router(portfolio.router, prefix="/api")
+app.include_router(regime.router, prefix="/api")
 
 
 @app.get("/")

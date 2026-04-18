@@ -18,10 +18,11 @@ class OrderRequest(BaseModel):
 
 
 class BotRequest(BaseModel):
-    strategy: str = "momentum"
+    strategy: str = "scalp"
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
     max_position: Optional[float] = None
+    risk_level: Optional[str] = None  # 'conservative' | 'moderate' | 'aggressive'
 
 
 @router.get("/orders")
@@ -61,7 +62,8 @@ async def start_bot(req: BotRequest):
         req.strategy,
         stop_loss=req.stop_loss,
         take_profit=req.take_profit,
-        max_position=req.max_position
+        max_position=req.max_position,
+        risk_level=req.risk_level,
     )
     return {
         "status": "started",
@@ -91,26 +93,38 @@ async def bot_status():
 
 @router.get("/strategies")
 async def get_strategies():
-    """Get available strategies."""
+    """Active scalping playbooks (composed within the engine)."""
     return {
         "strategies": [
             {
-                "id": "momentum",
-                "name": "Momentum Breakout",
-                "description": "RSI + MACD crossover momentum strategy",
-                "win_rate": 62.5,
+                "id": "scalp",
+                "name": "Micro-Scalping v4",
+                "description": "RSI/MACD/BB + volume surge on 5-min bars",
+                "enabled": True,
             },
             {
-                "id": "mean-reversion",
-                "name": "Mean Reversion",
-                "description": "Bollinger Bands mean reversion strategy",
-                "win_rate": 58.3,
+                "id": "vwap",
+                "name": "VWAP Mean-Reversion",
+                "description": "Fade deviations below VWAP during RTH",
+                "enabled": True,
             },
             {
-                "id": "ml-predict",
-                "name": "ML Prediction",
-                "description": "Gradient Boosting price prediction model",
-                "win_rate": 55.8,
+                "id": "orb",
+                "name": "Opening Range Breakout",
+                "description": "Buy break above 9:30–9:35 range, valid until 11:00 ET",
+                "enabled": True,
+            },
+            {
+                "id": "eod",
+                "name": "End-of-Day Drift",
+                "description": "Favor up-trending names into 15:50–15:58 close",
+                "enabled": True,
+            },
+            {
+                "id": "news-fade",
+                "name": "News Spike Fade",
+                "description": "Fade exhaustion after AI-detected panic",
+                "enabled": False,
             },
         ]
     }

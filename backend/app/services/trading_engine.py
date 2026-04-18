@@ -1,21 +1,43 @@
 """
-TradeSense - Trading Engine v3
-Cash Account Micro-Scalping Strategy
-─────────────────────────────────────
-$3,000 시작 → 매일 +1% 복리 → 한 달 후 $4,000 목표
-캐시 어카운트: PDT 면제, GFV 방지 로직 내장
+TradeSense - Trading Engine v4
+Cash-account micro-scalping with compliance, event, and regime guards.
+
+Delegates:
+- Compliance (GFV / free-riding / wash-sale / cooldowns) → compliance_service
+- Macro regime score + universe tilt                    → regime_service
+- Macro event / opening-auction blackout                → event_calendar
+- Risk preset tables driven by regime score             → core.risk_presets
+- Entry scoring (scalp + VWAP + ORB + EOD + news-fade)  → playbooks
+- Marketable-limit orders + spread filter               → execution_service
 """
-import logging
+from __future__ import annotations
+
 import asyncio
-from datetime import datetime, time, date, timedelta
-import pytz
+import logging
+from datetime import date, datetime, time
 from typing import Optional
+
+import pytz
+
 from app.core.config import settings
+from app.core.risk_presets import (
+    RISK_PRESETS,
+    is_halted_score,
+    market_level_for_score,
+    preset_for_score,
+)
 from app.services.alpaca_service import alpaca_service
+from app.services.compliance_service import compliance_service
+from app.services.event_calendar import is_blackout, symbol_is_earnings_today
+from app.services.execution_service import Executor, spread_info
+from app.services.playbooks import combine as combine_playbooks
+from app.services.regime_service import RegimeService
 
 logger = logging.getLogger(__name__)
 
 ET = pytz.timezone("America/New_York")
+_executor = Executor(alpaca_service)
+_regime = RegimeService(alpaca_service)
 
 
 def is_market_open() -> bool:
@@ -42,16 +64,11 @@ class TradingEngine:
         self.active_strategy: Optional[str] = None
         self.last_regime_reason: str = ""
 
-        # AI-driven focus (can override SCALP_UNIVERSE)
+        # Focus universe (AI + regime tilt can override)
         self.focus_symbols: list = list(self.SCALP_UNIVERSE[:8])
         self.focus_sectors: list = ["tech_ai", "tech_software"]
 
-        # ─── GFV Prevention (Cash Account) ─────────────────────
-        self._unsettled_funds: float = 0.0
-        self._unsettled_date: Optional[date] = None
-        self._positions_bought_with_unsettled: set = set()  # symbols bought with unsettled $
-
-        # ─── Daily P&L Tracking ────────────────────────────────
+        # Daily tracking
         self._trading_date: Optional[date] = None
         self._daily_pnl: float = 0.0
         self._daily_trades: int = 0
@@ -59,19 +76,30 @@ class TradingEngine:
         self._daily_loss_limit_hit: bool = False
         self._day_start_equity: float = settings.initial_capital
 
-        # ─── Regime / UI data ─────────────────────────────────
+        # Per-position peaks for trailing stop high-water mark
+        self._position_peaks: dict = {}
+
+        # Current active risk preset (starts moderate)
+        self._preset = RISK_PRESETS["moderate"]
+
+        # Regime / UI data
         self.regime_data: dict = {
             "strategy": "scalp",
-            "reasoning": "Cash account micro-scalp: $3,000 → 매일 +1% 복리",
-            "risk_level": settings.risk_level,
-            "max_position_percent": settings.max_position_percent,
-            "stop_loss_percent": settings.stop_loss_percent,
+            "reasoning": "Cash-account micro-scalp: $3,000 → 매일 +1% 복리",
+            "risk_level": self._preset.level,
+            "market_score": 50.0,
+            "market_level": "NORMAL",
+            "market_scores": {},
+            "max_position_percent": self._preset.max_position_percent,
+            "stop_loss_percent": self._preset.stop_loss_percent,
             "focus_sectors": self.focus_sectors,
             "focus_symbols": self.focus_symbols,
-            "daily_target": f"+{settings.daily_target_percent}%",
+            "daily_target": f"+{self._preset.daily_target_percent}%",
             "daily_pnl": "$0.00",
             "account_type": settings.account_type,
-            "timestamp": datetime.now().strftime("%b %d, %Y, %-I:%M%p")
+            "blackout": False,
+            "blackout_reason": "",
+            "timestamp": datetime.now().strftime("%b %d, %Y, %-I:%M%p"),
         }
 
         # ─── Session stats ────────────────────────────────────
@@ -90,24 +118,54 @@ class TradingEngine:
 
     # ─── Control ──────────────────────────────────────────────
 
-    def start(self, strategy: str = "scalp", stop_loss: Optional[float] = None, take_profit: Optional[float] = None, max_position: Optional[float] = None):
+    def start(
+        self,
+        strategy: str = "scalp",
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
+        max_position: Optional[float] = None,
+        risk_level: Optional[str] = None,
+    ):
         self.active          = True
         self.active_strategy = strategy
         self.regime_data["strategy"] = strategy
         self.regime_data["timestamp"] = datetime.now().strftime("%b %d, %Y, %-I:%M%p")
 
-        # Apply custom settings if provided
-        if stop_loss is not None:
-            settings.stop_loss_percent = stop_loss
-        if take_profit is not None:
-            settings.take_profit_percent = take_profit
-        if max_position is not None:
-            settings.max_position_percent = max_position
+        if risk_level:
+            from app.core.risk_presets import preset_for_level
+            self._preset = preset_for_level(risk_level)
 
-        self._log("info", f"🚀 Bot started — Strategy: MICRO-SCALP | Capital: ${settings.initial_capital:,.0f}")
-        self._log("info", f"📋 Cash Account | Target: +{settings.daily_target_percent}%/day | Stop: -{settings.daily_loss_limit_percent}%/day")
-        self._log("info", f"📊 Position: {settings.max_position_percent}% | TP: +{settings.take_profit_percent}% | SL: -{settings.stop_loss_percent}%")
-        logger.info(f"Trading engine started: {strategy} (SL: {settings.stop_loss_percent}%, TP: {settings.take_profit_percent}%)")
+        # Overrides still allowed, but clamped to scalp-safe bounds.
+        preset = self._preset
+        if stop_loss is not None:
+            preset = preset.__class__(
+                **{**preset.as_dict(), "stop_loss_percent": max(0.1, min(stop_loss, 1.0))}
+            )
+        if take_profit is not None:
+            preset = preset.__class__(
+                **{**preset.as_dict(), "take_profit_percent": max(0.3, min(take_profit, 3.0))}
+            )
+        if max_position is not None:
+            preset = preset.__class__(
+                **{**preset.as_dict(), "max_position_percent": max(5.0, min(max_position, 25.0))}
+            )
+        self._preset = preset
+
+        self._log(
+            "info",
+            f"🚀 Bot started — {preset.level.upper()} | Capital: ${settings.initial_capital:,.0f}",
+        )
+        self._log(
+            "info",
+            f"Target +{preset.daily_target_percent}% | Loss limit -{preset.daily_loss_limit_percent}% | "
+            f"Pos {preset.max_position_percent}% × {preset.max_concurrent_positions} slots",
+        )
+        self._log(
+            "info",
+            f"SL -{preset.stop_loss_percent}% | TP +{preset.take_profit_percent}% | "
+            f"Trail {preset.trailing_trigger_percent}% | Spread ≤ {preset.spread_filter_percent}%",
+        )
+        logger.info("Trading engine started: %s (preset=%s)", strategy, preset.level)
 
     def stop(self):
         self.active = False
@@ -127,11 +185,11 @@ class TradingEngine:
         market_time = now_et.time()
         today = now_et.date()
 
-        # ─── New Day Reset ────────────────────────────────────
         if self._trading_date != today:
             self._reset_daily(today)
+            compliance_service.sweep_settlements()
 
-        # ─── Auto Start/Stop ─────────────────────────────────
+        # Auto start/stop
         if not is_weekend:
             if market_time >= time(9, 25) and market_time < time(16, 0):
                 if not self.active:
@@ -141,18 +199,23 @@ class TradingEngine:
                     self._log("info", "[Auto-Start] Market opening — Scalp bot ACTIVE")
                     notification_service.send_alert(
                         "🚀 스캘핑 봇 시작",
-                        f"오늘 목표: +{settings.daily_target_percent}% (${self._day_start_equity * settings.daily_target_percent / 100:,.0f})",
-                        "SUCCESS"
+                        f"오늘 목표: +{self._preset.daily_target_percent}% "
+                        f"(${self._day_start_equity * self._preset.daily_target_percent / 100:,.0f})",
+                        "SUCCESS",
                     )
 
             if market_time >= time(16, 0) and self.active:
                 from app.services.notification_service import notification_service
                 self.active = False
-                self._log("info", f"[Auto-Stop] Market closed | Today P&L: ${self._daily_pnl:+,.2f} ({self._daily_trades} trades)")
+                self._log(
+                    "info",
+                    f"[Auto-Stop] Market closed | Today P&L: ${self._daily_pnl:+,.2f} "
+                    f"({self._daily_trades} trades)",
+                )
                 notification_service.send_alert(
                     "📊 오늘의 성적표",
                     f"P&L: ${self._daily_pnl:+,.2f} | Trades: {self._daily_trades}",
-                    "SUCCESS" if self._daily_pnl >= 0 else "CRITICAL"
+                    "SUCCESS" if self._daily_pnl >= 0 else "CRITICAL",
                 )
 
         if not self.active:
@@ -171,7 +234,9 @@ class TradingEngine:
                 self._log("info", f"⛔ Daily loss limit hit (${self._daily_pnl:+,.2f}). No more trades today.")
             return
 
-        # ─── AI Adaptive (every 30 scans to save tokens for chat) ─────
+        # Quantitative regime (cheap, every 10 scans) + AI regime (every 30)
+        if self._scan_count % 10 == 1:
+            self._quant_regime_check()
         if self._scan_count % 30 == 1:
             await self._ai_regime_check()
 
@@ -213,7 +278,7 @@ class TradingEngine:
                 f"Positions: {len(positions)} | Trades: {self._daily_trades}")
 
             # Check daily loss limit
-            if daily_pnl_pct <= -settings.daily_loss_limit_percent:
+            if daily_pnl_pct <= -self._preset.daily_loss_limit_percent:
                 self._daily_loss_limit_hit = True
                 from app.services.notification_service import notification_service
                 self._log("info", f"⛔ DAILY LOSS LIMIT: {daily_pnl_pct:.2f}% — stopping trades for today")
@@ -225,7 +290,7 @@ class TradingEngine:
                 return
 
             # Check daily target
-            if daily_pnl_pct >= settings.daily_target_percent and not self._daily_target_reached:
+            if daily_pnl_pct >= self._preset.daily_target_percent and not self._daily_target_reached:
                 self._daily_target_reached = True
                 from app.services.notification_service import notification_service
                 self._log("info", f"🎯 DAILY TARGET REACHED: +{daily_pnl_pct:.2f}% — reducing aggressiveness")
@@ -235,7 +300,28 @@ class TradingEngine:
                     "SUCCESS"
                 )
 
-            # Run scalp strategy
+            # Blackout window / VIX halt check (entries only)
+            preset = self._preset
+            blackout, reason = is_blackout(now_et, preset.blackout_window_minutes)
+            score = float(self.regime_data.get("market_score", 50.0))
+            vix_level = float(self.regime_data.get("vix_proxy_level", 0.0) or 0.0)
+            halt_score = is_halted_score(score)
+            halt_vix = vix_level and vix_level >= preset.vix_halt_level
+
+            self.regime_data["blackout"] = bool(blackout or halt_score or halt_vix)
+            self.regime_data["blackout_reason"] = (
+                reason
+                or ("market-score halt" if halt_score else "")
+                or (f"VIX {vix_level:.1f} ≥ {preset.vix_halt_level}" if halt_vix else "")
+            )
+
+            if compliance_service.is_cooling_down():
+                if self._scan_count % 5 == 1:
+                    self._log(
+                        "info",
+                        f"⏸ Loss-streak cooldown {compliance_service.cooldown_remaining_s()}s remaining",
+                    )
+
             await self._run_scalp(account, positions, pending)
 
         except Exception as e:
@@ -285,18 +371,12 @@ class TradingEngine:
 
     def _reset_daily(self, today: date):
         """Reset daily tracking for a new trading day."""
-        # Settle yesterday's unsettled funds
-        if self._unsettled_date and self._unsettled_date < today:
-            self._log("info", f"💰 Settled ${self._unsettled_funds:,.2f} from {self._unsettled_date}")
-            self._unsettled_funds = 0.0
-            self._unsettled_date = None
-            self._positions_bought_with_unsettled.clear()
-
         self._trading_date = today
         self._daily_pnl = 0.0
         self._daily_trades = 0
         self._daily_target_reached = False
         self._daily_loss_limit_hit = False
+        self._position_peaks.clear()
 
         # Get current equity as day start
         try:
@@ -306,34 +386,71 @@ class TradingEngine:
             self._day_start_equity = settings.initial_capital
 
         self._log("info", f"📅 New trading day: {today} | Start equity: ${self._day_start_equity:,.2f}")
-        self._log("info", f"🎯 Today's target: +${self._day_start_equity * settings.daily_target_percent / 100:,.2f} (+{settings.daily_target_percent}%)")
+        self._log(
+            "info",
+            f"🎯 Today's target: +${self._day_start_equity * self._preset.daily_target_percent / 100:,.2f} "
+            f"(+{self._preset.daily_target_percent}%)",
+        )
 
-    # ─── GFV Prevention ───────────────────────────────────────
+    # ─── GFV Prevention (delegates to compliance_service) ─────
 
     def _get_settled_cash(self, total_cash: float) -> float:
-        """Return only settled (available) cash for new buys."""
-        settled = total_cash - self._unsettled_funds
-        return max(settled, 0.0)
-
-    def _record_sell(self, proceeds: float):
-        """After a sell, mark proceeds as unsettled (T+1)."""
-        today = datetime.now(ET).date()
-        if self._unsettled_date != today:
-            # New day of unsettled funds
-            self._unsettled_funds = proceeds
-            self._unsettled_date = today
-        else:
-            self._unsettled_funds += proceeds
+        return compliance_service.settled_cash(total_cash)
 
     def _can_sell(self, symbol: str) -> bool:
-        """Check if we can sell this position without causing a GFV."""
-        # If we bought with unsettled funds, can't sell until settled
-        if symbol in self._positions_bought_with_unsettled:
-            self._log("info", f"⚠️ GFV prevention: {symbol} bought with unsettled funds, holding until settlement")
+        if not compliance_service.can_sell(symbol):
+            self._log(
+                "info",
+                f"⚠️ GFV prevention: holding {symbol} (bought with unsettled cash)",
+            )
             return False
         return True
 
-    # ─── AI Regime Check ──────────────────────────────────────
+    # ─── Regime checks ────────────────────────────────────────
+
+    def _apply_preset_from_score(self, score: float, source: str):
+        """Deterministic score → preset mapping. Logs only when it changes."""
+        new_preset = preset_for_score(score)
+        if new_preset.level != self._preset.level:
+            self._log(
+                "info",
+                f"🎚️ Risk auto-adjust ({source}): {self._preset.level} → {new_preset.level} "
+                f"(score={score:.1f})",
+            )
+            self._preset = new_preset
+        self.regime_data.update(
+            {
+                "risk_level": self._preset.level,
+                "market_score": round(score, 1),
+                "market_level": market_level_for_score(score),
+                "max_position_percent": self._preset.max_position_percent,
+                "stop_loss_percent": self._preset.stop_loss_percent,
+                "take_profit_percent": self._preset.take_profit_percent,
+                "daily_target": f"+{self._preset.daily_target_percent}%",
+            }
+        )
+
+    def _quant_regime_check(self):
+        """Cheap quantitative regime using ETF proxies (no LLM)."""
+        try:
+            quant = _regime.compute_scores()
+            score = quant["composite"]
+            tilt = quant.get("sector_tilt")
+            self.regime_data.update(
+                {
+                    "quant_scores": quant["scores"],
+                    "quant_changes_5d_pct": quant["changes_5d_pct"],
+                    "vix_proxy_level": quant["vix_proxy_level"],
+                    "sector_tilt": tilt,
+                    "timestamp": datetime.now().strftime("%b %d, %Y, %-I:%M%p"),
+                }
+            )
+            if tilt:
+                self.focus_symbols = _regime.suggested_universe(tilt)[: self._preset.universe_size]
+                self.regime_data["focus_symbols"] = self.focus_symbols
+            self._apply_preset_from_score(score, source="quant")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("quant regime check failed: %s", exc)
 
     async def _ai_regime_check(self):
         """Use AI to analyze news and adjust focus symbols."""
@@ -357,30 +474,31 @@ class TradingEngine:
                     self.focus_symbols = new_symbols
                     self.focus_sectors = new_sectors
 
-                # Apply risk settings (but keep scalp-appropriate bounds)
-                settings.risk_level = regime["risk_level"]
-                ai_sl = float(regime.get("stop_loss_percent", 0.3))
-                settings.stop_loss_percent = max(0.2, min(ai_sl, 1.0))  # Clamp 0.2-1.0% for scalping
+                # Combine AI market_score with quantitative score (60/40)
+                ai_score = float(regime.get("market_score", 50.0))
+                quant_score = float(self.regime_data.get("market_score", 50.0))
+                blended = 0.6 * quant_score + 0.4 * ai_score
 
-                ai_pos = float(regime.get("max_position_percent", 15))
-                settings.max_position_percent = max(10, min(ai_pos, 20))  # Clamp 10-20%
+                self.regime_data.update(
+                    {
+                        "reasoning": regime.get("reasoning", ""),
+                        "prev_strategy": old_strat,
+                        "prev_risk_level": old_risk,
+                        "ai_market_score": round(ai_score, 1),
+                        "market_scores": regime.get("market_scores", {}),
+                        "daily_pnl": self.regime_data.get("daily_pnl", "$0.00"),
+                        "account_type": settings.account_type,
+                        "timestamp": datetime.now().strftime("%b %d, %Y, %-I:%M%p"),
+                    }
+                )
+                self._apply_preset_from_score(blended, source="ai+quant")
 
-                self.regime_data = {
-                    **regime,
-                    "prev_strategy": old_strat,
-                    "prev_risk_level": old_risk,
-                    "daily_target": f"+{settings.daily_target_percent}%",
-                    "daily_pnl": self.regime_data.get("daily_pnl", "$0.00"),
-                    "account_type": settings.account_type,
-                    "timestamp": datetime.now().strftime("%b %d, %Y, %-I:%M%p")
-                }
-
-                if old_risk != settings.risk_level:
+                if old_risk != self._preset.level:
                     from app.services.notification_service import notification_service
                     notification_service.send_alert(
                         "🔄 Market Regime Update",
-                        f"Risk: {old_risk} → {settings.risk_level}\nReason: {regime['reasoning']}",
-                        "INFO"
+                        f"Risk: {old_risk} → {self._preset.level}\nReason: {regime.get('reasoning', '')}",
+                        "INFO",
                     )
 
         except Exception as e:
@@ -390,115 +508,127 @@ class TradingEngine:
 
     async def _run_scalp(self, account: dict, positions: list, pending: list):
         """
-        Micro-Scalp Strategy (5-min bars):
-        ─ Buy:  RSI bounce + VWAP support + volume spike
-        ─ Sell:  +0.5~1.0% take profit  OR  -0.3% stop loss
-        ─ GFV:   Only buy with settled cash
+        Cash-account scalping with:
+        - High-water-mark trailing stop per position
+        - Marketable-limit orders + spread filter
+        - GFV tracking via compliance_service
+        - Daily trade cap + loss-streak cooldown
+        - Event / opening-auction / VIX blackout for entries only
         """
+        preset = self._preset
         equity  = account["equity"]
         cash    = account["cash"]
-        settled = self._get_settled_cash(cash)
-        max_positions = 4
+        settled = compliance_service.settled_cash(cash)
+        now_et = datetime.now(ET)
 
         pending_symbols = [o["symbol"] for o in pending]
         current_symbols = [p["symbol"] for p in positions]
-        slots_available = max_positions - len(current_symbols)
 
-        # Raise entry threshold if daily target already reached
-        entry_score_threshold = 50 if not self._daily_target_reached else 70
-
-        # ── 1. Manage existing positions (tight scalp exits) ──
+        # ── 1. Manage open positions ────────────────────────────
         for pos in positions:
             symbol = pos["symbol"]
-            plpc   = pos["unrealized_plpc"]   # e.g. -0.003 = -0.3%
+            plpc   = pos["unrealized_plpc"]
             pl_usd = pos["unrealized_pl"]
+            qty_to_sell = int(pos["qty"])
 
-            # --- Short Position Protection (Emergency Cover) ---
-            # 캐시 계좌에서는 발생하면 안 되는 마이너스 수량 처리
-            if int(pos["qty"]) < 0:
+            if qty_to_sell < 0:
                 if symbol in pending_symbols:
-                    continue # Already covering
-                cover_qty = abs(int(pos["qty"]))
-                self._log("error", f"⚠️ EMERGENCY COVER: {symbol} has negative qty ({pos['qty']})! Fixing...")
-                alpaca_service.submit_market_order(symbol, cover_qty, "buy")
+                    continue
+                self._log("error", f"⚠️ EMERGENCY COVER {symbol}: qty={pos['qty']}")
+                alpaca_service.submit_market_order(symbol, abs(qty_to_sell), "buy")
                 continue
-
-            # GFV check: can we sell this?
+            if qty_to_sell <= 0:
+                continue
             if not self._can_sell(symbol):
                 continue
-            
-            qty_to_sell = int(pos["qty"])
-            if qty_to_sell <= 0: continue
 
-            # Stop loss (tight for scalping)
-            if plpc <= -(settings.stop_loss_percent / 100):
-                self._log("sell", f"🔴 STOP LOSS: {symbol} {plpc*100:+.2f}% (${pl_usd:+,.2f})")
-                res = alpaca_service.submit_market_order(symbol, qty_to_sell, "sell")
-                if "error" not in res:
-                    proceeds = qty_to_sell * pos.get("current_price", pos.get("avg_entry_price", 0))
-                    self._record_sell(proceeds)
-                    self._daily_trades += 1
-                    self.session_stats["total_trades"]  += 1
-                    self.session_stats["losing_trades"] += 1
-                    self.session_stats["loss_sum"]      += abs(pl_usd)
-                    self.session_stats["total_pnl"]     += pl_usd
+            # Maintain peak for trailing stop
+            peak = self._position_peaks.get(symbol, plpc)
+            if plpc > peak:
+                peak = plpc
+                self._position_peaks[symbol] = peak
+
+            snapshot = alpaca_service.get_snapshot(symbol) or {}
+            exit_reason = None
+
+            if plpc <= -(preset.stop_loss_percent / 100):
+                exit_reason = f"🔴 STOP {plpc*100:+.2f}%"
+            elif plpc >= (preset.take_profit_percent / 100):
+                exit_reason = f"🟢 TP {plpc*100:+.2f}%"
+            elif peak > 0 and (peak - plpc) >= (preset.trailing_trigger_percent / 100) and plpc > 0:
+                exit_reason = f"🟡 TRAIL peak={peak*100:+.2f}% now={plpc*100:+.2f}%"
+
+            if not exit_reason:
                 continue
 
-            # Take profit
-            if plpc >= (settings.take_profit_percent / 100):
-                self._log("sell", f"🟢 TAKE PROFIT: {symbol} {plpc*100:+.2f}% (${pl_usd:+,.2f})")
-                res = alpaca_service.submit_market_order(symbol, qty_to_sell, "sell")
-                if "error" not in res:
-                    proceeds = qty_to_sell * pos.get("current_price", pos.get("avg_entry_price", 0))
-                    self._record_sell(proceeds)
-                    self._daily_trades += 1
-                    self.session_stats["total_trades"]   += 1
-                    self.session_stats["winning_trades"] += 1
-                    self.session_stats["win_sum"]        += pl_usd
-                    self.session_stats["total_pnl"]      += pl_usd
+            self._log("sell", f"{exit_reason} {symbol} (${pl_usd:+,.2f})")
+            res = _executor.sell(symbol, qty_to_sell, snapshot, preset.spread_filter_percent)
+            if "error" in res:
+                self._log("error", f"Exit failed {symbol}: {res['error']}")
                 continue
 
-            # Trailing stop: if we were up but now falling back toward breakeven
-            if 0.003 <= plpc < 0.005:
-                self._log("sell", f"🟡 TRAIL EXIT: {symbol} {plpc*100:+.2f}%")
-                res = alpaca_service.submit_market_order(symbol, qty_to_sell, "sell")
-                if "error" not in res:
-                    proceeds = qty_to_sell * pos.get("current_price", pos.get("avg_entry_price", 0))
-                    self._record_sell(proceeds)
-                    self._daily_trades += 1
-                    self.session_stats["total_trades"]   += 1
-                    if plpc > 0:
-                        self.session_stats["winning_trades"] += 1
-                        self.session_stats["win_sum"]        += pl_usd
-                    else:
-                        self.session_stats["losing_trades"]  += 1
-                        self.session_stats["loss_sum"]       += abs(pl_usd)
-                    self.session_stats["total_pnl"]      += pl_usd
+            exit_price = float(pos.get("current_price") or pos.get("avg_entry_price") or 0.0)
+            cost_basis = qty_to_sell * float(pos.get("avg_entry_price") or 0.0)
+            compliance_service.record_sell(symbol, qty_to_sell, exit_price, cost_basis)
+            self._position_peaks.pop(symbol, None)
 
-        # ── 2. Check if we can enter new positions ────────────
-        # Account for pending buy orders in slots
+            self._daily_trades += 1
+            self.session_stats["total_trades"] += 1
+            if pl_usd > 0:
+                self.session_stats["winning_trades"] += 1
+                self.session_stats["win_sum"]        += pl_usd
+            else:
+                self.session_stats["losing_trades"]  += 1
+                self.session_stats["loss_sum"]       += abs(pl_usd)
+            self.session_stats["total_pnl"] += pl_usd
+
+        # Loss-streak circuit breaker
+        if compliance_service.loss_streak >= 3 and not compliance_service.is_cooling_down():
+            compliance_service.register_loss_streak_cooldown(minutes=15)
+            self._log("info", "⏸ 3 consecutive losses → 15-minute cooldown")
+
+        # ── 2. Entry gating ─────────────────────────────────────
+        if self.regime_data.get("blackout"):
+            if self._scan_count % 5 == 1:
+                self._log(
+                    "info",
+                    f"🚫 No new entries — {self.regime_data.get('blackout_reason','blackout')}",
+                )
+            return
+        if compliance_service.is_cooling_down():
+            return
+        if self._daily_trades >= preset.max_trades_per_day:
+            if self._scan_count % 10 == 1:
+                self._log("info", f"🧯 Daily trade cap {preset.max_trades_per_day} reached")
+            return
+
         pending_buys = [o["symbol"] for o in pending if o["side"] == "buy"]
-        slots_available = max_positions - (len(current_symbols) + len(set(pending_buys)))
-        
-        if slots_available <= 0:
+        slots = preset.max_concurrent_positions - (len(current_symbols) + len(set(pending_buys)))
+        if slots <= 0:
             return
-        if settled < 100:  # Need at least $100 settled cash
-            self._log("info", f"💤 Settled cash too low: ${settled:,.2f} (unsettled: ${self._unsettled_funds:,.2f})")
+        if settled < 100:
+            self._log("info", f"💤 Settled cash too low: ${settled:,.2f}")
             return
-        # Unrestricted scalping: Trading count limit removed as per user request
 
-        # ── 3. Scan for scalp entries ─────────────────────────
-        symbols_to_scan = self.focus_symbols[:10]  # AI-selected focus
+        entry_threshold = preset.entry_score_threshold
+        if self._daily_target_reached:
+            entry_threshold = max(entry_threshold, 70)
+
+        # ── 3. Scan universe ────────────────────────────────────
         scored = []
-
-        for symbol in symbols_to_scan:
+        for symbol in self.focus_symbols[: preset.universe_size]:
             if symbol in current_symbols:
                 continue
+            block = compliance_service.can_enter(symbol)
+            if block:
+                continue
+            # Earnings-today skip (earnings dates can be injected later)
+            if symbol_is_earnings_today(symbol, getattr(self, "_earnings_today", {})):
+                continue
+
             try:
-                # Use 5-min bars for scalp signals
                 bars = alpaca_service.get_bars(symbol, "5Min", 50)
                 if len(bars) < 20:
-                    # Fallback to daily bars
                     bars = alpaca_service.get_bars(symbol, "1Day", 30)
                     if len(bars) < 14:
                         continue
@@ -508,83 +638,68 @@ class TradingEngine:
                 indicators = self._calculate_indicators(closes)
                 price = closes[-1]
 
-                # ── Score the entry signal ─────────────────
-                score = 0
-                reasons = []
+                total, reasons = combine_playbooks(
+                    price=price,
+                    indicators=indicators,
+                    bars=bars,
+                    volumes=volumes,
+                    now=now_et,
+                    news_score=self.regime_data.get("news_score", 0.0) or 0.0,
+                    enabled=["scalp", "vwap", "orb", "eod"],
+                )
 
-                # RSI oversold bounce (strongest scalp signal)
-                if indicators["rsi"] < 35:
-                    score += 30
-                    reasons.append(f"RSI↓{indicators['rsi']:.0f}")
-                elif 35 <= indicators["rsi"] <= 45:
-                    score += 15
-                    reasons.append(f"RSI={indicators['rsi']:.0f}")
-
-                # MACD bullish crossover
-                if indicators["macd_signal"] == "bullish":
-                    score += 25
-                    reasons.append("MACD↑")
-
-                # Bollinger Band: near lower band = buy zone
-                if indicators["bb_lower"] > 0:
-                    bb_pct = (price - indicators["bb_lower"]) / (indicators["bb_upper"] - indicators["bb_lower"] + 0.001)
-                    if bb_pct < 0.2:
-                        score += 25
-                        reasons.append("BB-low")
-                    elif bb_pct < 0.4:
-                        score += 10
-                        reasons.append("BB-mid")
-
-                # Price above short MA (micro trend up)
                 if len(closes) >= 10:
                     ma10 = sum(closes[-10:]) / 10
                     if price > ma10:
-                        score += 10
+                        total += 10
                         reasons.append("P>MA10")
 
-                # Volume surge (2x avg = institutional interest)
-                if volumes and len(volumes) >= 10:
-                    avg_vol = sum(volumes[-10:]) / 10
-                    if avg_vol > 0 and volumes[-1] > avg_vol * 2:
-                        score += 15
-                        reasons.append("Vol🔥")
+                if total >= entry_threshold:
+                    scored.append((total, symbol, price, reasons))
 
-                if score >= entry_score_threshold:
-                    scored.append((score, symbol, price, indicators, reasons))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"Scan error for {symbol}: {exc}")
 
-            except Exception as e:
-                logger.warning(f"Scan error for {symbol}: {e}")
-
-        # ── 4. Execute top entries ────────────────────────────
+        # ── 4. Execute ──────────────────────────────────────────
         scored.sort(key=lambda x: -x[0])
-        entries = scored[:slots_available]
-
-        for score, symbol, price, indicators, reasons in entries:
-            # Skip if already in pending
+        for score, symbol, price, reasons in scored[:slots]:
             if symbol in pending_symbols:
                 continue
-                
-            # Position sizing: max 15% of equity, only use settled cash
-            max_position_value = equity * (settings.max_position_percent / 100)
-            buy_power = min(max_position_value, settled * 0.95)
-            qty = int(buy_power / price)
 
+            max_value = equity * (preset.max_position_percent / 100)
+            buy_power = min(max_value, settled * 0.95)
+            qty = int(buy_power / price)
             if qty <= 0:
                 continue
 
-            cost = qty * price
-            self._log("signal",
-                f"📊 BUY signal {symbol}: score={score} | {' + '.join(reasons)} | "
-                f"${price:.2f} × {qty} = ${cost:,.0f}")
+            snapshot = alpaca_service.get_snapshot(symbol) or {}
+            bid, ask, spread = spread_info(snapshot)
+            if spread > preset.spread_filter_percent:
+                self._log(
+                    "info",
+                    f"⏭ Skip {symbol}: spread {spread:.3f}% > {preset.spread_filter_percent:.3f}%",
+                )
+                continue
 
-            res = alpaca_service.submit_market_order(symbol, qty, "buy")
-            if "error" not in res:
-                self._log("buy", f"✅ BOUGHT {qty} × {symbol} @ ~${price:.2f} (${cost:,.0f})")
-                self._daily_trades += 1
-                self.session_stats["total_trades"] += 1
-                settled -= cost  # Reduce available settled cash
-            else:
+            cost = qty * price
+            self._log(
+                "signal",
+                f"📊 BUY {symbol}: score={score} | {' + '.join(reasons)} | "
+                f"${price:.2f} × {qty} = ${cost:,.0f}",
+            )
+
+            settled_before = settled
+            res = _executor.buy(symbol, qty, snapshot, preset.spread_filter_percent)
+            if "error" in res:
                 self._log("error", f"Order failed {symbol}: {res['error']}")
+                continue
+
+            compliance_service.record_buy(symbol, qty, price, settled_before)
+            self._position_peaks[symbol] = 0.0
+            self._log("buy", f"✅ BOUGHT {qty} × {symbol} @ ~${price:.2f} (${cost:,.0f})")
+            self._daily_trades += 1
+            self.session_stats["total_trades"] += 1
+            settled -= cost
 
     # ─── Technical Indicators ──────────────────────────────────
 
@@ -677,7 +792,8 @@ class TradingEngine:
             "daily_pnl": self._daily_pnl,
             "daily_trades": self._daily_trades,
             "daily_target_reached": self._daily_target_reached,
-            "settled_cash_available": self._get_settled_cash(0),  # approximate
+            "preset": self._preset.level,
+            "compliance": compliance_service.status(),
         }
 
 

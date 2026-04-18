@@ -9,6 +9,7 @@ import type {
   Order,
   PageId,
   RegimeData,
+  ComplianceStatus,
 } from './types';
 
 interface AppState {
@@ -64,6 +65,8 @@ interface AppState {
   setRegimeData: (data: RegimeData | null) => void;
   dismissedRegimeTimestamp: string | null;
   setDismissedRegimeTimestamp: (ts: string | null) => void;
+  compliance: ComplianceStatus | null;
+  setCompliance: (c: ComplianceStatus | null) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -76,6 +79,8 @@ export const useAppStore = create<AppState>((set) => ({
   setRegimeData: (data) => set({ regimeData: data }),
   dismissedRegimeTimestamp: null,
   setDismissedRegimeTimestamp: (ts) => set({ dismissedRegimeTimestamp: ts }),
+  compliance: null,
+  setCompliance: (c) => set({ compliance: c }),
 
   // Account - $3000 paper trading
   account: {

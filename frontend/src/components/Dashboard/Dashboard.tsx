@@ -57,6 +57,7 @@ const Dashboard: React.FC = () => {
     regimeData,
     dismissedRegimeTimestamp,
     setDismissedRegimeTimestamp,
+    compliance,
   } = useAppStore();
 
   const totalPL = account.equity - account.initial_capital;
@@ -246,6 +247,66 @@ const Dashboard: React.FC = () => {
             )}
           </div>
         )}
+
+      {/* Compliance / Blackout banner */}
+      {(compliance || regimeData?.blackout) && (
+        <div style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '8px',
+          marginBottom: '16px',
+          fontSize: '12px',
+        }}>
+          {regimeData?.blackout && (
+            <span style={{
+              padding: '4px 10px',
+              borderRadius: 'var(--radius-full)',
+              background: 'rgba(249, 115, 22, 0.15)',
+              border: '1px solid rgba(249, 115, 22, 0.4)',
+              color: '#f97316',
+              fontWeight: 600,
+            }}>
+              ⏸ Entry blackout: {regimeData.blackout_reason || 'active'}
+            </span>
+          )}
+          {compliance && compliance.gfv_level !== 'OK' && (
+            <span style={{
+              padding: '4px 10px',
+              borderRadius: 'var(--radius-full)',
+              background: 'rgba(239, 68, 68, 0.15)',
+              border: '1px solid rgba(239, 68, 68, 0.4)',
+              color: 'var(--loss)',
+              fontWeight: 600,
+            }}>
+              GFV {compliance.gfv_level} ({compliance.gfv_count_12mo}/3 in 12mo)
+            </span>
+          )}
+          {compliance && compliance.cooling_down && (
+            <span style={{
+              padding: '4px 10px',
+              borderRadius: 'var(--radius-full)',
+              background: 'rgba(250, 204, 21, 0.15)',
+              border: '1px solid rgba(250, 204, 21, 0.4)',
+              color: '#facc15',
+              fontWeight: 600,
+            }}>
+              ⏲ Cooldown {compliance.cooldown_remaining_s}s (loss streak {compliance.loss_streak})
+            </span>
+          )}
+          {compliance && compliance.unsettled_cash > 0 && (
+            <span style={{
+              padding: '4px 10px',
+              borderRadius: 'var(--radius-full)',
+              background: 'rgba(59, 130, 246, 0.12)',
+              border: '1px solid rgba(59, 130, 246, 0.3)',
+              color: 'var(--accent-primary)',
+              fontFamily: 'var(--font-mono)',
+            }}>
+              Unsettled ${compliance.unsettled_cash.toFixed(2)} · T+1
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Stats Grid */}
       <div className="stats-grid">

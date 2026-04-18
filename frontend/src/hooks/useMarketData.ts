@@ -1,7 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { useAppStore } from '../stores/useAppStore';
 import api from '../services/api';
-import type { AccountInfo, Order, Position, WatchlistItem } from '../stores/types';
+import type {
+  AccountInfo,
+  Order,
+  Position,
+  WatchlistItem,
+} from '../stores/types';
 
 const WATCHLIST_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'TSLA', 'META', 'AMD'];
 
@@ -30,6 +35,19 @@ export function useMarketData() {
       }
     } catch {
       // ignore
+    }
+
+    // ── Regime + compliance (Market Status + GFV/cooldown) ────
+    try {
+      const status = await api.getRegimeStatus();
+      if (status?.regime) {
+        useAppStore.getState().setRegimeData(status.regime);
+      }
+      if (status?.compliance) {
+        useAppStore.getState().setCompliance(status.compliance);
+      }
+    } catch {
+      // ignore — regime is non-critical for UI
     }
 
     // ── Trade History (Orders) ────────────────
