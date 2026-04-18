@@ -41,6 +41,9 @@ class AnalysisAgent:
                     self.gemini_version = "legacy"
                     self.gemini_client = None  # Will be set on first successful call
                     self._initialized = True
+                    # Refresh candidate list from the live API so retired models
+                    # (e.g. gemini-1.5-*) don't produce 404s at call time.
+                    self._discover_gemini_models()
                     logger.info("✅ AI Agent initialized with Google Gemini (Legacy SDK)")
                 except ImportError:
                     try:
@@ -57,15 +60,70 @@ class AnalysisAgent:
         except Exception as e:
             logger.error(f"❌ Failed to initialize AI Agent: {e}")
 
-    # Models to try in order — newest verified first
+    # Models to try in order — newest generally-available first.
+    # NOTE: gemini-1.5-* was retired from v1beta in late 2025, so we prefer
+    # 2.5 / 2.0 families. The live list is also fetched dynamically via
+    # list_models() (see _discover_gemini_models) when the SDK supports it.
     GEMINI_MODEL_CANDIDATES = [
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-pro",
         "gemini-2.0-flash-001",
         "gemini-2.0-flash",
-        "gemini-1.5-flash-002",
-        "gemini-1.5-flash-001",
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
+        "gemini-2.0-flash-lite",
     ]
+
+    def _discover_gemini_models(self) -> None:
+        """Query the Gemini API for models that actually support generateContent
+        and prepend them to the candidate list. Fails silently on errors."""
+        try:
+            genai = getattr(self, "_gemini_genai", None)
+            if not genai or not hasattr(genai, "list_models"):
+                return
+            available: list[str] = []
+            for m in genai.list_models():
+                methods = getattr(m, "supported_generation_methods", None) or []
+                if "generateContent" not in methods:
+                    continue
+                raw = getattr(m, "name", "") or ""
+                short = raw.split("/")[-1] if "/" in raw else raw
+                if not short or "embedding" in short.lower():
+                    continue
+                available.append(short)
+
+            if not available:
+                return
+
+            def rank(name: str) -> tuple:
+                n = name.lower()
+                fam = 3
+                if "2.5" in n:
+                    fam = 0
+                elif "2.0" in n:
+                    fam = 1
+                elif "1.5" in n:
+                    fam = 2
+                tier = 2
+                if "flash" in n and "lite" not in n:
+                    tier = 0
+                elif "flash-lite" in n or "flash_lite" in n or "lite" in n:
+                    tier = 1
+                elif "pro" in n:
+                    tier = 2
+                return (fam, tier, name)
+
+            available.sort(key=rank)
+            merged: list[str] = []
+            for name in available + self.GEMINI_MODEL_CANDIDATES:
+                if name not in merged:
+                    merged.append(name)
+            self.GEMINI_MODEL_CANDIDATES = merged
+            logger.info(
+                "Gemini model candidates (live): %s",
+                ", ".join(self.GEMINI_MODEL_CANDIDATES[:6]),
+            )
+        except Exception as e:
+            logger.warning(f"Could not list Gemini models: {e}")
 
     @property
     def is_ready(self) -> bool:
@@ -187,26 +245,39 @@ class AnalysisAgent:
 
     def _call_legacy_sdk(self, prompt: str) -> str:
         """Call Gemini using the legacy google-generativeai SDK with auto model fallback."""
-        # If we already found a working model, use it
+        # If we already found a working model, try it once; on 404 fall back.
         if self.gemini_client:
-            response = self.gemini_client.generate_content(prompt)
-            return response.text
-        
-        # Otherwise try each model candidate
+            try:
+                response = self.gemini_client.generate_content(prompt)
+                return response.text
+            except Exception as e:
+                err = str(e)
+                if "404" in err or "NOT_FOUND" in err.upper() or "is not supported" in err:
+                    logger.warning(
+                        "Cached Gemini model returned 404; re-discovering models."
+                    )
+                    self.gemini_client = None
+                    self._discover_gemini_models()
+                else:
+                    raise
+
         last_error = None
         for model_name in self.GEMINI_MODEL_CANDIDATES:
             try:
                 model = self._gemini_genai.GenerativeModel(model_name)
                 response = model.generate_content(prompt)
-                # Success! Save this model for future calls
                 self.gemini_client = model
                 logger.info(f"✅ Found working Gemini model: {model_name}")
                 return response.text
             except Exception as e:
                 last_error = e
+                err = str(e)
+                if "404" in err or "NOT_FOUND" in err.upper() or "is not supported" in err:
+                    logger.warning(f"Model {model_name} not available, trying next...")
+                    continue
                 logger.warning(f"Model {model_name} failed: {e}")
                 continue
-        
+
         raise last_error or Exception("No working Gemini model found")
 
     def _call_new_sdk(self, prompt: str) -> str:
