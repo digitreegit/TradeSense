@@ -66,7 +66,10 @@ function formatUsageLine(u: AlpacaApiUsage | null): string | null {
   if (u.remaining != null) {
     return `API ${u.remaining} left (window)`;
   }
-  return null;
+  if (u.headers_available === false) {
+    return 'REST quota: headers N/A';
+  }
+  return 'REST quota: no limit headers';
 }
 
 const Sidebar: React.FC = () => {
@@ -129,12 +132,12 @@ const Sidebar: React.FC = () => {
           <span className="status-dot" />
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
             <span>{connected ? 'Connected to Alpaca' : 'Disconnected'}</span>
-            {usageLine && connected && (
+            {connected && usageLine && (
               <span
                 style={{
                   fontSize: '10px',
-                  lineHeight: 1.3,
-                  color: 'var(--text-tertiary)',
+                  lineHeight: 1.35,
+                  color: 'rgba(255,255,255,0.72)',
                   fontFamily: 'var(--font-mono, ui-monospace, monospace)',
                   wordBreak: 'break-word',
                 }}
@@ -145,17 +148,21 @@ const Sidebar: React.FC = () => {
                 }
               >
                 {usageLine}
-                {alpacaUsage?.reset_in_seconds != null && alpacaUsage.reset_in_seconds > 0
+                {alpacaUsage?.ok &&
+                  alpacaUsage.reset_in_seconds != null &&
+                  alpacaUsage.reset_in_seconds > 0 &&
+                  alpacaUsage.remaining != null &&
+                  alpacaUsage.limit != null
                   ? ` · reset ~${alpacaUsage.reset_in_seconds}s`
                   : ''}
               </span>
             )}
             {connected && alpacaUsage && !alpacaUsage.ok && (
               <span
-                style={{ fontSize: '10px', color: 'var(--text-tertiary)', opacity: 0.85 }}
+                style={{ fontSize: '10px', color: 'rgba(255,255,255,0.65)', opacity: 0.9 }}
                 title={alpacaUsage.error}
               >
-                API quota unavailable
+                API quota: error (hover)
               </span>
             )}
           </div>

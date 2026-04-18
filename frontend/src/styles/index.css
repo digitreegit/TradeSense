@@ -384,7 +384,7 @@ body {
 
 .sidebar-status {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-sm);
   padding: var(--space-md);
   border-radius: var(--radius-md);
@@ -392,6 +392,11 @@ body {
   font-size: 12px;
   color: var(--profit);
   font-weight: 500;
+}
+
+.sidebar-status .status-dot {
+  flex-shrink: 0;
+  margin-top: 4px;
 }
 
 .sidebar-status.disconnected {

@@ -125,6 +125,8 @@ export interface AlpacaApiUsage {
   reset_epoch?: number | null;
   reset_in_seconds?: number | null;
   percent_used?: number | null;
+  /** False when Alpaca responded OK but sent no rate-limit headers */
+  headers_available?: boolean;
 }
 
 export interface ComplianceStatus {

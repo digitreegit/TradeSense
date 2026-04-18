@@ -630,12 +630,41 @@ class AlpacaService:
             "APCA-API-SECRET-KEY": settings.alpaca_secret_key,
         }
 
+        def _parse_rl(h: httpx.Headers) -> Dict[str, Optional[int]]:
+            norm = {k.lower(): v for k, v in h.items()}
+            # Some proxies strip X-; try without prefix too
+            limit_raw = norm.get("x-ratelimit-limit") or norm.get("ratelimit-limit")
+            remain_raw = norm.get("x-ratelimit-remaining") or norm.get("ratelimit-remaining")
+            reset_raw = norm.get("x-ratelimit-reset") or norm.get("ratelimit-reset")
+
+            def _to_int(val: Optional[str]) -> Optional[int]:
+                if val is None or val == "":
+                    return None
+                try:
+                    return int(float(val))
+                except (TypeError, ValueError):
+                    return None
+
+            lim = _to_int(limit_raw)
+            rem = _to_int(remain_raw)
+            rst = _to_int(reset_raw)
+            if rst and rst > 10_000_000_000:
+                rst = rst // 1000
+            return {"limit": lim, "remaining": rem, "reset_epoch": rst}
+
         try:
             with httpx.Client(timeout=5.0) as client:
                 resp = client.head(url, headers=headers)
-                if resp.status_code == 405 or resp.status_code == 404:
+                if resp.status_code in (405, 404):
                     resp = client.get(url, headers=headers)
                 resp.raise_for_status()
+                parsed = _parse_rl(resp.headers)
+                # /v2/clock often omits rate-limit headers — fall back to /v2/account
+                if parsed["limit"] is None and parsed["remaining"] is None:
+                    acc_url = f"{base}/v2/account"
+                    r2 = client.get(acc_url, headers=headers)
+                    r2.raise_for_status()
+                    parsed = _parse_rl(r2.headers)
         except Exception as e:  # noqa: BLE001
             logger.warning("Alpaca usage probe failed: %s", e)
             return {
@@ -644,25 +673,9 @@ class AlpacaService:
                 "error": str(e),
             }
 
-        norm = {k.lower(): v for k, v in resp.headers.items()}
-        limit_raw = norm.get("x-ratelimit-limit")
-        remain_raw = norm.get("x-ratelimit-remaining")
-        reset_raw = norm.get("x-ratelimit-reset")
-
-        def _to_int(val: Optional[str]) -> Optional[int]:
-            if val is None or val == "":
-                return None
-            try:
-                return int(float(val))
-            except (TypeError, ValueError):
-                return None
-
-        limit = _to_int(limit_raw)
-        remaining = _to_int(remain_raw)
-        reset_epoch = _to_int(reset_raw)
-        # Alpaca may return seconds or ms
-        if reset_epoch and reset_epoch > 10_000_000_000:
-            reset_epoch = reset_epoch // 1000
+        limit = parsed["limit"]
+        remaining = parsed["remaining"]
+        reset_epoch = parsed["reset_epoch"]
 
         used = None
         if limit is not None and remaining is not None:
@@ -686,6 +699,7 @@ class AlpacaService:
             "reset_epoch": reset_epoch,
             "reset_in_seconds": reset_in_s,
             "percent_used": pct_used,
+            "headers_available": limit is not None or remaining is not None,
         }
 
 
