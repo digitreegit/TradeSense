@@ -66,10 +66,13 @@ function formatUsageLine(u: AlpacaApiUsage | null): string | null {
   if (u.remaining != null) {
     return `API ${u.remaining} left (window)`;
   }
-  if (u.headers_available === false) {
-    return 'REST quota: headers N/A';
+  if (u.note) {
+    return u.note.length > 52 ? `${u.note.slice(0, 49)}…` : u.note;
   }
-  return 'REST quota: no limit headers';
+  if (u.headers_available === false) {
+    return 'REST OK · rate-limit headers not shown';
+  }
+  return 'REST OK · no quota headers';
 }
 
 const Sidebar: React.FC = () => {
@@ -142,9 +145,17 @@ const Sidebar: React.FC = () => {
                   wordBreak: 'break-word',
                 }}
                 title={
-                  alpacaUsage?.reset_in_seconds != null
-                    ? `Quota window resets in ~${alpacaUsage.reset_in_seconds}s`
-                    : 'Alpaca REST rate limit (rolling window)'
+                  [
+                    alpacaUsage?.note,
+                    alpacaUsage?.http_probe_error
+                      ? `HTTP probe: ${alpacaUsage.http_probe_error}`
+                      : null,
+                    alpacaUsage?.reset_in_seconds != null
+                      ? `Resets in ~${alpacaUsage.reset_in_seconds}s`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join('\n') || 'Alpaca REST'
                 }
               >
                 {usageLine}

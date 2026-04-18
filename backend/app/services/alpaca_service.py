@@ -652,25 +652,61 @@ class AlpacaService:
                 rst = rst // 1000
             return {"limit": lim, "remaining": rem, "reset_epoch": rst}
 
+        parsed: Dict[str, Optional[int]] = {
+            "limit": None,
+            "remaining": None,
+            "reset_epoch": None,
+        }
+        http_error: Optional[str] = None
+
         try:
-            with httpx.Client(timeout=5.0) as client:
-                resp = client.head(url, headers=headers)
-                if resp.status_code in (405, 404):
-                    resp = client.get(url, headers=headers)
+            # GET only — some stacks mishandle HEAD; matches browser/curl behaviour.
+            with httpx.Client(timeout=8.0, follow_redirects=True) as client:
+                resp = client.get(url, headers=headers)
                 resp.raise_for_status()
                 parsed = _parse_rl(resp.headers)
-                # /v2/clock often omits rate-limit headers — fall back to /v2/account
                 if parsed["limit"] is None and parsed["remaining"] is None:
                     acc_url = f"{base}/v2/account"
                     r2 = client.get(acc_url, headers=headers)
                     r2.raise_for_status()
                     parsed = _parse_rl(r2.headers)
         except Exception as e:  # noqa: BLE001
-            logger.warning("Alpaca usage probe failed: %s", e)
+            http_error = str(e)
+            logger.warning("Alpaca usage HTTP probe failed: %s", e)
+
+        # SDK fallback: same auth stack as get_account(); no rate-limit headers.
+        if parsed["limit"] is None and parsed["remaining"] is None:
+            if self.trading_client and self._initialized:
+                try:
+                    self.trading_client.get_clock()
+                    return {
+                        "ok": True,
+                        "connected": True,
+                        "limit": None,
+                        "remaining": None,
+                        "used": None,
+                        "reset_epoch": None,
+                        "reset_in_seconds": None,
+                        "percent_used": None,
+                        "headers_available": False,
+                        "note": (
+                            "Trading API reachable (SDK get_clock). "
+                            "Rate-limit headers not returned on this path."
+                        ),
+                        "http_probe_error": http_error,
+                    }
+                except Exception as sdk_e:  # noqa: BLE001
+                    logger.warning("Alpaca get_clock fallback failed: %s", sdk_e)
+                    return {
+                        "ok": False,
+                        "connected": self._initialized,
+                        "error": f"HTTP: {http_error or 'unknown'}; SDK: {sdk_e}",
+                    }
+
             return {
                 "ok": False,
                 "connected": self._initialized,
-                "error": str(e),
+                "error": http_error or "Alpaca not initialized",
             }
 
         limit = parsed["limit"]

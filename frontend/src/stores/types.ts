@@ -119,6 +119,8 @@ export interface AlpacaApiUsage {
   ok: boolean;
   connected?: boolean;
   error?: string;
+  note?: string;
+  http_probe_error?: string;
   limit?: number | null;
   remaining?: number | null;
   used?: number | null;
