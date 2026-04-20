@@ -27,6 +27,8 @@ const Header: React.FC = () => {
     trading: 'Trading Bot',
     portfolio: 'Portfolio',
     history: 'Trade History',
+    auth: 'Sign in',
+    settings: 'Settings',
   };
 
   const currentTime = time.toLocaleTimeString('en-US', {

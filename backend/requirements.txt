@@ -6,6 +6,7 @@ python-dotenv==1.1.0
 httpx==0.28.1
 pydantic==2.11.2
 pydantic-settings==2.8.1
+email-validator==2.2.0
 pytz==2025.2
 
 # Alpaca Trading
@@ -29,3 +30,8 @@ apscheduler==3.11.0
 
 # WSGI adapter for Passenger
 a2wsgi==1.10.8
+
+# Auth (Sign up / Sign in + encrypted Alpaca keys)
+bcrypt==4.2.1
+PyJWT==2.10.1
+cryptography==44.0.0

@@ -1,9 +1,8 @@
 """TradeSense - Regime & compliance API routes."""
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.api.deps import get_current_engine
 from app.core.risk_presets import RISK_PRESETS
-from app.services.compliance_service import compliance_service
-from app.services.trading_engine import trading_engine
 
 router = APIRouter(prefix="/regime", tags=["regime"])
 
@@ -14,10 +13,11 @@ async def list_presets():
 
 
 @router.get("/status")
-async def regime_status():
+async def regime_status(engine=Depends(get_current_engine)):
     """Market Status + active risk preset + compliance summary."""
+    stats = engine.get_stats()
     return {
-        "regime": trading_engine.regime_data,
-        "active_preset": trading_engine._preset.as_dict(),  # noqa: SLF001
-        "compliance": compliance_service.status(),
+        "regime": engine.regime_data,
+        "active_preset": engine._preset.as_dict(),  # noqa: SLF001
+        "compliance": stats.get("compliance", {}),
     }

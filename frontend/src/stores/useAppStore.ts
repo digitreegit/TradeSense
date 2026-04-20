@@ -78,6 +78,11 @@ interface AppState {
   setManualPlaybooks: (ids: string[]) => void;
   activePlaybooks: string[];
   setActivePlaybooks: (ids: string[]) => void;
+
+  /** Signed-in user (null = guest / legacy env Alpaca) */
+  authEmail: string | null;
+  authAlpacaConfigured: boolean;
+  setAuthProfile: (email: string | null, alpacaConfigured: boolean) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -101,6 +106,11 @@ export const useAppStore = create<AppState>((set) => ({
   setManualPlaybooks: (ids) => set({ manualPlaybooks: ids }),
   activePlaybooks: [],
   setActivePlaybooks: (ids) => set({ activePlaybooks: ids }),
+
+  authEmail: null,
+  authAlpacaConfigured: false,
+  setAuthProfile: (email, alpacaConfigured) =>
+    set({ authEmail: email, authAlpacaConfigured: alpacaConfigured }),
 
   // Account - $3000 paper trading
   account: {

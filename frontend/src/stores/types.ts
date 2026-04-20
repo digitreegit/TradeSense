@@ -168,4 +168,12 @@ export interface BotStatusResponse {
   regime_reason?: string;
 }
 
-export type PageId = 'dashboard' | 'chart' | 'agent' | 'trading' | 'portfolio' | 'history';
+export type PageId =
+  | 'dashboard'
+  | 'chart'
+  | 'agent'
+  | 'trading'
+  | 'portfolio'
+  | 'history'
+  | 'auth'
+  | 'settings';

@@ -5,6 +5,7 @@ import type {
   PlaybookConfig,
   RegimeData,
 } from '../stores/types';
+import { getToken } from '../auth/token';
 
 /**
  * HTTP client for the FastAPI backend.
@@ -30,11 +31,17 @@ async function parseError(response: Response): Promise<string> {
   return `HTTP ${response.status}`;
 }
 
+function authHeaders(): Record<string, string> {
+  const t = getToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${API_PREFIX}${path.startsWith('/') ? path : `/${path}`}`;
   const response = await fetch(url, {
     headers: {
       'Content-Type': 'application/json',
+      ...authHeaders(),
       ...options?.headers,
     },
     ...options,
@@ -138,6 +145,32 @@ export const api = {
     request<unknown>('/trading/backtest', {
       method: 'POST',
       body: JSON.stringify({ strategy, params }),
+    }),
+
+  register: (email: string, password: string) =>
+    request<{ user_id: number; email: string; access_token: string }>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+
+  login: (email: string, password: string) =>
+    request<{ user_id: number; email: string; access_token: string }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+
+  getMe: () =>
+    request<{
+      authenticated: boolean;
+      user_id?: number;
+      email?: string;
+      alpaca_configured?: boolean;
+    }>('/auth/me'),
+
+  saveAlpacaKeys: (api_key: string, secret_key: string) =>
+    request<{ ok: boolean; message: string }>('/auth/alpaca-keys', {
+      method: 'POST',
+      body: JSON.stringify({ api_key, secret_key }),
     }),
 } as const;
 

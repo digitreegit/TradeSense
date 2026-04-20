@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     host: str = os.getenv("HOST", "0.0.0.0")
     port: int = int(os.getenv("PORT", "8000"))
 
+    # Auth / multi-user (optional; when unset, legacy single-user .env Alpaca still works)
+    jwt_secret: str = os.getenv("JWT_SECRET", "")
+    tradesense_secret_key: str = os.getenv("TRADESENSE_SECRET_KEY", "")
+
     class Config:
         env_file = _env_file_path or ".env"
         extra = "allow"
