@@ -18,11 +18,13 @@ const WATCHLIST_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'TSLA', 'MET
 export function useMarketData() {
   const { 
     setWatchlist, setAccount, setPositions, setOrders, 
-    setConnected, setMarketOpen, setBotActive 
+    setConnected, setMarketOpen, setBotActive,
+    authEmail,
   } = useAppStore();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchAll = async () => {
+    if (!authEmail) return;
     // ── Strategy playbooks (AUTO/MANUAL routing from engine) ──
     try {
       const res = await api.getStrategies();
@@ -185,13 +187,20 @@ export function useMarketData() {
   };
 
   useEffect(() => {
+    if (!authEmail) {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      return;
+    }
+
     fetchAll(); // immediate first fetch
 
-    // Refresh every 15 seconds
     intervalRef.current = setInterval(fetchAll, 15000);
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, []);
+  }, [authEmail]);
 }

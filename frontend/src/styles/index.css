@@ -1436,3 +1436,28 @@ body {
   color: var(--accent-primary);
   background: var(--accent-primary-dim);
 }
+
+/* User menu dropdown (header) */
+.user-menu-item {
+  display: block;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: none;
+  text-align: left;
+  font-size: 13px;
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.user-menu-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.user-menu-item-danger {
+  color: var(--loss);
+  border-top: 1px solid var(--border-secondary);
+  margin-top: 4px;
+  padding-top: 12px;
+}

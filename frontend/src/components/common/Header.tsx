@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import { isMarketOpen } from '../../utils/helpers';
+import UserMenu from './UserMenu';
 
 // Heroicons v2 Outline SVGs
 const DocumentCheckIcon = (props: React.ComponentProps<'svg'>) => (
@@ -29,6 +30,7 @@ const Header: React.FC = () => {
     history: 'Trade History',
     auth: 'Sign in',
     settings: 'Settings',
+    profile: 'Profile',
   };
 
   const currentTime = time.toLocaleTimeString('en-US', {
@@ -59,6 +61,7 @@ const Header: React.FC = () => {
         }}>
           {currentTime}
         </div>
+        <UserMenu />
       </div>
     </header>
   );

@@ -176,4 +176,5 @@ export type PageId =
   | 'portfolio'
   | 'history'
   | 'auth'
-  | 'settings';
+  | 'settings'
+  | 'profile';

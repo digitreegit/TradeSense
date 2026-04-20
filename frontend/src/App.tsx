@@ -9,24 +9,27 @@ import Portfolio from './components/Portfolio/Portfolio';
 import History from './components/Portfolio/History';
 import AuthPage from './components/Auth/AuthPage';
 import SettingsPage from './components/Settings/SettingsPage';
+import ProfilePage from './components/Profile/ProfilePage';
 import { useAppStore } from './stores/useAppStore';
 import { useMarketData } from './hooks/useMarketData';
 import api from './services/api';
-import { getToken } from './auth/token';
+import { clearToken, getToken } from './auth/token';
 
 const App: React.FC = () => {
-  const { currentPage, setCurrentPage, setAuthProfile } = useAppStore();
-  const [authReady, setAuthReady] = useState(false);
-  const [needsAlpaca, setNeedsAlpaca] = useState(false);
+  const { currentPage, setCurrentPage, setAuthProfile, authEmail } = useAppStore();
+  const [bootstrapped, setBootstrapped] = useState(false);
 
-  useMarketData(); // Poll Alpaca-backed data (~15s)
+  useMarketData(); // Poll only when authEmail is set
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const t = getToken();
       if (!t) {
-        setAuthReady(true);
+        if (!cancelled) {
+          setAuthProfile(null, false);
+          setBootstrapped(true);
+        }
         return;
       }
       try {
@@ -34,21 +37,23 @@ const App: React.FC = () => {
         if (cancelled) return;
         if (me.authenticated && me.email) {
           setAuthProfile(me.email, Boolean(me.alpaca_configured));
-          if (!me.alpaca_configured) {
-            setNeedsAlpaca(true);
-            setCurrentPage('auth');
-          }
+        } else {
+          clearToken();
+          setAuthProfile(null, false);
         }
       } catch {
-        if (!cancelled) setAuthProfile(null, false);
+        if (!cancelled) {
+          clearToken();
+          setAuthProfile(null, false);
+        }
       } finally {
-        if (!cancelled) setAuthReady(true);
+        if (!cancelled) setBootstrapped(true);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [setAuthProfile, setCurrentPage]);
+  }, [setAuthProfile]);
 
   const renderPage = () => {
     switch (currentPage) {
@@ -58,27 +63,22 @@ const App: React.FC = () => {
       case 'trading': return <TradingBot />;
       case 'portfolio': return <Portfolio />;
       case 'history': return <History />;
-      case 'auth':
-        return (
-          <AuthPage
-            onDone={() => {
-              setNeedsAlpaca(false);
-              setCurrentPage('dashboard');
-            }}
-            initialAlpacaStep={needsAlpaca}
-          />
-        );
       case 'settings': return <SettingsPage />;
+      case 'profile': return <ProfilePage />;
       default: return <Dashboard />;
     }
   };
 
-  if (!authReady) {
+  if (!bootstrapped) {
     return (
       <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)' }}>
         Loading…
       </div>
     );
+  }
+
+  if (!authEmail) {
+    return <AuthPage />;
   }
 
   return (
