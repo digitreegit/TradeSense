@@ -9,7 +9,7 @@ const UserIcon = (props: React.ComponentProps<'svg'>) => (
 );
 
 const UserMenu: React.FC = () => {
-  const { authEmail, setAuthProfile, setCurrentPage } = useAppStore();
+  const { authEmail, setAuthProfile, setCurrentPage, setAuthMethod } = useAppStore();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -24,6 +24,7 @@ const UserMenu: React.FC = () => {
   const logout = () => {
     clearToken();
     setAuthProfile(null, false);
+    setAuthMethod(null);
     setOpen(false);
   };
 

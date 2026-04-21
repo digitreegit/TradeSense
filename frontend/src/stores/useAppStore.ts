@@ -83,6 +83,8 @@ interface AppState {
   authEmail: string | null;
   authAlpacaConfigured: boolean;
   setAuthProfile: (email: string | null, alpacaConfigured: boolean) => void;
+  authMethod: 'google' | 'email' | null;
+  setAuthMethod: (method: 'google' | 'email' | null) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -111,6 +113,8 @@ export const useAppStore = create<AppState>((set) => ({
   authAlpacaConfigured: false,
   setAuthProfile: (email, alpacaConfigured) =>
     set({ authEmail: email, authAlpacaConfigured: alpacaConfigured }),
+  authMethod: null,
+  setAuthMethod: (method) => set({ authMethod: method }),
 
   // Account - $3000 paper trading
   account: {

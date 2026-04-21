@@ -13,10 +13,10 @@ import ProfilePage from './components/Profile/ProfilePage';
 import { useAppStore } from './stores/useAppStore';
 import { useMarketData } from './hooks/useMarketData';
 import api from './services/api';
-import { clearToken, getToken } from './auth/token';
+import { clearToken, getLastAuthMethod, getToken } from './auth/token';
 
 const App: React.FC = () => {
-  const { currentPage, setCurrentPage, setAuthProfile, authEmail } = useAppStore();
+  const { currentPage, setCurrentPage, setAuthProfile, setAuthMethod, authEmail } = useAppStore();
   const [bootstrapped, setBootstrapped] = useState(false);
 
   useMarketData(); // Poll only when authEmail is set
@@ -37,14 +37,17 @@ const App: React.FC = () => {
         if (cancelled) return;
         if (me.authenticated && me.email) {
           setAuthProfile(me.email, Boolean(me.alpaca_configured));
+          setAuthMethod(getLastAuthMethod());
         } else {
           clearToken();
           setAuthProfile(null, false);
+          setAuthMethod(null);
         }
       } catch {
         if (!cancelled) {
           clearToken();
           setAuthProfile(null, false);
+          setAuthMethod(null);
         }
       } finally {
         if (!cancelled) setBootstrapped(true);
@@ -53,7 +56,7 @@ const App: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [setAuthProfile]);
+  }, [setAuthProfile, setAuthMethod]);
 
   const renderPage = () => {
     switch (currentPage) {

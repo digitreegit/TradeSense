@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import api from '../../services/api';
 import { useAppStore } from '../../stores/useAppStore';
+import { clearToken } from '../../auth/token';
 
 const SettingsPage: React.FC = () => {
-  const { authEmail, authAlpacaConfigured, setAuthProfile } = useAppStore();
+  const { authEmail, authAlpacaConfigured, setAuthProfile, setCurrentPage } = useAppStore();
   const [key, setKey] = useState('');
   const [secret, setSecret] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
@@ -30,6 +31,12 @@ const SettingsPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const signOut = () => {
+    clearToken();
+    setAuthProfile(null, false);
+    setCurrentPage('auth');
   };
 
   return (
@@ -90,6 +97,14 @@ const SettingsPage: React.FC = () => {
             {loading ? 'Saving…' : 'Save keys'}
           </button>
         </form>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={signOut}
+          style={{ marginTop: '14px', width: '100%' }}
+        >
+          Sign Out
+        </button>
       </div>
     </div>
   );

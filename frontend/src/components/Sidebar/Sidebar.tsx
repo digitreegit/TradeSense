@@ -84,7 +84,23 @@ function formatUsageLine(u: AlpacaApiUsage | null): string | null {
 }
 
 const Sidebar: React.FC = () => {
-  const { currentPage, setCurrentPage, connected, botActive, alpacaUsage } = useAppStore();
+  const {
+    currentPage,
+    setCurrentPage,
+    connected,
+    botActive,
+    alpacaUsage,
+    authEmail,
+    authAlpacaConfigured,
+  } = useAppStore();
+  const showConnected = Boolean(authEmail && authAlpacaConfigured && connected);
+  const statusLabel = !authEmail
+    ? 'Sign in required'
+    : !authAlpacaConfigured
+      ? 'Alpaca keys required'
+      : showConnected
+        ? 'Connected to Alpaca'
+        : 'Disconnected';
   const usageLine = formatUsageLine(alpacaUsage);
 
   let currentSection = '';
@@ -139,11 +155,11 @@ const Sidebar: React.FC = () => {
       </nav>
 
       <div className="sidebar-footer">
-        <div className={`sidebar-status ${connected ? '' : 'disconnected'}`}>
+        <div className={`sidebar-status ${showConnected ? '' : 'disconnected'}`}>
           <span className="status-dot" />
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
-            <span>{connected ? 'Connected to Alpaca' : 'Disconnected'}</span>
-            {connected && usageLine && (
+            <span>{statusLabel}</span>
+            {showConnected && usageLine && (
               <span
                 style={{
                   fontSize: '10px',
@@ -176,7 +192,7 @@ const Sidebar: React.FC = () => {
                   : ''}
               </span>
             )}
-            {connected && alpacaUsage && !alpacaUsage.ok && (
+            {showConnected && alpacaUsage && !alpacaUsage.ok && (
               <span
                 style={{ fontSize: '10px', color: 'rgba(255,255,255,0.65)', opacity: 0.9 }}
                 title={alpacaUsage.error}
