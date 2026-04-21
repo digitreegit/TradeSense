@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str = os.getenv("SUPABASE_JWT_SECRET", "")
     tradesense_secret_key: str = os.getenv("TRADESENSE_SECRET_KEY", "")
 
+    # Notifications (Resend)
+    resend_api_key: str = os.getenv("RESEND_API_KEY", "")
+    resend_from_email: str = os.getenv("RESEND_FROM_EMAIL", "")
+    receiver_email: str = os.getenv("RECEIVER_EMAIL", "")
+
     class Config:
         env_file = _env_file_path or ".env"
         extra = "allow"

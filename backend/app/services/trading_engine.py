@@ -87,11 +87,17 @@ class TradingEngine:
     ]
     PLAYBOOK_IDS: list = [p["id"] for p in PLAYBOOKS]
 
-    def __init__(self, alpaca: AlpacaService, compliance: ComplianceService):
+    def __init__(
+        self,
+        alpaca: AlpacaService,
+        compliance: ComplianceService,
+        owner_email: Optional[str] = None,
+    ):
         self._alpaca = alpaca
         self._compliance = compliance
         self._executor = Executor(alpaca)
         self._regime = RegimeService(alpaca)
+        self.owner_email = (owner_email or "").strip().lower() or None
 
         self.active           = False
         self.active_strategy: Optional[str] = None
