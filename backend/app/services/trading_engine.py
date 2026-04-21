@@ -797,6 +797,10 @@ class TradingEngine:
             return
 
         entry_threshold = preset.entry_score_threshold
+        # Opening momentum window (9:35–10:05 ET):
+        # allow slightly easier entries to increase scalp frequency.
+        if time(9, 35) <= now_et.time() < time(10, 5):
+            entry_threshold = max(20, entry_threshold - 8)
         if self._daily_target_reached:
             entry_threshold = max(entry_threshold, 70)
 
@@ -853,9 +857,16 @@ class TradingEngine:
                 continue
 
             max_value = equity * (preset.max_position_percent / 100)
+            # Dynamic minimum notional by symbol "speed" bucket.
+            # Faster / high-beta names get slightly larger minimum size so entries
+            # are meaningful, while still bounded by settled-cash-only sizing.
+            fast_names = {"TSLA", "NVDA", "AMD", "META", "QQQ"}
+            min_notional = 300.0 if symbol in fast_names else 180.0
             # Cash-safe aggressive mode:
             # always size only from settled cash to avoid unsettled-fund reuse/GFV risk.
             buy_power = min(max_value, settled * 0.60)
+            if buy_power < min_notional:
+                continue
             qty = int(buy_power / price)
             if qty <= 0:
                 continue
