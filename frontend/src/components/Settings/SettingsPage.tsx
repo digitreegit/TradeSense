@@ -18,6 +18,7 @@ const SettingsPage: React.FC = () => {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   const keysLocked = authAlpacaConfigured;
 
@@ -48,10 +49,6 @@ const SettingsPage: React.FC = () => {
   };
 
   const deleteKeys = async () => {
-    const confirmed = window.confirm(
-      'Delete the currently saved Alpaca keys? You will need to enter a new key pair to trade again.',
-    );
-    if (!confirmed) return;
     setErr(null);
     setMsg(null);
     setDeleting(true);
@@ -110,7 +107,7 @@ const SettingsPage: React.FC = () => {
             <button
               type="button"
               className="btn btn-danger btn-sm"
-              onClick={deleteKeys}
+              onClick={() => setConfirmDeleteOpen(true)}
               disabled={deleting || loading}
             >
               {deleting ? 'Deleting…' : 'Delete Keys'}
@@ -173,6 +170,60 @@ const SettingsPage: React.FC = () => {
           Sign Out
         </button>
       </div>
+
+      {confirmDeleteOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.65)',
+            backdropFilter: 'blur(3px)',
+            WebkitBackdropFilter: 'blur(3px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1200,
+            padding: '16px',
+          }}
+        >
+          <div
+            className="card"
+            style={{
+              width: '100%',
+              maxWidth: '460px',
+              padding: '20px',
+              borderColor: 'var(--border-accent)',
+            }}
+          >
+            <h3 style={{ fontSize: '18px', marginBottom: '8px' }}>Delete stored Alpaca keys?</h3>
+            <p style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              This will remove your currently saved key pair. Trading will stay disabled until you add
+              a new key pair.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '18px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setConfirmDeleteOpen(false)}
+                disabled={deleting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={async () => {
+                  await deleteKeys();
+                  setConfirmDeleteOpen(false);
+                }}
+                disabled={deleting}
+              >
+                {deleting ? 'Deleting…' : 'Delete Keys'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
