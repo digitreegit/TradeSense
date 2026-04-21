@@ -117,50 +117,53 @@ const SettingsPage: React.FC = () => {
             </button>
           )}
         </p>
-        <form onSubmit={saveKeys}>
-          {err && <p style={{ color: 'var(--loss)', fontSize: '13px', marginBottom: '8px' }}>{err}</p>}
-          {msg && <p style={{ color: 'var(--profit)', fontSize: '13px', marginBottom: '8px' }}>{msg}</p>}
-          <label style={{ fontSize: '12px' }}>Alpaca API Key ID</label>
-          <input
-            type="password"
-            autoComplete="off"
-            value={key}
-            onChange={(e) => setKey(e.target.value)}
-            placeholder="PK…"
-            disabled={keysLocked || loading || deleting}
-            style={{
-              display: 'block',
-              width: '100%',
-              margin: '6px 0 12px',
-              padding: '10px',
-              borderRadius: '8px',
-              border: '1px solid var(--border-secondary)',
-              background: 'var(--bg-secondary)',
-              color: 'inherit',
-            }}
-          />
-          <label style={{ fontSize: '12px' }}>Alpaca Secret Key</label>
-          <input
-            type="password"
-            autoComplete="off"
-            value={secret}
-            onChange={(e) => setSecret(e.target.value)}
-            disabled={keysLocked || loading || deleting}
-            style={{
-              display: 'block',
-              width: '100%',
-              margin: '6px 0 16px',
-              padding: '10px',
-              borderRadius: '8px',
-              border: '1px solid var(--border-secondary)',
-              background: 'var(--bg-secondary)',
-              color: 'inherit',
-            }}
-          />
-          <button type="submit" className="btn-start" disabled={loading || deleting || keysLocked}>
-            {loading ? 'Saving…' : 'Save keys'}
-          </button>
-        </form>
+        {err && <p style={{ color: 'var(--loss)', fontSize: '13px', marginBottom: '8px' }}>{err}</p>}
+        {msg && <p style={{ color: 'var(--profit)', fontSize: '13px', marginBottom: '8px' }}>{msg}</p>}
+
+        {!keysLocked && (
+          <form onSubmit={saveKeys}>
+            <label style={{ fontSize: '12px' }}>Alpaca API Key ID</label>
+            <input
+              type="password"
+              autoComplete="off"
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              placeholder="PK…"
+              disabled={loading || deleting}
+              style={{
+                display: 'block',
+                width: '100%',
+                margin: '6px 0 12px',
+                padding: '10px',
+                borderRadius: '8px',
+                border: '1px solid var(--border-secondary)',
+                background: 'var(--bg-secondary)',
+                color: 'inherit',
+              }}
+            />
+            <label style={{ fontSize: '12px' }}>Alpaca Secret Key</label>
+            <input
+              type="password"
+              autoComplete="off"
+              value={secret}
+              onChange={(e) => setSecret(e.target.value)}
+              disabled={loading || deleting}
+              style={{
+                display: 'block',
+                width: '100%',
+                margin: '6px 0 16px',
+                padding: '10px',
+                borderRadius: '8px',
+                border: '1px solid var(--border-secondary)',
+                background: 'var(--bg-secondary)',
+                color: 'inherit',
+              }}
+            />
+            <button type="submit" className="btn-start" disabled={loading || deleting}>
+              {loading ? 'Saving…' : 'Save keys'}
+            </button>
+          </form>
+        )}
         <button
           type="button"
           className="btn btn-danger"
