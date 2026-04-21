@@ -1,9 +1,7 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import {
-  getLastAuthMethod,
   setLastAuthMethod,
-  type AuthMethod,
 } from '../../auth/token';
 import { supabase } from '../../auth/supabase';
 
@@ -21,7 +19,6 @@ const AuthPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [lastUsed, setLastUsed] = useState<AuthMethod | null>(getLastAuthMethod());
 
   const handleGoogle = async () => {
     setError(null);
@@ -34,7 +31,6 @@ const AuthPage: React.FC = () => {
         options: { redirectTo },
       });
       if (oauthErr) throw oauthErr;
-      setLastUsed('google');
       setLastAuthMethod('google');
       setAuthMethod('google');
       setInfo('Redirecting to Google…');
@@ -62,7 +58,6 @@ const AuthPage: React.FC = () => {
         >
           <GoogleIcon />
           {loading ? 'Redirecting…' : 'Continue with Google'}
-          {lastUsed === 'google' && <span className="auth-last-used">LAST USED</span>}
         </button>
       </div>
     </div>
