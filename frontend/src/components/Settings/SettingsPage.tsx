@@ -2,9 +2,16 @@ import React, { useState } from 'react';
 import api from '../../services/api';
 import { useAppStore } from '../../stores/useAppStore';
 import { clearToken } from '../../auth/token';
+import { supabase } from '../../auth/supabase';
 
 const SettingsPage: React.FC = () => {
-  const { authEmail, authAlpacaConfigured, setAuthProfile, setCurrentPage } = useAppStore();
+  const {
+    authEmail,
+    authAlpacaConfigured,
+    setAuthProfile,
+    setCurrentPage,
+    setAuthMethod,
+  } = useAppStore();
   const [key, setKey] = useState('');
   const [secret, setSecret] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
@@ -34,8 +41,10 @@ const SettingsPage: React.FC = () => {
   };
 
   const signOut = () => {
+    void supabase.auth.signOut();
     clearToken();
     setAuthProfile(null, false);
+    setAuthMethod(null);
     setCurrentPage('auth');
   };
 

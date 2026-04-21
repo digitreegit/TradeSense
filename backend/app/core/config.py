@@ -60,8 +60,10 @@ class Settings(BaseSettings):
     host: str = os.getenv("HOST", "0.0.0.0")
     port: int = int(os.getenv("PORT", "8000"))
 
-    # Auth / multi-user (optional; when unset, legacy single-user .env Alpaca still works)
-    jwt_secret: str = os.getenv("JWT_SECRET", "")
+    # Auth / multi-user (Supabase OAuth + encrypted Alpaca keys)
+    supabase_url: str = os.getenv("SUPABASE_URL", "")
+    supabase_anon_key: str = os.getenv("SUPABASE_ANON_KEY", "")
+    supabase_jwt_secret: str = os.getenv("SUPABASE_JWT_SECRET", "")
     tradesense_secret_key: str = os.getenv("TRADESENSE_SECRET_KEY", "")
 
     class Config:

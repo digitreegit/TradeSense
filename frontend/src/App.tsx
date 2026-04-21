@@ -13,7 +13,8 @@ import ProfilePage from './components/Profile/ProfilePage';
 import { useAppStore } from './stores/useAppStore';
 import { useMarketData } from './hooks/useMarketData';
 import api from './services/api';
-import { clearToken, getLastAuthMethod, getToken } from './auth/token';
+import { getLastAuthMethod } from './auth/token';
+import { supabase } from './auth/supabase';
 
 const App: React.FC = () => {
   const { currentPage, setCurrentPage, setAuthProfile, setAuthMethod, authEmail } = useAppStore();
@@ -23,15 +24,8 @@ const App: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      const t = getToken();
-      if (!t) {
-        if (!cancelled) {
-          setAuthProfile(null, false);
-          setBootstrapped(true);
-        }
-        return;
-      }
+
+    const syncProfile = async () => {
       try {
         const me = await api.getMe();
         if (cancelled) return;
@@ -39,22 +33,30 @@ const App: React.FC = () => {
           setAuthProfile(me.email, Boolean(me.alpaca_configured));
           setAuthMethod(getLastAuthMethod());
         } else {
-          clearToken();
           setAuthProfile(null, false);
           setAuthMethod(null);
         }
       } catch {
         if (!cancelled) {
-          clearToken();
           setAuthProfile(null, false);
           setAuthMethod(null);
         }
       } finally {
         if (!cancelled) setBootstrapped(true);
       }
-    })();
+    };
+
+    supabase.auth.getSession().then(() => {
+      if (!cancelled) void syncProfile();
+    });
+
+    const { data } = supabase.auth.onAuthStateChange(() => {
+      if (!cancelled) void syncProfile();
+    });
+
     return () => {
       cancelled = true;
+      data.subscription.unsubscribe();
     };
   }, [setAuthProfile, setAuthMethod]);
 

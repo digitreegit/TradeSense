@@ -1,51 +1,22 @@
-"""Sign up / Sign in + Alpaca key storage (encrypted)."""
+"""Supabase-backed auth + Alpaca key storage (encrypted)."""
 from __future__ import annotations
 
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
 from app.api.deps import get_current_user_id, get_current_user_id_optional
 from app.db import users_db
-from app.services.auth_service import login_user, register_user
 from app.services.crypto_keys import encrypt_text
 from app.services.user_runtime import refresh_user_alpaca
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-class RegisterBody(BaseModel):
-    email: EmailStr
-    password: str = Field(..., min_length=8)
-
-
-class LoginBody(BaseModel):
-    email: EmailStr
-    password: str
-
-
 class AlpacaKeysBody(BaseModel):
     api_key: str = Field(..., min_length=10)
     secret_key: str = Field(..., min_length=10)
-
-
-@router.post("/register")
-async def register(body: RegisterBody):
-    users_db.init_db()
-    try:
-        return register_user(body.email, body.password)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-
-@router.post("/login")
-async def login(body: LoginBody):
-    users_db.init_db()
-    try:
-        return login_user(body.email, body.password)
-    except ValueError as e:
-        raise HTTPException(status_code=401, detail=str(e)) from e
 
 
 @router.get("/me")
