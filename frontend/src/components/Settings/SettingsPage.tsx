@@ -48,6 +48,10 @@ const SettingsPage: React.FC = () => {
   };
 
   const deleteKeys = async () => {
+    const confirmed = window.confirm(
+      'Delete the currently saved Alpaca keys? You will need to enter a new key pair to trade again.',
+    );
+    if (!confirmed) return;
     setErr(null);
     setMsg(null);
     setDeleting(true);
