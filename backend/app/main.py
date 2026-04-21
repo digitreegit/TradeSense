@@ -7,7 +7,7 @@ import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -15,8 +15,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from app.core.config import settings
 from app.services.alpaca_service import alpaca_service
 from app.services.analysis_agent import analysis_agent
-from app.services.trading_engine import trading_engine
-from app.api.routes import agent, alpaca, market, portfolio, regime, trading
+from app.api.deps import get_current_engine
+from app.services.user_runtime import default_engine, engines_to_run, warm_registered_users
+from app.api.routes import agent, alpaca, auth, market, portfolio, regime, trading
 
 # Configure logging
 logging.basicConfig(
@@ -36,7 +37,8 @@ async def trading_loop():
     while True:
         try:
             # Even when the bot is IDLE, run_cycle checks auto-start conditions each interval.
-            await trading_engine.run_cycle()
+            for eng in engines_to_run():
+                await eng.run_cycle()
         except Exception as e:
             logger.error(f"Error in trading loop: {e}")
         
@@ -57,6 +59,7 @@ async def lifespan(app: FastAPI):
     # Initialize services
     alpaca_service.initialize()
     analysis_agent.initialize()
+    warm_registered_users()
 
     # Start background trading loop
     global trading_task
@@ -68,13 +71,20 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("⚠️ Running in demo mode (Alpaca not connected)")
 
+    try:
+        from app.db import users_db
+        users_db.init_db()
+        logger.info("✅ User database ready (Sign up / Sign in)")
+    except Exception as e:
+        logger.warning("User DB init: %s", e)
+
     yield
 
     # Shutdown
     logger.info("👋 TradeSense Backend shutting down...")
     if trading_task:
         trading_task.cancel()
-    trading_engine.stop()
+    default_engine.stop()
 
 
 # Create FastAPI app
@@ -100,6 +110,7 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(auth.router, prefix="/api")
 app.include_router(trading.router, prefix="/api")
 app.include_router(market.router, prefix="/api")
 app.include_router(agent.router, prefix="/api")
@@ -119,9 +130,9 @@ async def root():
 
 
 @app.get("/api/account")
-async def get_account():
-    """Get account information."""
-    return alpaca_service.get_account()
+async def get_account(engine=Depends(get_current_engine)):
+    """Get account information (per-user Alpaca when JWT present)."""
+    return engine._alpaca.get_account()
 
 
 @app.get("/api/health")
@@ -134,20 +145,20 @@ async def health():
         "alpaca_key_len": len(settings.alpaca_api_key),
         "ai_ready": analysis_agent._initialized,
         "ai_provider": settings.ai_provider,
-        "bot_active": trading_engine.is_active,
+        "bot_active": default_engine.is_active,
         "mode": settings.trading_mode,
     }
 
 
 @app.get("/api/health/alpaca-usage")
-async def health_alpaca_usage():
+async def health_alpaca_usage(engine=Depends(get_current_engine)):
     """
     Alpaca REST rate-limit snapshot (same payload as /api/alpaca/usage).
 
     Registered on the root app next to /api/health so production SPA catch-all
     routes cannot accidentally return index.html for this path.
     """
-    return alpaca_service.get_api_usage()
+    return engine._alpaca.get_api_usage()
 
 
 # --- Serve frontend static files in production ---

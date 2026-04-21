@@ -3,7 +3,7 @@ TradeSense - Trading Engine v4
 Cash-account micro-scalping with compliance, event, and regime guards.
 
 Delegates:
-- Compliance (GFV / free-riding / wash-sale / cooldowns) → compliance_service
+- Compliance (GFV / free-riding / wash-sale / cooldowns) → self._compliance
 - Macro regime score + universe tilt                    → regime_service
 - Macro event / opening-auction blackout                → event_calendar
 - Risk preset tables driven by regime score             → core.risk_presets
@@ -26,8 +26,8 @@ from app.core.risk_presets import (
     market_level_for_score,
     preset_for_score,
 )
-from app.services.alpaca_service import alpaca_service
-from app.services.compliance_service import compliance_service
+from app.services.alpaca_service import AlpacaService
+from app.services.compliance_service import ComplianceService
 from app.services.event_calendar import is_blackout, symbol_is_earnings_today
 from app.services.execution_service import Executor, spread_info
 from app.services.playbooks import combine as combine_playbooks
@@ -36,8 +36,6 @@ from app.services.regime_service import RegimeService
 logger = logging.getLogger(__name__)
 
 ET = pytz.timezone("America/New_York")
-_executor = Executor(alpaca_service)
-_regime = RegimeService(alpaca_service)
 
 
 def is_market_open() -> bool:
@@ -59,7 +57,42 @@ class TradingEngine:
         "SPY", "QQQ", "INTC", "NFLX", "AVGO", "CRM", "UBER",
     ]
 
-    def __init__(self):
+    # ─── Playbook metadata (shared with /trading/strategies route) ───
+    PLAYBOOKS: list = [
+        {
+            "id": "scalp",
+            "name": "Micro-Scalping v4",
+            "description": "RSI/MACD/BB + volume surge on 5-min bars",
+        },
+        {
+            "id": "vwap",
+            "name": "VWAP Mean-Reversion",
+            "description": "Fade deviations below VWAP during RTH",
+        },
+        {
+            "id": "orb",
+            "name": "Opening Range Breakout",
+            "description": "Buy break above 9:30–9:35 range, valid until 11:00 ET",
+        },
+        {
+            "id": "eod",
+            "name": "End-of-Day Drift",
+            "description": "Favor up-trending names into 15:50–15:58 close",
+        },
+        {
+            "id": "news-fade",
+            "name": "News Spike Fade",
+            "description": "Fade exhaustion after AI-detected panic",
+        },
+    ]
+    PLAYBOOK_IDS: list = [p["id"] for p in PLAYBOOKS]
+
+    def __init__(self, alpaca: AlpacaService, compliance: ComplianceService):
+        self._alpaca = alpaca
+        self._compliance = compliance
+        self._executor = Executor(alpaca)
+        self._regime = RegimeService(alpaca)
+
         self.active           = False
         self.active_strategy: Optional[str] = None
         self.last_regime_reason: str = ""
@@ -116,6 +149,15 @@ class TradingEngine:
         self._scan_count = 0
         self._v3_cleanup_done = False  # Flag: have we cleaned up legacy positions?
 
+        # ─── Playbook routing ────────────────────────────────
+        # auto_playbooks=True → engine decides which playbooks participate
+        # based on time-of-day / regime; user edits the MANUAL list instead,
+        # which is only consulted when auto is OFF.
+        self.auto_playbooks: bool = True
+        self.manual_playbooks: list = ["scalp", "vwap", "orb", "eod"]
+        self._last_active_playbooks: list = list(self.manual_playbooks)
+        self._sync_regime_playbook_display()
+
     # ─── Control ──────────────────────────────────────────────
 
     def start(
@@ -128,8 +170,8 @@ class TradingEngine:
     ):
         self.active          = True
         self.active_strategy = strategy
-        self.regime_data["strategy"] = strategy
         self.regime_data["timestamp"] = datetime.now().strftime("%b %d, %Y, %-I:%M%p")
+        self._sync_regime_playbook_display()
 
         if risk_level:
             from app.core.risk_presets import preset_for_level
@@ -176,6 +218,111 @@ class TradingEngine:
     def is_active(self) -> bool:
         return self.active
 
+    # ─── Playbook configuration ───────────────────────────────
+
+    def get_playbook_config(self) -> dict:
+        """Return current playbook routing state (for the API / UI)."""
+        active = self._choose_active_playbooks(datetime.now(ET))
+        return {
+            "auto": self.auto_playbooks,
+            "manual": list(self.manual_playbooks),
+            "active": active,
+            "playbooks": [
+                {
+                    **p,
+                    "manual_enabled": p["id"] in self.manual_playbooks,
+                    "active_now": p["id"] in active,
+                }
+                for p in self.PLAYBOOKS
+            ],
+        }
+
+    def set_playbook_config(
+        self,
+        auto: Optional[bool] = None,
+        manual: Optional[list] = None,
+    ) -> dict:
+        """Update AUTO flag and/or the manual enabled set. Unknown ids are ignored."""
+        if auto is not None:
+            self.auto_playbooks = bool(auto)
+        if manual is not None:
+            cleaned = [pid for pid in manual if pid in self.PLAYBOOK_IDS]
+            self.manual_playbooks = cleaned
+        if not self.auto_playbooks and not self.manual_playbooks:
+            self.manual_playbooks = ["scalp"]
+            self._log(
+                "info",
+                "Manual playbook list was empty — defaulted to ['scalp'] to keep the bot functional.",
+            )
+        self._log(
+            "info",
+            f"Playbooks updated — AUTO={self.auto_playbooks} | "
+            f"manual={','.join(self.manual_playbooks) or '∅'}",
+        )
+        self._sync_regime_playbook_display()
+        return self.get_playbook_config()
+
+    def _choose_active_playbooks(self, now_et: datetime) -> list:
+        """AUTO → time-of-day + regime driven routing.
+        MANUAL → respect whatever the user ticked."""
+        if not self.auto_playbooks:
+            return list(self.manual_playbooks)
+
+        t = now_et.time()
+        score = float(self.regime_data.get("market_score", 50.0) or 50.0)
+        news = float(self.regime_data.get("news_score", 0.0) or 0.0)
+
+        active: list = []
+
+        # Opening auction window (9:30 – 9:35) already blacked out upstream,
+        # but as soon as the range prints we enable ORB until late morning.
+        if time(9, 35) <= t < time(11, 0):
+            active.append("orb")
+
+        # VWAP mean-reversion is most useful after the first impulse.
+        if time(10, 0) <= t < time(15, 30):
+            active.append("vwap")
+
+        # Core scalp across RTH except the very last minutes where spreads widen.
+        if time(9, 35) <= t < time(15, 45):
+            active.append("scalp")
+
+        # EOD drift into the close window.
+        if time(15, 30) <= t < time(15, 58):
+            active.append("eod")
+
+        # News-fade is only trusted when a strong panic signal is in regime.
+        if news <= -0.6:
+            active.append("news-fade")
+
+        # In clearly risk-off regimes, fall back to news-fade only.
+        if score < 25:
+            active = [p for p in active if p in ("news-fade",)] or ["news-fade"]
+
+        # If nothing matched (e.g. pre-market / after-hours), keep at least the scalp.
+        if not active:
+            active = ["scalp"]
+
+        # De-dup while preserving order.
+        seen = set()
+        uniq = []
+        for p in active:
+            if p not in seen:
+                uniq.append(p)
+                seen.add(p)
+        return uniq
+
+    def _sync_regime_playbook_display(self, now_et: Optional[datetime] = None) -> None:
+        """Keep regime_data in sync for the dashboard even when the bot is idle
+        or the market is closed (not only inside _run_scalp)."""
+        when = now_et or datetime.now(ET)
+        active = self._choose_active_playbooks(when)
+        self._last_active_playbooks = list(active)
+        self.regime_data["active_playbooks"] = active
+        self.regime_data["playbook_mode"] = "auto" if self.auto_playbooks else "manual"
+        # Human-readable combo for any legacy UI still reading `strategy`
+        self.regime_data["strategy"] = " + ".join(p.upper() for p in active)
+
     # ─── Main Loop ────────────────────────────────────────────
 
     async def run_cycle(self):
@@ -187,7 +334,7 @@ class TradingEngine:
 
         if self._trading_date != today:
             self._reset_daily(today)
-            compliance_service.sweep_settlements()
+            self._compliance.sweep_settlements()
 
         # Auto start/stop
         if not is_weekend:
@@ -218,6 +365,9 @@ class TradingEngine:
                     "SUCCESS" if self._daily_pnl >= 0 else "CRITICAL",
                 )
 
+        # Dashboard playbook line updates every scan, even when bot is off / market closed.
+        self._sync_regime_playbook_display(now_et)
+
         if not self.active:
             return
 
@@ -245,7 +395,7 @@ class TradingEngine:
             await self._cleanup_legacy_positions()
             
             # Wait until all cleanup orders are fulfilled before proceeding to main scalp
-            pending = alpaca_service.get_orders(status="open")
+            pending = self._alpaca.get_orders(status="open")
             if not pending:
                 self._v3_cleanup_done = True
                 self._log("info", "✅ Legacy cleanup confirmed — ready for $3,000 scalping!")
@@ -256,9 +406,9 @@ class TradingEngine:
 
         # ─── Execute Strategy ─────────────────────────────────
         try:
-            account   = alpaca_service.get_account()
-            positions = alpaca_service.get_positions()
-            pending   = alpaca_service.get_orders(status="open")
+            account   = self._alpaca.get_account()
+            positions = self._alpaca.get_positions()
+            pending   = self._alpaca.get_orders(status="open")
             
             equity    = account["equity"]
             cash      = account["cash"]
@@ -315,11 +465,11 @@ class TradingEngine:
                 or (f"VIX {vix_level:.1f} ≥ {preset.vix_halt_level}" if halt_vix else "")
             )
 
-            if compliance_service.is_cooling_down():
+            if self._compliance.is_cooling_down():
                 if self._scan_count % 5 == 1:
                     self._log(
                         "info",
-                        f"⏸ Loss-streak cooldown {compliance_service.cooldown_remaining_s()}s remaining",
+                        f"⏸ Loss-streak cooldown {self._compliance.cooldown_remaining_s()}s remaining",
                     )
 
             await self._run_scalp(account, positions, pending)
@@ -333,7 +483,7 @@ class TradingEngine:
     async def _cleanup_legacy_positions(self):
         """Sell ALL existing positions from old strategy. V3 starts with a clean slate."""
         try:
-            positions = alpaca_service.get_positions()
+            positions = self._alpaca.get_positions()
             if not positions:
                 self._log("info", "✅ No legacy positions — clean start!")
                 return
@@ -349,12 +499,12 @@ class TradingEngine:
                 
                 if raw_qty > 0:
                     self._log("info", f"  Selling {raw_qty}x {symbol} (legacy cleanup)")
-                    res = alpaca_service.submit_market_order(symbol, raw_qty, "sell")
+                    res = self._alpaca.submit_market_order(symbol, raw_qty, "sell")
                 else:
                     # Negative qty (short): cover with a buy
                     cover_qty = abs(raw_qty)
                     self._log("info", f"  Covering {cover_qty}x {symbol} short position (legacy cleanup)")
-                    res = alpaca_service.submit_market_order(symbol, cover_qty, "buy")
+                    res = self._alpaca.submit_market_order(symbol, cover_qty, "buy")
 
                 if "error" in res:
                     self._log("error", f"  Failed to close {symbol}: {res['error']}")
@@ -380,7 +530,7 @@ class TradingEngine:
 
         # Get current equity as day start
         try:
-            account = alpaca_service.get_account()
+            account = self._alpaca.get_account()
             self._day_start_equity = account["equity"]
         except Exception:
             self._day_start_equity = settings.initial_capital
@@ -392,13 +542,13 @@ class TradingEngine:
             f"(+{self._preset.daily_target_percent}%)",
         )
 
-    # ─── GFV Prevention (delegates to compliance_service) ─────
+    # ─── GFV Prevention (delegates to self._compliance) ─────
 
     def _get_settled_cash(self, total_cash: float) -> float:
-        return compliance_service.settled_cash(total_cash)
+        return self._compliance.settled_cash(total_cash)
 
     def _can_sell(self, symbol: str) -> bool:
-        if not compliance_service.can_sell(symbol):
+        if not self._compliance.can_sell(symbol):
             self._log(
                 "info",
                 f"⚠️ GFV prevention: holding {symbol} (bought with unsettled cash)",
@@ -433,7 +583,7 @@ class TradingEngine:
     def _quant_regime_check(self):
         """Cheap quantitative regime using ETF proxies (no LLM)."""
         try:
-            quant = _regime.compute_scores()
+            quant = self._regime.compute_scores()
             score = quant["composite"]
             tilt = quant.get("sector_tilt")
             self.regime_data.update(
@@ -446,7 +596,7 @@ class TradingEngine:
                 }
             )
             if tilt:
-                self.focus_symbols = _regime.suggested_universe(tilt)[: self._preset.universe_size]
+                self.focus_symbols = self._regime.suggested_universe(tilt)[: self._preset.universe_size]
                 self.regime_data["focus_symbols"] = self.focus_symbols
             self._apply_preset_from_score(score, source="quant")
         except Exception as exc:  # noqa: BLE001
@@ -456,7 +606,7 @@ class TradingEngine:
         """Use AI to analyze news and adjust focus symbols."""
         try:
             from app.services.analysis_agent import analysis_agent
-            news = alpaca_service.get_latest_news(
+            news = self._alpaca.get_latest_news(
                 ["AAPL", "NVDA", "SPY", "QQQ", "GLD", "USO"], limit=10
             )
             if news:
@@ -511,15 +661,17 @@ class TradingEngine:
         Cash-account scalping with:
         - High-water-mark trailing stop per position
         - Marketable-limit orders + spread filter
-        - GFV tracking via compliance_service
+        - GFV tracking via self._compliance
         - Daily trade cap + loss-streak cooldown
         - Event / opening-auction / VIX blackout for entries only
         """
         preset = self._preset
         equity  = account["equity"]
         cash    = account["cash"]
-        settled = compliance_service.settled_cash(cash)
+        settled = self._compliance.settled_cash(cash)
         now_et = datetime.now(ET)
+        self._sync_regime_playbook_display(now_et)
+        active_playbooks = list(self.regime_data.get("active_playbooks") or self._last_active_playbooks)
 
         pending_symbols = [o["symbol"] for o in pending]
         current_symbols = [p["symbol"] for p in positions]
@@ -535,7 +687,7 @@ class TradingEngine:
                 if symbol in pending_symbols:
                     continue
                 self._log("error", f"⚠️ EMERGENCY COVER {symbol}: qty={pos['qty']}")
-                alpaca_service.submit_market_order(symbol, abs(qty_to_sell), "buy")
+                self._alpaca.submit_market_order(symbol, abs(qty_to_sell), "buy")
                 continue
             if qty_to_sell <= 0:
                 continue
@@ -548,7 +700,7 @@ class TradingEngine:
                 peak = plpc
                 self._position_peaks[symbol] = peak
 
-            snapshot = alpaca_service.get_snapshot(symbol) or {}
+            snapshot = self._alpaca.get_snapshot(symbol) or {}
             exit_reason = None
 
             if plpc <= -(preset.stop_loss_percent / 100):
@@ -562,14 +714,14 @@ class TradingEngine:
                 continue
 
             self._log("sell", f"{exit_reason} {symbol} (${pl_usd:+,.2f})")
-            res = _executor.sell(symbol, qty_to_sell, snapshot, preset.spread_filter_percent)
+            res = self._executor.sell(symbol, qty_to_sell, snapshot, preset.spread_filter_percent)
             if "error" in res:
                 self._log("error", f"Exit failed {symbol}: {res['error']}")
                 continue
 
             exit_price = float(pos.get("current_price") or pos.get("avg_entry_price") or 0.0)
             cost_basis = qty_to_sell * float(pos.get("avg_entry_price") or 0.0)
-            compliance_service.record_sell(symbol, qty_to_sell, exit_price, cost_basis)
+            self._compliance.record_sell(symbol, qty_to_sell, exit_price, cost_basis)
             self._position_peaks.pop(symbol, None)
 
             self._daily_trades += 1
@@ -583,8 +735,8 @@ class TradingEngine:
             self.session_stats["total_pnl"] += pl_usd
 
         # Loss-streak circuit breaker
-        if compliance_service.loss_streak >= 3 and not compliance_service.is_cooling_down():
-            compliance_service.register_loss_streak_cooldown(minutes=15)
+        if self._compliance.loss_streak >= 3 and not self._compliance.is_cooling_down():
+            self._compliance.register_loss_streak_cooldown(minutes=15)
             self._log("info", "⏸ 3 consecutive losses → 15-minute cooldown")
 
         # ── 2. Entry gating ─────────────────────────────────────
@@ -595,7 +747,7 @@ class TradingEngine:
                     f"🚫 No new entries — {self.regime_data.get('blackout_reason','blackout')}",
                 )
             return
-        if compliance_service.is_cooling_down():
+        if self._compliance.is_cooling_down():
             return
         if self._daily_trades >= preset.max_trades_per_day:
             if self._scan_count % 10 == 1:
@@ -619,7 +771,7 @@ class TradingEngine:
         for symbol in self.focus_symbols[: preset.universe_size]:
             if symbol in current_symbols:
                 continue
-            block = compliance_service.can_enter(symbol)
+            block = self._compliance.can_enter(symbol)
             if block:
                 continue
             # Earnings-today skip (earnings dates can be injected later)
@@ -627,9 +779,9 @@ class TradingEngine:
                 continue
 
             try:
-                bars = alpaca_service.get_bars(symbol, "5Min", 50)
+                bars = self._alpaca.get_bars(symbol, "5Min", 50)
                 if len(bars) < 20:
-                    bars = alpaca_service.get_bars(symbol, "1Day", 30)
+                    bars = self._alpaca.get_bars(symbol, "1Day", 30)
                     if len(bars) < 14:
                         continue
 
@@ -645,7 +797,7 @@ class TradingEngine:
                     volumes=volumes,
                     now=now_et,
                     news_score=self.regime_data.get("news_score", 0.0) or 0.0,
-                    enabled=["scalp", "vwap", "orb", "eod"],
+                    enabled=active_playbooks,
                 )
 
                 if len(closes) >= 10:
@@ -672,7 +824,7 @@ class TradingEngine:
             if qty <= 0:
                 continue
 
-            snapshot = alpaca_service.get_snapshot(symbol) or {}
+            snapshot = self._alpaca.get_snapshot(symbol) or {}
             bid, ask, spread = spread_info(snapshot)
             if spread > preset.spread_filter_percent:
                 self._log(
@@ -689,12 +841,12 @@ class TradingEngine:
             )
 
             settled_before = settled
-            res = _executor.buy(symbol, qty, snapshot, preset.spread_filter_percent)
+            res = self._executor.buy(symbol, qty, snapshot, preset.spread_filter_percent)
             if "error" in res:
                 self._log("error", f"Order failed {symbol}: {res['error']}")
                 continue
 
-            compliance_service.record_buy(symbol, qty, price, settled_before)
+            self._compliance.record_buy(symbol, qty, price, settled_before)
             self._position_peaks[symbol] = 0.0
             self._log("buy", f"✅ BOUGHT {qty} × {symbol} @ ~${price:.2f} (${cost:,.0f})")
             self._daily_trades += 1
@@ -793,9 +945,7 @@ class TradingEngine:
             "daily_trades": self._daily_trades,
             "daily_target_reached": self._daily_target_reached,
             "preset": self._preset.level,
-            "compliance": compliance_service.status(),
+            "compliance": self._compliance.status(),
         }
 
 
-# Singleton
-trading_engine = TradingEngine()

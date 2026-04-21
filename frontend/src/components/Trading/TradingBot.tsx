@@ -83,10 +83,45 @@ const TradingBot: React.FC = () => {
     tradeLogs,
     setTradeLogs,
     strategies,
-    activeStrategy,
-    setActiveStrategy,
     account,
+    playbookAuto,
+    setPlaybookAuto,
+    manualPlaybooks,
+    setManualPlaybooks,
+    activePlaybooks,
+    setActivePlaybooks,
   } = useAppStore();
+
+  const [savingPlaybooks, setSavingPlaybooks] = useState(false);
+
+  const pushPlaybookConfig = useCallback(
+    async (next: { auto?: boolean; manual?: string[] }) => {
+      try {
+        setSavingPlaybooks(true);
+        const cfg = await api.setPlaybookConfig(next);
+        if (typeof cfg.auto === 'boolean') setPlaybookAuto(cfg.auto);
+        if (Array.isArray(cfg.manual)) setManualPlaybooks(cfg.manual);
+        if (Array.isArray(cfg.active)) setActivePlaybooks(cfg.active);
+      } catch (err) {
+        console.error('Failed to update playbooks:', err);
+      } finally {
+        setSavingPlaybooks(false);
+      }
+    },
+    [setPlaybookAuto, setManualPlaybooks, setActivePlaybooks],
+  );
+
+  const handleToggleAuto = () => {
+    pushPlaybookConfig({ auto: !playbookAuto });
+  };
+
+  const handleToggleManual = (id: string) => {
+    if (playbookAuto) return; // editing the manual set only matters in AUTO-OFF
+    const next = manualPlaybooks.includes(id)
+      ? manualPlaybooks.filter((p) => p !== id)
+      : [...manualPlaybooks, id];
+    pushPlaybookConfig({ manual: next });
+  };
 
   const [riskLevel, setRiskLevel] = useState<'conservative' | 'moderate' | 'aggressive'>('moderate');
   const [maxPositionSize, setMaxPositionSize] = useState(15);
@@ -133,7 +168,7 @@ const TradingBot: React.FC = () => {
   const handleToggleBot = async () => {
     try {
       if (!botActive) {
-        await api.startBot(activeStrategy || 'momentum', {
+        await api.startBot('scalp', {
           stop_loss: stopLossPercent,
           take_profit: takeProfitPercent,
           max_position: maxPositionSize,
@@ -233,50 +268,98 @@ const TradingBot: React.FC = () => {
               <span className="card-title">
                 <CheckBadgeIcon className="card-icon" /> Trading Strategies
               </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{
+                  fontSize: '11px',
+                  color: 'var(--text-tertiary)',
+                  fontFamily: 'var(--font-mono)',
+                }}>
+                  {playbookAuto ? 'ENGINE DECIDES' : 'MANUAL'}
+                </span>
+                <button
+                  className={playbookAuto ? 'btn-start' : 'btn btn-secondary btn-sm'}
+                  onClick={handleToggleAuto}
+                  disabled={savingPlaybooks}
+                  style={{ minWidth: '82px', justifyContent: 'center' }}
+                  title={
+                    playbookAuto
+                      ? 'AUTO: engine picks active playbooks by time-of-day and regime'
+                      : 'MANUAL: only the ticked playbooks will run'
+                  }
+                >
+                  {playbookAuto ? 'AUTO ✓' : 'AUTO'}
+                </button>
+              </div>
             </div>
             <div style={{ padding: 'var(--space-lg)' }}>
+              {playbookAuto && (
+                <p style={{
+                  fontSize: '12px',
+                  color: 'var(--text-tertiary)',
+                  marginBottom: '12px',
+                  lineHeight: 1.5,
+                }}>
+                  Engine routes playbooks automatically (time-of-day + regime).
+                  Turn AUTO off to restrict to the ticked set below.
+                </p>
+              )}
               <div className="strategy-grid">
-                {strategies.map((strat) => (
-                  <div
-                    key={strat.id}
-                    className={`strategy-card ${activeStrategy === strat.id ? 'active' : ''}`}
-                    onClick={() => setActiveStrategy(strat.id)}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span className="strategy-name">{strat.name}</span>
-                      <span style={{
-                        width: 12,
-                        height: 12,
-                        borderRadius: '50%',
-                        border: '2px solid',
-                        borderColor: activeStrategy === strat.id ? 'var(--accent-primary)' : 'var(--text-muted)',
-                        background: activeStrategy === strat.id ? 'var(--accent-primary)' : 'transparent',
-                        display: 'inline-block',
-                      }} />
-                    </div>
-                    <p className="strategy-description">{strat.description}</p>
-                    <div className="strategy-stats">
-                      <div className="strategy-stat">
-                        <span className="strategy-stat-label">Win Rate</span>
-                        <span className="strategy-stat-value" style={{ color: 'var(--profit)' }}>
-                          {strat.winRate}%
-                        </span>
-                      </div>
-                      <div className="strategy-stat">
-                        <span className="strategy-stat-label">Trades</span>
-                        <span className="strategy-stat-value">{strat.trades}</span>
-                      </div>
-                      <div className="strategy-stat">
-                        <span className="strategy-stat-label">P&L</span>
-                        <span className="strategy-stat-value" style={{
-                          color: strat.pnl >= 0 ? 'var(--profit)' : 'var(--loss)',
+                {strategies.map((strat) => {
+                  const isActiveNow = activePlaybooks.includes(strat.id);
+                  const isManualOn = manualPlaybooks.includes(strat.id);
+                  const isOn = playbookAuto ? isActiveNow : isManualOn;
+                  return (
+                    <div
+                      key={strat.id}
+                      className={`strategy-card ${isOn ? 'active' : ''}`}
+                      onClick={() => handleToggleManual(strat.id)}
+                      style={{
+                        cursor: playbookAuto ? 'default' : 'pointer',
+                        opacity: playbookAuto && !isActiveNow ? 0.75 : 1,
+                      }}
+                      title={
+                        playbookAuto
+                          ? isActiveNow
+                            ? 'Currently active (AUTO)'
+                            : 'Not active right now (AUTO will enable when conditions match)'
+                          : isManualOn
+                            ? 'Enabled for manual mode — click to disable'
+                            : 'Disabled — click to enable for manual mode'
+                      }
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span className="strategy-name">{strat.name}</span>
+                        <span style={{
+                          width: 14,
+                          height: 14,
+                          borderRadius: '4px',
+                          border: '2px solid',
+                          borderColor: isOn ? 'var(--accent-primary)' : 'var(--text-muted)',
+                          background: isOn ? 'var(--accent-primary)' : 'transparent',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: 'white',
+                          fontSize: '10px',
+                          fontWeight: 800,
                         }}>
-                          {strat.pnl >= 0 ? '+' : ''}{formatCurrency(strat.pnl)}
+                          {isOn ? '✓' : ''}
                         </span>
                       </div>
+                      <p className="strategy-description">{strat.description}</p>
+                      <div style={{
+                        marginTop: '6px',
+                        fontSize: '10px',
+                        fontFamily: 'var(--font-mono)',
+                        color: isActiveNow ? 'var(--profit)' : 'var(--text-muted)',
+                        letterSpacing: '0.5px',
+                      }}>
+                        {isActiveNow ? '● ACTIVE NOW' : '○ idle'}
+                        {!playbookAuto && isManualOn && !isActiveNow ? ' · manual-on' : ''}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -446,7 +529,9 @@ const TradingBot: React.FC = () => {
                   </div>
                 <div style={{ color: 'var(--text-secondary)' }}>
                   • Capital: {formatCurrency(account.equity)}<br/>
-                  • Strategy: {strategies.find(s => s.id === activeStrategy)?.name}<br/>
+                  • Strategy: {playbookAuto
+                    ? `AUTO · ${activePlaybooks.join(', ') || 'idle'}`
+                    : `MANUAL · ${manualPlaybooks.join(', ') || 'none'}`}<br/>
                   • Max per trade: {formatCurrency(account.equity * maxPositionSize / 100)}<br/>
                   • Stop Loss: {formatPercent(-stopLossPercent)}<br/>
                   • Take Profit: {formatPercent(takeProfitPercent)}<br/>

@@ -4,8 +4,9 @@ uvicorn[standard]==0.34.0
 websockets==14.2
 python-dotenv==1.1.0
 httpx==0.28.1
-pydantic==2.11.2
+pydantic==2.13.3
 pydantic-settings==2.8.1
+email-validator==2.2.0
 pytz==2025.2
 
 # Alpaca Trading
@@ -18,8 +19,8 @@ scikit-learn==1.6.1
 
 # AI / LLM
 openai==1.59.9
-google-genai==1.10.0
-google-generativeai==0.8.4
+google-genai==1.73.1
+google-generativeai==0.8.6
 
 # Technical Analysis
 ta==0.11.0
@@ -29,3 +30,7 @@ apscheduler==3.11.0
 
 # WSGI adapter for Passenger
 a2wsgi==1.10.8
+
+# Auth (Supabase OAuth + encrypted Alpaca keys)
+supabase==2.28.3
+cryptography==44.0.0

@@ -2,8 +2,10 @@ import type {
   AlpacaApiUsage,
   BotStatusResponse,
   ComplianceStatus,
+  PlaybookConfig,
   RegimeData,
 } from '../stores/types';
+import { getToken } from '../auth/token';
 
 /**
  * HTTP client for the FastAPI backend.
@@ -29,11 +31,17 @@ async function parseError(response: Response): Promise<string> {
   return `HTTP ${response.status}`;
 }
 
+function authHeaders(): Record<string, string> {
+  const t = getToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${API_PREFIX}${path.startsWith('/') ? path : `/${path}`}`;
   const response = await fetch(url, {
     headers: {
       'Content-Type': 'application/json',
+      ...authHeaders(),
       ...options?.headers,
     },
     ...options,
@@ -111,12 +119,46 @@ export const api = {
   /** Prefer health path so SPA catch-all in production never returns HTML here */
   getAlpacaUsage: () => request<AlpacaApiUsage>('/health/alpaca-usage'),
 
-  getStrategies: () => request<unknown>('/trading/strategies'),
+  getStrategies: () =>
+    request<{
+      auto?: boolean;
+      manual?: string[];
+      active?: string[];
+      strategies: Array<{
+        id: string;
+        name: string;
+        description: string;
+        enabled?: boolean;
+        manual_enabled?: boolean;
+      }>;
+    }>('/trading/strategies'),
+
+  getPlaybookConfig: () => request<PlaybookConfig>('/trading/playbooks'),
+
+  setPlaybookConfig: (body: { auto?: boolean; manual?: string[] }) =>
+    request<PlaybookConfig>('/trading/playbooks', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   backtestStrategy: (strategy: string, params: Record<string, unknown>) =>
     request<unknown>('/trading/backtest', {
       method: 'POST',
       body: JSON.stringify({ strategy, params }),
+    }),
+
+  getMe: () =>
+    request<{
+      authenticated: boolean;
+      user_id?: number;
+      email?: string;
+      alpaca_configured?: boolean;
+    }>('/auth/me'),
+
+  saveAlpacaKeys: (api_key: string, secret_key: string) =>
+    request<{ ok: boolean; message: string }>('/auth/alpaca-keys', {
+      method: 'POST',
+      body: JSON.stringify({ api_key, secret_key }),
     }),
 } as const;
 

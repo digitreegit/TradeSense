@@ -70,6 +70,8 @@ export interface Strategy {
   name: string;
   description: string;
   active: boolean;
+  /** Optional: from API playbook list */
+  enabled?: boolean;
   winRate: number;
   trades: number;
   pnl: number;
@@ -112,6 +114,23 @@ export interface RegimeData {
   blackout?: boolean;
   blackout_reason?: string;
   news_score?: number;
+  /** Currently enabled playbooks in engine (AUTO or MANUAL routing) */
+  active_playbooks?: string[];
+  playbook_mode?: 'auto' | 'manual';
+}
+
+/** `/api/trading/playbooks` payload */
+export interface PlaybookConfig {
+  auto: boolean;
+  manual: string[];
+  active: string[];
+  playbooks: Array<{
+    id: string;
+    name: string;
+    description: string;
+    manual_enabled: boolean;
+    active_now: boolean;
+  }>;
 }
 
 /** Alpaca REST rate-limit snapshot (from response headers via /v2/clock probe). */
@@ -149,4 +168,13 @@ export interface BotStatusResponse {
   regime_reason?: string;
 }
 
-export type PageId = 'dashboard' | 'chart' | 'agent' | 'trading' | 'portfolio' | 'history';
+export type PageId =
+  | 'dashboard'
+  | 'chart'
+  | 'agent'
+  | 'trading'
+  | 'portfolio'
+  | 'history'
+  | 'auth'
+  | 'settings'
+  | 'profile';

@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     host: str = os.getenv("HOST", "0.0.0.0")
     port: int = int(os.getenv("PORT", "8000"))
 
+    # Auth / multi-user (Supabase OAuth + encrypted Alpaca keys)
+    supabase_url: str = os.getenv("SUPABASE_URL", "")
+    supabase_anon_key: str = os.getenv("SUPABASE_ANON_KEY", "")
+    supabase_jwt_secret: str = os.getenv("SUPABASE_JWT_SECRET", "")
+    tradesense_secret_key: str = os.getenv("TRADESENSE_SECRET_KEY", "")
+
     class Config:
         env_file = _env_file_path or ".env"
         extra = "allow"

@@ -70,6 +70,21 @@ interface AppState {
   setCompliance: (c: ComplianceStatus | null) => void;
   alpacaUsage: AlpacaApiUsage | null;
   setAlpacaUsage: (u: AlpacaApiUsage | null) => void;
+
+  // Playbook routing (AUTO vs MANUAL set + currently-active list)
+  playbookAuto: boolean;
+  setPlaybookAuto: (v: boolean) => void;
+  manualPlaybooks: string[];
+  setManualPlaybooks: (ids: string[]) => void;
+  activePlaybooks: string[];
+  setActivePlaybooks: (ids: string[]) => void;
+
+  /** Signed-in user (null = guest / legacy env Alpaca) */
+  authEmail: string | null;
+  authAlpacaConfigured: boolean;
+  setAuthProfile: (email: string | null, alpacaConfigured: boolean) => void;
+  authMethod: 'google' | 'email' | null;
+  setAuthMethod: (method: 'google' | 'email' | null) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -86,6 +101,20 @@ export const useAppStore = create<AppState>((set) => ({
   setCompliance: (c) => set({ compliance: c }),
   alpacaUsage: null,
   setAlpacaUsage: (u) => set({ alpacaUsage: u }),
+
+  playbookAuto: true,
+  setPlaybookAuto: (v) => set({ playbookAuto: v }),
+  manualPlaybooks: ['scalp', 'vwap', 'orb', 'eod'],
+  setManualPlaybooks: (ids) => set({ manualPlaybooks: ids }),
+  activePlaybooks: [],
+  setActivePlaybooks: (ids) => set({ activePlaybooks: ids }),
+
+  authEmail: null,
+  authAlpacaConfigured: false,
+  setAuthProfile: (email, alpacaConfigured) =>
+    set({ authEmail: email, authAlpacaConfigured: alpacaConfigured }),
+  authMethod: null,
+  setAuthMethod: (method) => set({ authMethod: method }),
 
   // Account - $3000 paper trading
   account: {
@@ -184,7 +213,7 @@ export const useAppStore = create<AppState>((set) => ({
     },
   ],
   setStrategies: (strategies) => set({ strategies }),
-  activeStrategy: 'momentum',
+  activeStrategy: 'scalp',
   setActiveStrategy: (id) => set({ activeStrategy: id }),
 
   // Connection

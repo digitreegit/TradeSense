@@ -35,29 +35,36 @@ class AlpacaService:
         self.is_virtual_reset = False
 
     def initialize(self):
-        """Initialize Alpaca API clients."""
-        if not settings.alpaca_api_key or not settings.alpaca_secret_key:
+        """Initialize Alpaca API clients from global settings (.env)."""
+        return self.initialize_with_keys(
+            settings.alpaca_api_key, settings.alpaca_secret_key
+        )
+
+    def initialize_with_keys(self, api_key: str, secret_key: str) -> bool:
+        """Initialize clients from explicit keys (per-user or env)."""
+        self.trading_client = None
+        self.data_client = None
+        self._initialized = False
+        if not api_key or not secret_key:
             logger.warning("Alpaca API keys not configured. Running in demo mode.")
-            return
-
+            return False
         try:
-            # Paper trading client
             self.trading_client = TradingClient(
-                api_key=settings.alpaca_api_key,
-                secret_key=settings.alpaca_secret_key,
-                paper=True,  # Always use paper trading
+                api_key=api_key,
+                secret_key=secret_key,
+                paper=True,
             )
-
             self.data_client = StockHistoricalDataClient(
-                api_key=settings.alpaca_api_key,
-                secret_key=settings.alpaca_secret_key,
+                api_key=api_key,
+                secret_key=secret_key,
             )
-
             self._initialized = True
             logger.info("✅ Alpaca API clients initialized (Paper Trading)")
+            return True
         except Exception as e:
             logger.error(f"❌ Failed to initialize Alpaca: {e}")
             self._initialized = False
+            return False
 
     @property
     def is_ready(self) -> bool:
