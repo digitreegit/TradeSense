@@ -31,7 +31,7 @@ const UserMenu: React.FC = () => {
   };
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
+    <div ref={ref} style={{ position: 'relative', zIndex: 1300 }}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -67,7 +67,7 @@ const UserMenu: React.FC = () => {
             border: '1px solid var(--border-secondary)',
             background: 'var(--bg-primary)',
             boxShadow: 'var(--shadow-lg)',
-            zIndex: 200,
+            zIndex: 1400,
           }}
         >
           <div

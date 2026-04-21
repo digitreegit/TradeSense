@@ -436,6 +436,8 @@ body {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   flex-shrink: 0;
+  position: relative;
+  z-index: 1100;
 }
 
 .header-left {
