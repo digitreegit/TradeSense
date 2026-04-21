@@ -1,14 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import {
   getLastAuthMethod,
   setLastAuthMethod,
-  setToken,
   type AuthMethod,
 } from '../../auth/token';
 import { supabase } from '../../auth/supabase';
-
-type Mode = 'register' | 'login' | 'forgot';
 
 const GoogleIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
@@ -20,59 +17,11 @@ const GoogleIcon = () => (
 );
 
 const AuthPage: React.FC = () => {
-  const { setAuthMethod, setAuthProfile } = useAppStore();
-  const [mode, setMode] = useState<Mode>('register');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const { setAuthMethod } = useAppStore();
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [lastUsed, setLastUsed] = useState<AuthMethod | null>(getLastAuthMethod());
-
-  const subtitle = useMemo(() => {
-    if (mode === 'register') return 'Create a new account';
-    if (mode === 'login') return 'Sign in to your account';
-    return "Enter your email and we'll send a reset link";
-  }, [mode]);
-
-  const captureSession = async () => {
-    const { data, error: sessionErr } = await supabase.auth.getSession();
-    if (sessionErr) throw sessionErr;
-    const token = data.session?.access_token;
-    const userEmail = data.session?.user?.email;
-    if (!token || !userEmail) throw new Error('No active Supabase session');
-    setToken(token);
-    setAuthProfile(userEmail, false);
-  };
-
-  const submitEmailAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setInfo(null);
-    setLoading(true);
-    try {
-      if (mode === 'register') {
-        const { data, error: signUpErr } = await supabase.auth.signUp({ email, password });
-        if (signUpErr) throw signUpErr;
-        if (!data.session) {
-          setInfo('Sign up successful. Check your email and confirm your account, then sign in.');
-          setMode('login');
-          return;
-        }
-      } else {
-        const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
-        if (signInErr) throw signInErr;
-      }
-      await captureSession();
-      setLastUsed('email');
-      setLastAuthMethod('email');
-      setAuthMethod('email');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Request failed');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleGoogle = async () => {
     setError(null);
@@ -96,154 +45,25 @@ const AuthPage: React.FC = () => {
     }
   };
 
-  const sendReset = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setInfo(null);
-    setLoading(true);
-    try {
-      const redirectTo = `${window.location.origin}/`;
-      const { error: resetErr } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo,
-      });
-      if (resetErr) throw resetErr;
-      setInfo('Password reset email sent. Check your inbox.');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Reset request failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="auth-shell">
       <div className="auth-card">
-        <h1 className="auth-title">
-          {mode === 'register'
-            ? 'Get Started'
-            : mode === 'login'
-              ? 'Welcome Back'
-              : 'Forgot your password?'}
-        </h1>
-        <p className="auth-subtitle">{subtitle}</p>
+        <h1 className="auth-title">Welcome to TradeSense</h1>
+        <p className="auth-subtitle">Sign in with Google to continue</p>
 
-        {(mode === 'register' || mode === 'login') && (
-          <>
-            <button
-              type="button"
-              className="auth-google-btn"
-              onClick={handleGoogle}
-              disabled={loading}
-            >
-              <GoogleIcon />
-              Continue with Google
-              {lastUsed === 'google' && <span className="auth-last-used">LAST USED</span>}
-            </button>
-            <div className="auth-divider">
-              <span />
-              <em>or</em>
-              <span />
-            </div>
-          </>
-        )}
+        {error && <p className="auth-error">{error}</p>}
+        {info && <p className="auth-info">{info}</p>}
 
-        {(mode === 'register' || mode === 'login') && (
-          <form onSubmit={submitEmailAuth} className="auth-form">
-            {error && <p className="auth-error">{error}</p>}
-            {info && <p className="auth-info">{info}</p>}
-
-            <label>Email</label>
-            <input
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className="auth-input"
-            />
-
-            <label>Password {mode === 'register' ? '(minimum 8 characters)' : ''}</label>
-            <div className="auth-input-wrap">
-              <input
-                type="password"
-                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={8}
-                className="auth-input"
-              />
-              {lastUsed === 'email' && <span className="auth-last-used-inline">LAST USED</span>}
-            </div>
-
-            {mode === 'login' && (
-              <button
-                type="button"
-                className="auth-link-btn"
-                onClick={() => {
-                  setMode('forgot');
-                  setError(null);
-                  setInfo(null);
-                }}
-              >
-                Forgot password?
-              </button>
-            )}
-
-            <button type="submit" className="auth-submit" disabled={loading}>
-              {loading ? 'Please wait…' : mode === 'register' ? 'Sign Up' : 'Sign In'}
-            </button>
-
-            <p className="auth-switch">
-              {mode === 'login' ? "Don't have an account?" : 'Have an account?'}{' '}
-              <button
-                type="button"
-                onClick={() => {
-                  setMode(mode === 'login' ? 'register' : 'login');
-                  setError(null);
-                  setInfo(null);
-                }}
-              >
-                {mode === 'login' ? 'Sign Up' : 'Sign In'}
-              </button>
-            </p>
-          </form>
-        )}
-
-        {mode === 'forgot' && (
-          <form onSubmit={sendReset} className="auth-form">
-            {error && <p className="auth-error">{error}</p>}
-            {info && <p className="auth-info">{info}</p>}
-
-            <label>Email</label>
-            <input
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className="auth-input"
-            />
-
-            <button type="submit" className="auth-submit" disabled={loading}>
-              {loading ? 'Sending…' : 'Send Reset Link'}
-            </button>
-
-            <p className="auth-switch">
-              Already have an account?{' '}
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('login');
-                  setError(null);
-                  setInfo(null);
-                }}
-              >
-                Sign In
-              </button>
-            </p>
-          </form>
-        )}
+        <button
+          type="button"
+          className="auth-google-btn"
+          onClick={handleGoogle}
+          disabled={loading}
+        >
+          <GoogleIcon />
+          {loading ? 'Redirecting…' : 'Continue with Google'}
+          {lastUsed === 'google' && <span className="auth-last-used">LAST USED</span>}
+        </button>
       </div>
     </div>
   );
