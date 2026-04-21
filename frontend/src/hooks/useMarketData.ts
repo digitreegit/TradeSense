@@ -59,6 +59,8 @@ export function useMarketData() {
     try {
       const botStatus = await api.getBotStatus();
       setBotActive(botStatus.active);
+      const dailyScalps = Number((botStatus as { stats?: { daily_trades?: number } }).stats?.daily_trades ?? 0);
+      useAppStore.getState().setBotDailyTrades(Number.isFinite(dailyScalps) ? dailyScalps : 0);
       if (botStatus.regime_data) {
         useAppStore.getState().setRegimeData(botStatus.regime_data);
       }
