@@ -148,6 +148,18 @@ def set_user_alpaca_encrypted(
         conn.close()
 
 
+def clear_user_alpaca_encrypted(user_id: int) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE users SET alpaca_key_enc = NULL, alpaca_secret_enc = NULL WHERE id = ?",
+            (user_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def list_user_ids_with_alpaca() -> list[int]:
     conn = get_connection()
     try:

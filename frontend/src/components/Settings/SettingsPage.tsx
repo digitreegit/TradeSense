@@ -17,11 +17,18 @@ const SettingsPage: React.FC = () => {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const keysLocked = authAlpacaConfigured;
 
   const saveKeys = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr(null);
     setMsg(null);
+    if (keysLocked) {
+      setErr('Delete existing keys first to enter new keys.');
+      return;
+    }
     if (!key.trim() || !secret.trim()) {
       setErr('Enter both the API Key ID and Secret Key.');
       return;
@@ -40,6 +47,23 @@ const SettingsPage: React.FC = () => {
     }
   };
 
+  const deleteKeys = async () => {
+    setErr(null);
+    setMsg(null);
+    setDeleting(true);
+    try {
+      await api.deleteAlpacaKeys();
+      setAuthProfile(authEmail, false);
+      setKey('');
+      setSecret('');
+      setMsg('Stored Alpaca keys were deleted. You can add a new key pair now.');
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : 'Failed to delete keys');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const signOut = () => {
     void supabase.auth.signOut();
     clearToken();
@@ -55,14 +79,39 @@ const SettingsPage: React.FC = () => {
         <p style={{ fontSize: '13px', color: 'var(--text-tertiary)', marginBottom: '20px', lineHeight: 1.5 }}>
           Connect your <strong>Alpaca paper trading</strong> account. Keys are encrypted and only your user can trade with them.
           Create keys at{' '}
-          <a href="https://app.alpaca.markets/paper/dashboard/overview" target="_blank" rel="noreferrer">
+          <a
+            href="https://app.alpaca.markets/paper/dashboard/overview"
+            target="_blank"
+            rel="noreferrer"
+            style={{ color: 'var(--info)', textDecoration: 'none' }}
+          >
             Alpaca (Paper)
           </a>
           .
         </p>
-        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
+        <p
+          style={{
+            fontSize: '13px',
+            color: 'var(--text-secondary)',
+            marginBottom: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            flexWrap: 'wrap',
+          }}
+        >
           Signed in as <strong>{authEmail}</strong>
           {authAlpacaConfigured ? ' · keys on file' : ' · keys not configured yet'}
+          {authAlpacaConfigured && (
+            <button
+              type="button"
+              className="btn btn-danger btn-sm"
+              onClick={deleteKeys}
+              disabled={deleting || loading}
+            >
+              {deleting ? 'Deleting…' : 'Delete Keys'}
+            </button>
+          )}
         </p>
         <form onSubmit={saveKeys}>
           {err && <p style={{ color: 'var(--loss)', fontSize: '13px', marginBottom: '8px' }}>{err}</p>}
@@ -74,6 +123,7 @@ const SettingsPage: React.FC = () => {
             value={key}
             onChange={(e) => setKey(e.target.value)}
             placeholder="PK…"
+            disabled={keysLocked || loading || deleting}
             style={{
               display: 'block',
               width: '100%',
@@ -91,6 +141,7 @@ const SettingsPage: React.FC = () => {
             autoComplete="off"
             value={secret}
             onChange={(e) => setSecret(e.target.value)}
+            disabled={keysLocked || loading || deleting}
             style={{
               display: 'block',
               width: '100%',
@@ -102,15 +153,15 @@ const SettingsPage: React.FC = () => {
               color: 'inherit',
             }}
           />
-          <button type="submit" className="btn-start" disabled={loading}>
+          <button type="submit" className="btn-start" disabled={loading || deleting || keysLocked}>
             {loading ? 'Saving…' : 'Save keys'}
           </button>
         </form>
         <button
           type="button"
-          className="btn btn-secondary"
+          className="btn btn-danger"
           onClick={signOut}
-          style={{ marginTop: '14px', width: '100%' }}
+          style={{ marginTop: '40px', width: '100%' }}
         >
           Sign Out
         </button>

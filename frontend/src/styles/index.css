@@ -1217,6 +1217,11 @@ body {
   color: white;
 }
 
+.btn-danger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .btn-sm {
   padding: var(--space-xs) var(--space-md);
   font-size: 12px;
