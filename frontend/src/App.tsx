@@ -13,7 +13,7 @@ import ProfilePage from './components/Profile/ProfilePage';
 import { useAppStore } from './stores/useAppStore';
 import { useMarketData } from './hooks/useMarketData';
 import api from './services/api';
-import { getLastAuthMethod } from './auth/token';
+import { getLastAuthMethod, setToken } from './auth/token';
 import { supabase } from './auth/supabase';
 
 const App: React.FC = () => {
@@ -27,6 +27,11 @@ const App: React.FC = () => {
 
     const syncProfile = async () => {
       try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const supaToken = sessionData.session?.access_token ?? null;
+        if (supaToken) {
+          setToken(supaToken);
+        }
         const me = await api.getMe();
         if (cancelled) return;
         if (me.authenticated && me.email) {

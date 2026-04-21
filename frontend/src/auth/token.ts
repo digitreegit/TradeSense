@@ -18,6 +18,10 @@ export function clearToken(): void {
   localStorage.removeItem(KEY);
 }
 
+export function hasToken(): boolean {
+  return Boolean(getToken());
+}
+
 export function setLastAuthMethod(method: AuthMethod): void {
   localStorage.setItem(LAST_AUTH_METHOD_KEY, method);
 }

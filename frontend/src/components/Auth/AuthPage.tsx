@@ -52,8 +52,13 @@ const AuthPage: React.FC = () => {
     setLoading(true);
     try {
       if (mode === 'register') {
-        const { error: signUpErr } = await supabase.auth.signUp({ email, password });
+        const { data, error: signUpErr } = await supabase.auth.signUp({ email, password });
         if (signUpErr) throw signUpErr;
+        if (!data.session) {
+          setInfo('Sign up successful. Check your email and confirm your account, then sign in.');
+          setMode('login');
+          return;
+        }
       } else {
         const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
         if (signInErr) throw signInErr;
