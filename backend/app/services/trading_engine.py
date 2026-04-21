@@ -164,6 +164,10 @@ class TradingEngine:
         self._last_active_playbooks: list = list(self.manual_playbooks)
         self._sync_regime_playbook_display()
 
+    def set_owner_email(self, email: Optional[str]) -> None:
+        """Attach/update recipient email for per-user notifications."""
+        self.owner_email = (email or "").strip().lower() or None
+
     # ─── Control ──────────────────────────────────────────────
 
     def start(
@@ -329,6 +333,10 @@ class TradingEngine:
         # Human-readable combo for any legacy UI still reading `strategy`
         self.regime_data["strategy"] = " + ".join(p.upper() for p in active)
 
+    def set_owner_email(self, email: Optional[str]) -> None:
+        """Set notification recipient for this engine instance."""
+        self.owner_email = (email or "").strip().lower() or None
+
     # ─── Main Loop ────────────────────────────────────────────
 
     async def run_cycle(self):
@@ -344,7 +352,7 @@ class TradingEngine:
 
         # Auto start/stop
         if not is_weekend:
-            if market_time >= time(9, 25) and market_time < time(16, 0):
+            if market_time >= time(9, 20) and market_time < time(16, 10):
                 if not self.active:
                     from app.services.notification_service import notification_service
                     self.active = True
@@ -355,9 +363,10 @@ class TradingEngine:
                         f"Today's target: +{self._preset.daily_target_percent}% "
                         f"(${self._day_start_equity * self._preset.daily_target_percent / 100:,.0f})",
                         "SUCCESS",
+                        to_email=self.owner_email,
                     )
 
-            if market_time >= time(16, 0) and self.active:
+            if market_time >= time(16, 10) and self.active:
                 from app.services.notification_service import notification_service
                 self.active = False
                 self._log(
@@ -365,11 +374,23 @@ class TradingEngine:
                     f"[Auto-Stop] Market closed | Today P&L: ${self._daily_pnl:+,.2f} "
                     f"({self._daily_trades} trades)",
                 )
-                notification_service.send_alert(
-                    "📊 Today's summary",
-                    f"P&L: ${self._daily_pnl:+,.2f} | Trades: {self._daily_trades}",
-                    "SUCCESS" if self._daily_pnl >= 0 else "CRITICAL",
-                )
+                try:
+                    account = self._alpaca.get_account()
+                    notification_service.send_daily_summary(
+                        to_email=self.owner_email or "",
+                        trading_date=today.isoformat(),
+                        daily_pnl=float(self._daily_pnl),
+                        daily_pnl_pct=((self._daily_pnl / self._day_start_equity) * 100.0)
+                        if self._day_start_equity > 0
+                        else 0.0,
+                        equity=float(account.get("equity", 0.0)),
+                        portfolio_value=float(account.get("portfolio_value", account.get("equity", 0.0))),
+                        cash=float(account.get("cash", 0.0)),
+                        trades=int(self._daily_trades),
+                        win_rate_pct=float(self.get_stats().get("win_rate", 0.0)),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed to send daily summary email: %s", exc)
 
         # Dashboard playbook line updates every scan, even when bot is off / market closed.
         self._sync_regime_playbook_display(now_et)
@@ -402,13 +423,20 @@ class TradingEngine:
             
             # Wait until all cleanup orders are fulfilled before proceeding to main scalp
             pending = self._alpaca.get_orders(status="open")
+            cleanup_pending = [o for o in pending if str(o.get("side", "")).lower() == "sell"]
             if not pending:
                 self._v3_cleanup_done = True
                 self._log("info", "✅ Legacy cleanup confirmed — ready for $3,000 scalping!")
             else:
                 if self._scan_count % 5 == 1:
-                    self._log("info", f"🧹 Waiting for {len(pending)} cleanup orders to fill...")
-                return # Keep waiting
+                    self._log(
+                        "info",
+                        f"🧹 Waiting for {len(cleanup_pending)} cleanup orders to fill "
+                        f"(open total: {len(pending)})..."
+                    )
+                # Do not block the strategy if there are only non-cleanup pending orders.
+                if cleanup_pending:
+                    return # Keep waiting only for cleanup sells
 
         # ─── Execute Strategy ─────────────────────────────────
         try:

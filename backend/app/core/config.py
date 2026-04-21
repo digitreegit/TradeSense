@@ -69,7 +69,11 @@ class Settings(BaseSettings):
     # Notifications (Resend)
     resend_api_key: str = os.getenv("RESEND_API_KEY", "")
     resend_from_email: str = os.getenv("RESEND_FROM_EMAIL", "")
-    receiver_email: str = os.getenv("RECEIVER_EMAIL", "")
+    receiver_email: str = (
+        os.getenv("RESEND_DEFAULT_TO_EMAIL", "")
+        or os.getenv("ALERT_RECIPIENTS", "")
+        or os.getenv("RECEIVER_EMAIL", "")
+    )
 
     class Config:
         env_file = _env_file_path or ".env"
