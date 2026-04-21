@@ -104,7 +104,7 @@ const UserMenu: React.FC = () => {
             Settings
           </button>
           <button type="button" role="menuitem" className="user-menu-item user-menu-item-danger" onClick={logout}>
-            Log out
+            Sign Out
           </button>
         </div>
       )}
