@@ -853,7 +853,9 @@ class TradingEngine:
                 continue
 
             max_value = equity * (preset.max_position_percent / 100)
-            buy_power = min(max_value, settled * 0.95)
+            # Cash-safe aggressive mode:
+            # always size only from settled cash to avoid unsettled-fund reuse/GFV risk.
+            buy_power = min(max_value, settled * 0.60)
             qty = int(buy_power / price)
             if qty <= 0:
                 continue
