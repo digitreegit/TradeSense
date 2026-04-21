@@ -372,7 +372,10 @@ const Dashboard: React.FC = () => {
             <span>{botActive ? 'ACTIVE' : 'IDLE'}</span>
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '6px' }}>
-            {tradeLogs.length} events logged · Daily Scalping {botDailyTrades}
+            {tradeLogs.length} events logged · Daily Scalping:{' '}
+            <strong style={{ color: 'var(--accent-primary)', fontFamily: 'var(--font-mono)' }}>
+              {Number.isFinite(botDailyTrades) ? botDailyTrades : 0}
+            </strong>
           </div>
         </div>
       </div>
