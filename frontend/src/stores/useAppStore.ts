@@ -39,6 +39,8 @@ interface AppState {
   // Trading Bot
   botActive: boolean;
   setBotActive: (active: boolean) => void;
+  botDailyTrades: number;
+  setBotDailyTrades: (count: number) => void;
   tradeLogs: TradeLog[];
   addTradeLog: (log: TradeLog) => void;
   setTradeLogs: (logs: TradeLog[]) => void;
@@ -157,6 +159,8 @@ export const useAppStore = create<AppState>((set) => ({
   // Trading Bot
   botActive: false,
   setBotActive: (active) => set({ botActive: active }),
+  botDailyTrades: 0,
+  setBotDailyTrades: (count) => set({ botDailyTrades: Math.max(0, Number(count) || 0) }),
   tradeLogs: [
     { time: new Date().toLocaleTimeString(), type: 'info', message: 'TradeSense v3 — Cash Account Scalp Engine Initialized ($3,000)' },
     { time: new Date().toLocaleTimeString(), type: 'info', message: 'PDT-Exempt mode active. GFV monitoring enabled.' },
