@@ -145,6 +145,7 @@ export const api = {
     request<{
       scale: '3k' | '10k' | '30k';
       level: string;
+      display_capital: number;
       auto: boolean;
       available: Array<'3k' | '10k' | '30k'>;
       preset: Record<string, unknown>;
@@ -154,6 +155,7 @@ export const api = {
     request<{
       scale: '3k' | '10k' | '30k';
       level: string;
+      display_capital: number;
       preset: Record<string, unknown>;
     }>('/trading/scale', {
       method: 'POST',

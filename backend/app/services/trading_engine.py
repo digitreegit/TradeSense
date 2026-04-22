@@ -30,6 +30,7 @@ import pytz
 from app.core.config import resolved_capital_scale, settings
 from app.core.risk_presets import (
     RISK_PRESETS_FOR,
+    display_capital_for_scale,
     is_halted_score,
     market_level_for_score,
     preset_for_level,
@@ -107,6 +108,7 @@ class TradingEngine:
         self._alpaca = alpaca
         self._compliance = compliance
         self._scale = resolved_capital_scale()
+        self._alpaca.set_virtual_display_capital(display_capital_for_scale(self._scale))
 
         self._exec_logger = ExecutionLogger(
             log_dir=log_dir,
@@ -121,7 +123,12 @@ class TradingEngine:
         self.last_regime_reason: str = ""
 
         # Focus universe (AI + regime tilt can override)
-        universe_slice = 12 if self._scale == "30k" else 8
+        if self._scale == "30k":
+            universe_slice = 12
+        elif self._scale == "10k":
+            universe_slice = 10
+        else:
+            universe_slice = 8
         self.focus_symbols: list = list(self.SCALP_UNIVERSE[:universe_slice])
         self.focus_sectors: list = ["tech_ai", "tech_software"]
 
@@ -131,7 +138,7 @@ class TradingEngine:
         self._daily_trades: int = 0
         self._daily_target_reached: bool = False
         self._daily_loss_limit_hit: bool = False
-        self._day_start_equity: float = settings.initial_capital
+        self._day_start_equity: float = display_capital_for_scale(self._scale)
 
         # Per-position peaks for trailing stop high-water mark
         self._position_peaks: dict = {}
@@ -149,7 +156,7 @@ class TradingEngine:
             "strategy": "scalp",
             "reasoning": (
                 f"{self._scale}-scale scalp — "
-                f"${settings.initial_capital:,.0f} → "
+                f"${display_capital_for_scale(self._scale):,.0f} → "
                 f"+{self._preset.daily_target_percent}%/day"
             ),
             "risk_level": self._preset.level,
@@ -199,20 +206,20 @@ class TradingEngine:
 
     def get_scale_info(self) -> dict:
         """Report current scale + preset level so the UI can render the selector."""
+        dc = display_capital_for_scale(self._scale)
         return {
             "scale": self._scale,
             "level": self._preset.level,
+            "display_capital": dc,
             "auto": True,
             "available": ["3k", "10k", "30k"],
             "preset": self._preset.as_dict(),
         }
 
     def set_capital_scale(self, scale: str) -> dict:
-        """Switch the active preset table at runtime.
-
-        Keeps the current risk *level* (conservative/moderate/aggressive)
-        and swaps only the scale-dependent parameters. Safe to call while
-        the bot is active — the change is visible on the next scan.
+        """Switch scale + risk preset table, re-anchor virtual portfolio to the
+        scale's notional (3k / 10k / 30k), and reset session counters so the
+        bot treats it as a fresh run (legacy position cleanup may run again).
         """
         new_scale = (scale or "").strip().lower()
         if new_scale not in ("3k", "10k", "30k"):
@@ -224,6 +231,46 @@ class TradingEngine:
         self._scale = new_scale
         self._preset = preset_for_level(self._preset.level, scale=new_scale)
 
+        if self._scale == "30k":
+            u_slice = 12
+        elif self._scale == "10k":
+            u_slice = 10
+        else:
+            u_slice = 8
+        self.focus_symbols = list(self.SCALP_UNIVERSE[:u_slice])
+        self.regime_data["focus_symbols"] = self.focus_symbols
+
+        display = display_capital_for_scale(self._scale)
+        self._alpaca.set_virtual_display_capital(display)
+
+        self._trading_date = None
+        self._daily_pnl = 0.0
+        self._daily_trades = 0
+        self._daily_target_reached = False
+        self._daily_loss_limit_hit = False
+        self._position_peaks.clear()
+        self._pending_reconcile.clear()
+        self.session_stats.update({
+            "total_trades": 0,
+            "winning_trades": 0,
+            "losing_trades": 0,
+            "win_sum": 0.0,
+            "loss_sum": 0.0,
+            "total_pnl": 0.0,
+            "max_drawdown": 0.0,
+            "slippage_bps_sum": 0.0,
+            "slippage_bps_count": 0,
+        })
+        self.trade_logs.clear()
+        self._scan_count = 0
+        self._v3_cleanup_done = False
+
+        try:
+            acct = self._alpaca.get_account()
+            self._day_start_equity = float(acct.get("equity", display))
+        except Exception:
+            self._day_start_equity = display
+
         self.regime_data.update(
             {
                 "capital_scale": self._scale,
@@ -232,15 +279,22 @@ class TradingEngine:
                 "stop_loss_percent": self._preset.stop_loss_percent,
                 "take_profit_percent": self._preset.take_profit_percent,
                 "daily_target": f"+{self._preset.daily_target_percent}%",
+                "daily_pnl": "$0.00",
+                "reasoning": (
+                    f"{self._scale}-scale scalp — ${display:,.0f} → "
+                    f"+{self._preset.daily_target_percent}%/day"
+                ),
                 "timestamp": datetime.now().strftime("%b %d, %Y, %-I:%M%p"),
             }
         )
+        self._sync_regime_playbook_display()
         self._log(
             "info",
             f"🔧 Capital scale switched: {old_scale} → {new_scale} | "
+            f"virtual start ${display:,.0f} | "
             f"preset={self._preset.level.upper()} | TIF={self._preset.default_tif.upper()} | "
             f"slots={self._preset.max_concurrent_positions} | "
-            f"trades/day={self._preset.max_trades_per_day}",
+            f"trades/day={self._preset.max_trades_per_day} | session reset",
         )
         return self.get_scale_info()
 
@@ -280,7 +334,7 @@ class TradingEngine:
         self._log(
             "info",
             f"🚀 Bot started [{self._scale}] — {preset.level.upper()} | "
-            f"Capital: ${settings.initial_capital:,.0f} | TIF: {preset.default_tif.upper()}",
+            f"Capital: ${display_capital_for_scale(self._scale):,.0f} | TIF: {preset.default_tif.upper()}",
         )
         self._log(
             "info",
@@ -649,7 +703,7 @@ class TradingEngine:
             account = self._alpaca.get_account()
             self._day_start_equity = account["equity"]
         except Exception:
-            self._day_start_equity = settings.initial_capital
+            self._day_start_equity = display_capital_for_scale(self._scale)
 
         self._log("info", f"📅 New trading day: {today} | Start equity: ${self._day_start_equity:,.2f}")
         self._log(
