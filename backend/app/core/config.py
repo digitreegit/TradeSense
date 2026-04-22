@@ -50,8 +50,9 @@ class Settings(BaseSettings):
     account_type: str = os.getenv("ACCOUNT_TYPE", "cash")
     scan_interval_seconds: float = float(os.getenv("SCAN_INTERVAL_SECONDS", "1"))
 
-    # Capital scale: "3k" (legacy cash-scalp) | "30k" (HFT paper test) | "auto"
-    # "auto" picks based on ``initial_capital``: >=$15k → 30k preset tuning.
+    # Capital scale: "3k" | "10k" | "30k" | "auto"
+    # "auto" picks based on ``initial_capital``:
+    #   <$6,500 → 3k ; <$20,000 → 10k ; otherwise 30k
     capital_scale: str = os.getenv("CAPITAL_SCALE", "auto")
 
     # Streaming (Alpaca WebSocket)
@@ -97,8 +98,20 @@ settings = Settings()
 
 
 def resolved_capital_scale() -> str:
-    """Return '3k' or '30k' based on explicit config or initial_capital."""
+    """Return '3k', '10k', or '30k'.
+
+    Auto bands (when ``CAPITAL_SCALE=auto``):
+
+    - < \\$6,500  → "3k"
+    - < \\$20,000 → "10k"
+    - otherwise  → "30k"
+    """
     mode = (settings.capital_scale or "auto").strip().lower()
-    if mode in ("3k", "30k"):
+    if mode in ("3k", "10k", "30k"):
         return mode
-    return "30k" if settings.initial_capital >= 15_000 else "3k"
+    cap = float(settings.initial_capital or 0)
+    if cap >= 20_000:
+        return "30k"
+    if cap >= 6_500:
+        return "10k"
+    return "3k"

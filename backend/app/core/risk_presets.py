@@ -1,12 +1,21 @@
 """
 Risk preset table for cash-account scalping.
 
-Two scales are supported:
+Three scales are supported:
 
 - ``"3k"``  — legacy $3,000 cash-scalp (tight settled-cash turnover).
+- ``"10k"`` — $10,000 bridge: enough settled cash for real rotation but
+  still below the marginable PDT threshold, so cash-only scalping stays
+  simple. Tuned to split the difference between 3k and 30k.
 - ``"30k"`` — $30,000 paper HFT test (Algo Trader Plus + SIP + us-east-1
   cloud latency budget). More slots, tighter stops, larger daily trade
   cap, and looser per-trade notional minimums so fills are meaningful.
+
+All three assume a **cash account** (no margin, no shorting). The PDT
+(Pattern Day Trader) rule only applies to *margin* accounts — a cash
+account can day-trade freely as long as it respects T+1 settlement and
+the GFV/free-riding rules, which ``ComplianceService`` enforces. So the
+$25k PDT threshold does **not** gate the 10k preset.
 
 Both UI and trading engine read from ``RISK_PRESETS_FOR(scale)``, so the
 active scale is a single source of truth. Market-regime score maps
@@ -18,7 +27,7 @@ from dataclasses import dataclass, asdict
 from typing import Dict, Literal
 
 RiskLevel = Literal["conservative", "moderate", "aggressive"]
-CapitalScale = Literal["3k", "30k"]
+CapitalScale = Literal["3k", "10k", "30k"]
 
 
 @dataclass(frozen=True)
@@ -125,17 +134,86 @@ _PRESETS_3K: Dict[RiskLevel, RiskPreset] = {
 }
 
 
+# ─── $10,000 bridge scale ──────────────────────────────────────────────
+# Sits between 3k and 30k. Design rationale:
+# - Still cash-only (no margin, no shorting) → PDT rule doesn't apply.
+# - Enough settled cash that 4–8 concurrent rotations are realistic
+#   without starving GFV room, so we bump slot count and trade cap
+#   materially vs 3k.
+# - Per-trade min notional is raised modestly so SEC fee + TAF don't
+#   disproportionately eat profits at small-share scalps.
+# - Default TIF stays DAY on conservative/moderate (simpler, lets
+#   partial fills still work), switches to IOC on aggressive where
+#   rapid turnover matters more than hit-rate.
+# - Settled-cash cap between the two neighbours (~0.50).
+_PRESETS_10K: Dict[RiskLevel, RiskPreset] = {
+    "conservative": RiskPreset(
+        level="conservative",
+        scale="10k",
+        max_position_percent=8.0,
+        max_concurrent_positions=4,
+        stop_loss_percent=0.18,
+        take_profit_percent=0.45,
+        trailing_trigger_percent=0.14,
+        daily_loss_limit_percent=0.60,       # $60
+        daily_target_percent=0.70,           # $70
+        max_trades_per_day=40,
+        entry_score_threshold=62,
+        spread_filter_percent=0.03,
+        universe_size=8,
+        vix_halt_level=19.0,
+        blackout_window_minutes=60,
+        min_notional_slow=350.0,
+        min_notional_fast=600.0,
+        settled_cash_trade_cap=0.45,
+        default_tif="day",
+    ),
+    "moderate": RiskPreset(
+        level="moderate",
+        scale="10k",
+        max_position_percent=10.0,
+        max_concurrent_positions=6,
+        stop_loss_percent=0.25,
+        take_profit_percent=0.60,
+        trailing_trigger_percent=0.18,
+        daily_loss_limit_percent=1.00,       # $100
+        daily_target_percent=1.00,           # $100
+        max_trades_per_day=100,
+        entry_score_threshold=48,
+        spread_filter_percent=0.05,
+        universe_size=14,
+        vix_halt_level=23.0,
+        blackout_window_minutes=25,
+        min_notional_slow=450.0,
+        min_notional_fast=800.0,
+        settled_cash_trade_cap=0.50,
+        default_tif="day",
+    ),
+    "aggressive": RiskPreset(
+        level="aggressive",
+        scale="10k",
+        max_position_percent=9.0,
+        max_concurrent_positions=10,
+        stop_loss_percent=0.28,
+        take_profit_percent=0.55,
+        trailing_trigger_percent=0.16,
+        daily_loss_limit_percent=1.50,       # $150
+        daily_target_percent=1.30,           # $130
+        max_trades_per_day=280,
+        entry_score_threshold=28,
+        spread_filter_percent=0.10,
+        universe_size=24,
+        vix_halt_level=28.0,
+        blackout_window_minutes=5,
+        min_notional_slow=500.0,
+        min_notional_fast=1000.0,
+        settled_cash_trade_cap=0.55,
+        default_tif="ioc",
+    ),
+}
+
+
 # ─── $30,000 HFT paper test ────────────────────────────────────────────
-# Rationale:
-# - With SIP + unlimited API + us-east-1 co-located compute, per-scan
-#   latency drops from ~250 ms to <30 ms. That justifies tighter stops
-#   and more trades per day.
-# - $30k settled-cash base lets GFV room compound: each trade is a
-#   smaller % of settled cash so turnover rises while GFV risk falls.
-# - Minimum notional goes up so fills aren't 1-share scraps that get
-#   crushed by SEC fee + TAF on the sell side.
-# - Default TIF is IOC to discard unfilled remainders; cash is recycled
-#   in the next scan.
 _PRESETS_30K: Dict[RiskLevel, RiskPreset] = {
     "conservative": RiskPreset(
         level="conservative",
@@ -211,6 +289,8 @@ def RISK_PRESETS_FOR(scale: str) -> Dict[RiskLevel, RiskPreset]:
     s = (scale or "3k").strip().lower()
     if s == "30k":
         return _PRESETS_30K
+    if s == "10k":
+        return _PRESETS_10K
     return _PRESETS_3K
 
 
