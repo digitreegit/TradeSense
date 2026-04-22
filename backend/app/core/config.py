@@ -50,6 +50,20 @@ class Settings(BaseSettings):
     account_type: str = os.getenv("ACCOUNT_TYPE", "cash")
     scan_interval_seconds: float = float(os.getenv("SCAN_INTERVAL_SECONDS", "1"))
 
+    # Capital scale: "3k" | "10k" | "30k" | "auto"
+    # "auto" picks based on ``initial_capital``:
+    #   <$6,500 → 3k ; <$20,000 → 10k ; otherwise 30k
+    capital_scale: str = os.getenv("CAPITAL_SCALE", "auto")
+
+    # Streaming (Alpaca WebSocket)
+    alpaca_data_feed: str = os.getenv("ALPACA_DATA_FEED", "iex")  # "iex" or "sip"
+    streaming_enabled: bool = os.getenv("STREAMING_ENABLED", "true").lower() != "false"
+    streaming_symbols: str = os.getenv("STREAMING_SYMBOLS", "")  # comma-separated override
+
+    # Execution quality
+    execution_log_enabled: bool = os.getenv("EXECUTION_LOG_ENABLED", "true").lower() != "false"
+    default_order_tif: str = os.getenv("DEFAULT_ORDER_TIF", "day")  # "day" | "ioc"
+
     # AI
     ai_provider: str = os.getenv("AI_PROVIDER", "openai")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
@@ -81,3 +95,23 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def resolved_capital_scale() -> str:
+    """Return '3k', '10k', or '30k'.
+
+    Auto bands (when ``CAPITAL_SCALE=auto``):
+
+    - < \\$6,500  → "3k"
+    - < \\$20,000 → "10k"
+    - otherwise  → "30k"
+    """
+    mode = (settings.capital_scale or "auto").strip().lower()
+    if mode in ("3k", "10k", "30k"):
+        return mode
+    cap = float(settings.initial_capital or 0)
+    if cap >= 20_000:
+        return "30k"
+    if cap >= 6_500:
+        return "10k"
+    return "3k"

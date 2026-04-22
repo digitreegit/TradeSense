@@ -12,9 +12,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
-from app.core.config import settings
+from app.core.config import resolved_capital_scale, settings
 from app.services.alpaca_service import alpaca_service
 from app.services.analysis_agent import analysis_agent
+from app.services import streaming_service
 from app.api.deps import get_current_engine
 from app.services.user_runtime import default_engine, engines_to_run, warm_registered_users
 from app.api.routes import agent, alpaca, auth, market, portfolio, regime, trading
@@ -36,27 +37,41 @@ async def trading_loop():
     logger.info("Starting background trading loop...")
     while True:
         try:
-            # Even when the bot is IDLE, run_cycle checks auto-start conditions each interval.
             for eng in engines_to_run():
                 await eng.run_cycle()
         except Exception as e:
             logger.error(f"Error in trading loop: {e}")
-        
+
         await asyncio.sleep(settings.scan_interval_seconds)
+
+
+def _collect_streaming_universe() -> list:
+    """Union of all engines' focus symbols, plus an override from env."""
+    syms: set = set()
+    for eng in engines_to_run():
+        try:
+            syms.update(eng.focus_symbols or [])
+            syms.update(getattr(eng, "SCALP_UNIVERSE", []))
+        except Exception:
+            continue
+    override = (settings.streaming_symbols or "").strip()
+    if override:
+        syms.update(s.strip().upper() for s in override.split(",") if s.strip())
+    return sorted(syms)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
-    # Startup
     logger.info("=" * 60)
     logger.info("🚀 TradeSense Backend Starting...")
     logger.info(f"📊 Trading Mode: {settings.trading_mode.upper()}")
     logger.info(f"💰 Initial Capital: ${settings.initial_capital:,.2f}")
+    logger.info(f"🏛️ Capital Scale: {resolved_capital_scale()}")
+    logger.info(f"📡 Data Feed: {settings.alpaca_data_feed.upper()}")
     logger.info(f"🤖 AI Provider: {settings.ai_provider}")
     logger.info("=" * 60)
 
-    # Initialize services
     alpaca_service.initialize()
     analysis_agent.initialize()
     warm_registered_users()
@@ -78,12 +93,35 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("User DB init: %s", e)
 
+    # Start WebSocket market data stream (best-effort; never blocks boot).
+    if settings.streaming_enabled and settings.alpaca_api_key and settings.alpaca_secret_key:
+        try:
+            syms = _collect_streaming_universe()
+            if syms:
+                streaming_service.start(
+                    syms,
+                    settings.alpaca_api_key,
+                    settings.alpaca_secret_key,
+                    feed=settings.alpaca_data_feed,
+                )
+                logger.info(
+                    "📡 Streaming started (feed=%s, symbols=%d)",
+                    settings.alpaca_data_feed, len(syms),
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Streaming failed to start (REST fallback active): %s", exc)
+    else:
+        logger.info("📡 Streaming disabled (STREAMING_ENABLED=false or keys missing)")
+
     yield
 
-    # Shutdown
     logger.info("👋 TradeSense Backend shutting down...")
     if trading_task:
         trading_task.cancel()
+    try:
+        await streaming_service.stop()
+    except Exception:
+        pass
     default_engine.stop()
 
 
@@ -91,11 +129,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="TradeSense API",
     description="AI-Powered Quant Trading Platform - Paper Trading",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
-# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -109,7 +146,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
 app.include_router(auth.router, prefix="/api")
 app.include_router(trading.router, prefix="/api")
 app.include_router(market.router, prefix="/api")
@@ -123,8 +159,10 @@ app.include_router(alpaca.router, prefix="/api")
 async def root():
     return {
         "name": "TradeSense API",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "mode": settings.trading_mode,
+        "scale": resolved_capital_scale(),
+        "feed": settings.alpaca_data_feed,
         "status": "running",
     }
 
@@ -147,6 +185,9 @@ async def health():
         "ai_provider": settings.ai_provider,
         "bot_active": default_engine.is_active,
         "mode": settings.trading_mode,
+        "scale": resolved_capital_scale(),
+        "feed": settings.alpaca_data_feed,
+        "streaming": streaming_service.state(),
     }
 
 
@@ -161,12 +202,15 @@ async def health_alpaca_usage(engine=Depends(get_current_engine)):
     return engine._alpaca.get_api_usage()
 
 
-# --- Serve frontend static files in production ---
-# In deployment, frontend files sit alongside backend (not in frontend/dist)
-_app_root = Path(__file__).resolve().parent.parent.parent  # project root
+@app.get("/api/health/streaming")
+async def health_streaming():
+    """Current WebSocket streaming state (connected, feed, subscribed)."""
+    return streaming_service.state()
+
+
+_app_root = Path(__file__).resolve().parent.parent.parent
 STATIC_DIR = _app_root / "frontend" / "dist"
 if not STATIC_DIR.is_dir():
-    # Flat deployment: index.html and assets/ are at project root
     STATIC_DIR = _app_root
 
 if STATIC_DIR.is_dir() and (STATIC_DIR / "index.html").is_file():
@@ -176,13 +220,6 @@ if STATIC_DIR.is_dir() and (STATIC_DIR / "index.html").is_file():
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        """Serve the SPA; fall back to index.html for client-side routes.
-
-        Never swallow real API routes: the catch-all is registered after routers,
-        but some ASGI stacks still prefer this handler for unknown paths. If the
-        path looks like an API call, return 404 JSON instead of index.html so
-        clients don't get HTML where they expect JSON.
-        """
         if full_path == "api" or full_path.startswith("api/"):
             return JSONResponse(
                 status_code=404,

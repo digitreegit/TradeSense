@@ -1,6 +1,12 @@
 """
 TradeSense - Trading Engine v4
-Cash-account micro-scalping with compliance, event, and regime guards.
+Cash-account scalping with compliance, event, and regime guards.
+
+v4.1 adds:
+- Capital-scale aware risk presets (3k vs 30k) via core.risk_presets
+- WebSocket-first snapshot reads (AlpacaService already prefers streaming)
+- Marketable-limit + IOC TIF through a single Executor abstraction
+- Execution-quality logging (signal → order → fill → slippage JSONL)
 
 Delegates:
 - Compliance (GFV / free-riding / wash-sale / cooldowns) → self._compliance
@@ -9,26 +15,30 @@ Delegates:
 - Risk preset tables driven by regime score             → core.risk_presets
 - Entry scoring (scalp + VWAP + ORB + EOD + news-fade)  → playbooks
 - Marketable-limit orders + spread filter               → execution_service
+- Per-order slippage + latency JSONL                    → execution_logger
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 from datetime import date, datetime, time
+from pathlib import Path
 from typing import Optional
 
 import pytz
 
-from app.core.config import settings
+from app.core.config import resolved_capital_scale, settings
 from app.core.risk_presets import (
-    RISK_PRESETS,
+    RISK_PRESETS_FOR,
     is_halted_score,
     market_level_for_score,
+    preset_for_level,
     preset_for_score,
 )
 from app.services.alpaca_service import AlpacaService
 from app.services.compliance_service import ComplianceService
 from app.services.event_calendar import is_blackout, symbol_is_earnings_today
+from app.services.execution_logger import ExecutionLogger
 from app.services.execution_service import Executor, spread_info
 from app.services.playbooks import combine as combine_playbooks
 from app.services.regime_service import RegimeService
@@ -43,21 +53,21 @@ def is_market_open() -> bool:
     now_et = datetime.now(ET)
     if now_et.weekday() >= 5:
         return False
-    market_open  = time(9, 30)
+    market_open = time(9, 30)
     market_close = time(16, 0)
     return market_open <= now_et.time() <= market_close
 
 
 class TradingEngine:
-    """Cash Account Micro-Scalp Engine with GFV prevention."""
+    """Cash-account scalp engine with GFV prevention."""
 
-    # ─── Liquid scalping candidates (tight spreads, high volume) ───
     SCALP_UNIVERSE = [
         "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "AMD", "TSLA",
         "SPY", "QQQ", "INTC", "NFLX", "AVGO", "CRM", "UBER",
+        # Added for the $30k scale — higher-ADV liquid names with tight spreads
+        "MU", "COIN", "PLTR", "SMCI", "IWM", "DIA", "XLK", "XLE",
     ]
 
-    # ─── Playbook metadata (shared with /trading/strategies route) ───
     PLAYBOOKS: list = [
         {
             "id": "scalp",
@@ -92,19 +102,27 @@ class TradingEngine:
         alpaca: AlpacaService,
         compliance: ComplianceService,
         owner_email: Optional[str] = None,
+        log_dir: Optional[Path] = None,
     ):
         self._alpaca = alpaca
         self._compliance = compliance
-        self._executor = Executor(alpaca)
+        self._scale = resolved_capital_scale()
+
+        self._exec_logger = ExecutionLogger(
+            log_dir=log_dir,
+            owner_tag=(owner_email or "default"),
+        )
+        self._executor = Executor(alpaca, exec_logger=self._exec_logger)
         self._regime = RegimeService(alpaca)
         self.owner_email = (owner_email or "").strip().lower() or None
 
-        self.active           = False
+        self.active = False
         self.active_strategy: Optional[str] = None
         self.last_regime_reason: str = ""
 
         # Focus universe (AI + regime tilt can override)
-        self.focus_symbols: list = list(self.SCALP_UNIVERSE[:8])
+        universe_slice = 12 if self._scale == "30k" else 8
+        self.focus_symbols: list = list(self.SCALP_UNIVERSE[:universe_slice])
         self.focus_sectors: list = ["tech_ai", "tech_software"]
 
         # Daily tracking
@@ -118,13 +136,22 @@ class TradingEngine:
         # Per-position peaks for trailing stop high-water mark
         self._position_peaks: dict = {}
 
-        # Current active risk preset (starts moderate)
-        self._preset = RISK_PRESETS["moderate"]
+        # Active risk preset (respects scale)
+        table = RISK_PRESETS_FOR(self._scale)
+        self._preset = table["moderate"]
 
-        # Regime / UI data
+        # Track open orders we've submitted so we can reconcile fills for
+        # execution-quality analysis.
+        # broker_id → client_id
+        self._pending_reconcile: dict = {}
+
         self.regime_data: dict = {
             "strategy": "scalp",
-            "reasoning": "Cash-account micro-scalp: $3,000 → +1%/day compounding target",
+            "reasoning": (
+                f"{self._scale}-scale scalp — "
+                f"${settings.initial_capital:,.0f} → "
+                f"+{self._preset.daily_target_percent}%/day"
+            ),
             "risk_level": self._preset.level,
             "market_score": 50.0,
             "market_level": "NORMAL",
@@ -136,12 +163,13 @@ class TradingEngine:
             "daily_target": f"+{self._preset.daily_target_percent}%",
             "daily_pnl": "$0.00",
             "account_type": settings.account_type,
+            "capital_scale": self._scale,
             "blackout": False,
             "blackout_reason": "",
             "timestamp": datetime.now().strftime("%b %d, %Y, %-I:%M%p"),
         }
 
-        # ─── Session stats ────────────────────────────────────
+        # Session stats
         self.trade_logs: list = []
         self.session_stats = {
             "total_trades":   0,
@@ -151,14 +179,13 @@ class TradingEngine:
             "loss_sum":       0.0,
             "total_pnl":      0.0,
             "max_drawdown":   0.0,
+            "slippage_bps_sum": 0.0,
+            "slippage_bps_count": 0,
         }
         self._scan_count = 0
-        self._v3_cleanup_done = False  # Flag: have we cleaned up legacy positions?
+        self._v3_cleanup_done = False
 
-        # ─── Playbook routing ────────────────────────────────
-        # auto_playbooks=True → engine decides which playbooks participate
-        # based on time-of-day / regime; user edits the MANUAL list instead,
-        # which is only consulted when auto is OFF.
+        # Playbook routing
         self.auto_playbooks: bool = True
         self.manual_playbooks: list = ["scalp", "vwap", "orb", "eod"]
         self._last_active_playbooks: list = list(self.manual_playbooks)
@@ -167,6 +194,55 @@ class TradingEngine:
     def set_owner_email(self, email: Optional[str]) -> None:
         """Attach/update recipient email for per-user notifications."""
         self.owner_email = (email or "").strip().lower() or None
+
+    # ─── Capital scale (hot-swap 3k/10k/30k preset tables) ─────
+
+    def get_scale_info(self) -> dict:
+        """Report current scale + preset level so the UI can render the selector."""
+        return {
+            "scale": self._scale,
+            "level": self._preset.level,
+            "auto": True,
+            "available": ["3k", "10k", "30k"],
+            "preset": self._preset.as_dict(),
+        }
+
+    def set_capital_scale(self, scale: str) -> dict:
+        """Switch the active preset table at runtime.
+
+        Keeps the current risk *level* (conservative/moderate/aggressive)
+        and swaps only the scale-dependent parameters. Safe to call while
+        the bot is active — the change is visible on the next scan.
+        """
+        new_scale = (scale or "").strip().lower()
+        if new_scale not in ("3k", "10k", "30k"):
+            raise ValueError(f"unknown capital scale: {scale!r}")
+        if new_scale == self._scale:
+            return self.get_scale_info()
+
+        old_scale = self._scale
+        self._scale = new_scale
+        self._preset = preset_for_level(self._preset.level, scale=new_scale)
+
+        self.regime_data.update(
+            {
+                "capital_scale": self._scale,
+                "risk_level": self._preset.level,
+                "max_position_percent": self._preset.max_position_percent,
+                "stop_loss_percent": self._preset.stop_loss_percent,
+                "take_profit_percent": self._preset.take_profit_percent,
+                "daily_target": f"+{self._preset.daily_target_percent}%",
+                "timestamp": datetime.now().strftime("%b %d, %Y, %-I:%M%p"),
+            }
+        )
+        self._log(
+            "info",
+            f"🔧 Capital scale switched: {old_scale} → {new_scale} | "
+            f"preset={self._preset.level.upper()} | TIF={self._preset.default_tif.upper()} | "
+            f"slots={self._preset.max_concurrent_positions} | "
+            f"trades/day={self._preset.max_trades_per_day}",
+        )
+        return self.get_scale_info()
 
     # ─── Control ──────────────────────────────────────────────
 
@@ -178,16 +254,14 @@ class TradingEngine:
         max_position: Optional[float] = None,
         risk_level: Optional[str] = None,
     ):
-        self.active          = True
+        self.active = True
         self.active_strategy = strategy
         self.regime_data["timestamp"] = datetime.now().strftime("%b %d, %Y, %-I:%M%p")
         self._sync_regime_playbook_display()
 
         if risk_level:
-            from app.core.risk_presets import preset_for_level
-            self._preset = preset_for_level(risk_level)
+            self._preset = preset_for_level(risk_level, scale=self._scale)
 
-        # Overrides still allowed, but clamped to scalp-safe bounds.
         preset = self._preset
         if stop_loss is not None:
             preset = preset.__class__(
@@ -205,7 +279,8 @@ class TradingEngine:
 
         self._log(
             "info",
-            f"🚀 Bot started — {preset.level.upper()} | Capital: ${settings.initial_capital:,.0f}",
+            f"🚀 Bot started [{self._scale}] — {preset.level.upper()} | "
+            f"Capital: ${settings.initial_capital:,.0f} | TIF: {preset.default_tif.upper()}",
         )
         self._log(
             "info",
@@ -217,7 +292,10 @@ class TradingEngine:
             f"SL -{preset.stop_loss_percent}% | TP +{preset.take_profit_percent}% | "
             f"Trail {preset.trailing_trigger_percent}% | Spread ≤ {preset.spread_filter_percent}%",
         )
-        logger.info("Trading engine started: %s (preset=%s)", strategy, preset.level)
+        logger.info(
+            "Trading engine started: %s (scale=%s preset=%s)",
+            strategy, self._scale, preset.level,
+        )
 
     def stop(self):
         self.active = False
@@ -231,7 +309,6 @@ class TradingEngine:
     # ─── Playbook configuration ───────────────────────────────
 
     def get_playbook_config(self) -> dict:
-        """Return current playbook routing state (for the API / UI)."""
         active = self._choose_active_playbooks(datetime.now(ET))
         return {
             "auto": self.auto_playbooks,
@@ -252,7 +329,6 @@ class TradingEngine:
         auto: Optional[bool] = None,
         manual: Optional[list] = None,
     ) -> dict:
-        """Update AUTO flag and/or the manual enabled set. Unknown ids are ignored."""
         if auto is not None:
             self.auto_playbooks = bool(auto)
         if manual is not None:
@@ -273,8 +349,6 @@ class TradingEngine:
         return self.get_playbook_config()
 
     def _choose_active_playbooks(self, now_et: datetime) -> list:
-        """AUTO → time-of-day + regime driven routing.
-        MANUAL → respect whatever the user ticked."""
         if not self.auto_playbooks:
             return list(self.manual_playbooks)
 
@@ -283,37 +357,21 @@ class TradingEngine:
         news = float(self.regime_data.get("news_score", 0.0) or 0.0)
 
         active: list = []
-
-        # Opening auction window (9:30 – 9:35) already blacked out upstream,
-        # but as soon as the range prints we enable ORB until late morning.
         if time(9, 35) <= t < time(11, 0):
             active.append("orb")
-
-        # VWAP mean-reversion is most useful after the first impulse.
         if time(10, 0) <= t < time(15, 30):
             active.append("vwap")
-
-        # Core scalp across RTH except the very last minutes where spreads widen.
         if time(9, 35) <= t < time(15, 45):
             active.append("scalp")
-
-        # EOD drift into the close window.
         if time(15, 30) <= t < time(15, 58):
             active.append("eod")
-
-        # News-fade is only trusted when a strong panic signal is in regime.
         if news <= -0.6:
             active.append("news-fade")
-
-        # In clearly risk-off regimes, fall back to news-fade only.
         if score < 25:
             active = [p for p in active if p in ("news-fade",)] or ["news-fade"]
-
-        # If nothing matched (e.g. pre-market / after-hours), keep at least the scalp.
         if not active:
             active = ["scalp"]
 
-        # De-dup while preserving order.
         seen = set()
         uniq = []
         for p in active:
@@ -323,24 +381,16 @@ class TradingEngine:
         return uniq
 
     def _sync_regime_playbook_display(self, now_et: Optional[datetime] = None) -> None:
-        """Keep regime_data in sync for the dashboard even when the bot is idle
-        or the market is closed (not only inside _run_scalp)."""
         when = now_et or datetime.now(ET)
         active = self._choose_active_playbooks(when)
         self._last_active_playbooks = list(active)
         self.regime_data["active_playbooks"] = active
         self.regime_data["playbook_mode"] = "auto" if self.auto_playbooks else "manual"
-        # Human-readable combo for any legacy UI still reading `strategy`
         self.regime_data["strategy"] = " + ".join(p.upper() for p in active)
-
-    def set_owner_email(self, email: Optional[str]) -> None:
-        """Set notification recipient for this engine instance."""
-        self.owner_email = (email or "").strip().lower() or None
 
     # ─── Main Loop ────────────────────────────────────────────
 
     async def run_cycle(self):
-        """Run one trading cycle."""
         now_et = datetime.now(ET)
         is_weekend = now_et.weekday() >= 5
         market_time = now_et.time()
@@ -350,7 +400,6 @@ class TradingEngine:
             self._reset_daily(today)
             self._compliance.sweep_settlements()
 
-        # Auto start/stop
         if not is_weekend:
             if market_time >= time(9, 20) and market_time < time(16, 10):
                 if not self.active:
@@ -389,10 +438,9 @@ class TradingEngine:
                         trades=int(self._daily_trades),
                         win_rate_pct=float(self.get_stats().get("win_rate", 0.0)),
                     )
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     logger.warning("Failed to send daily summary email: %s", exc)
 
-        # Dashboard playbook line updates every scan, even when bot is off / market closed.
         self._sync_regime_playbook_display(now_et)
 
         if not self.active:
@@ -405,63 +453,57 @@ class TradingEngine:
                 self._log("info", f"Standby — Market opens at 9:30 AM ET | Now: {now_et.strftime('%H:%M ET')}")
             return
 
-        # ─── Check daily limits ───────────────────────────────
         if self._daily_loss_limit_hit:
             if self._scan_count % 10 == 1:
                 self._log("info", f"⛔ Daily loss limit hit (${self._daily_pnl:+,.2f}). No more trades today.")
             return
 
-        # Quantitative regime (cheap, every 10 scans) + AI regime (every 30)
+        # Regime checks
         if self._scan_count % 10 == 1:
             self._quant_regime_check()
         if self._scan_count % 30 == 1:
             await self._ai_regime_check()
 
-        # ─── One-time cleanup of legacy positions ─────────────
+        # Reconcile any outstanding order fills (for slippage logging)
+        self._reconcile_pending_fills()
+
+        # One-time cleanup of legacy positions
         if not self._v3_cleanup_done:
             await self._cleanup_legacy_positions()
-            
-            # Wait until all cleanup orders are fulfilled before proceeding to main scalp
             pending = self._alpaca.get_orders(status="open")
             cleanup_pending = [o for o in pending if str(o.get("side", "")).lower() == "sell"]
             if not pending:
                 self._v3_cleanup_done = True
-                self._log("info", "✅ Legacy cleanup confirmed — ready for $3,000 scalping!")
+                self._log("info", "✅ Legacy cleanup confirmed — ready for scalping!")
             else:
                 if self._scan_count % 5 == 1:
                     self._log(
                         "info",
                         f"🧹 Waiting for {len(cleanup_pending)} cleanup orders to fill "
-                        f"(open total: {len(pending)})..."
+                        f"(open total: {len(pending)})...",
                     )
-                # Do not block the strategy if there are only non-cleanup pending orders.
                 if cleanup_pending:
-                    return # Keep waiting only for cleanup sells
+                    return
 
-        # ─── Execute Strategy ─────────────────────────────────
         try:
-            account   = self._alpaca.get_account()
+            account = self._alpaca.get_account()
             positions = self._alpaca.get_positions()
-            pending   = self._alpaca.get_orders(status="open")
-            
-            equity    = account["equity"]
-            cash      = account["cash"]
-            
-            pending_symbols = [o["symbol"] for o in pending]
+            pending = self._alpaca.get_orders(status="open")
+            equity = account["equity"]
+            cash = account["cash"]
 
-            # Update daily P&L
             self._daily_pnl = equity - self._day_start_equity
             daily_pnl_pct = (self._daily_pnl / self._day_start_equity) * 100
 
-            # Update regime_data for UI
             self.regime_data["daily_pnl"] = f"${self._daily_pnl:+,.2f} ({daily_pnl_pct:+.2f}%)"
 
-            self._log("info",
+            self._log(
+                "info",
                 f"Scan #{self._scan_count} | Equity: ${equity:,.2f} | "
                 f"Daily P&L: ${self._daily_pnl:+,.2f} ({daily_pnl_pct:+.2f}%) | "
-                f"Positions: {len(positions)} | Trades: {self._daily_trades}")
+                f"Positions: {len(positions)} | Trades: {self._daily_trades}",
+            )
 
-            # Check daily loss limit
             if daily_pnl_pct <= -self._preset.daily_loss_limit_percent:
                 self._daily_loss_limit_hit = True
                 from app.services.notification_service import notification_service
@@ -469,11 +511,11 @@ class TradingEngine:
                 notification_service.send_alert(
                     "⛔ Daily loss limit hit",
                     f"P&L: ${self._daily_pnl:+,.2f} ({daily_pnl_pct:+.2f}%)\nNo more trades today.",
-                    "CRITICAL"
+                    "CRITICAL",
+                    to_email=self.owner_email,
                 )
                 return
 
-            # Check daily target
             if daily_pnl_pct >= self._preset.daily_target_percent and not self._daily_target_reached:
                 self._daily_target_reached = True
                 from app.services.notification_service import notification_service
@@ -481,10 +523,10 @@ class TradingEngine:
                 notification_service.send_alert(
                     "🎯 Daily target reached",
                     f"P&L: ${self._daily_pnl:+,.2f} (+{daily_pnl_pct:.2f}%)\nReducing aggressiveness to protect gains.",
-                    "SUCCESS"
+                    "SUCCESS",
+                    to_email=self.owner_email,
                 )
 
-            # Blackout window / VIX halt check (entries only)
             preset = self._preset
             blackout, reason = is_blackout(now_et, preset.blackout_window_minutes)
             score = float(self.regime_data.get("market_score", 50.0))
@@ -512,10 +554,52 @@ class TradingEngine:
             self._log("error", f"Cycle error: {str(e)}")
             logger.error(f"Trading cycle error: {e}")
 
+    # ─── Fill reconciliation for execution quality logging ─────────
+
+    def _reconcile_pending_fills(self) -> None:
+        """Poll broker for status on any order we previously submitted and
+        record slippage once it fills. Safe to call on every scan; bounded
+        by ``_pending_reconcile`` size.
+        """
+        if not self._pending_reconcile:
+            return
+        to_drop: list = []
+        for broker_id, client_id in list(self._pending_reconcile.items()):
+            try:
+                info = self._alpaca.get_order(broker_id)
+            except Exception:
+                continue
+            if not info:
+                continue
+            status = info.get("status", "")
+            terminal = {"filled", "canceled", "expired", "rejected", "done_for_day"}
+            if status not in terminal and info.get("filled_avg_price") is None:
+                continue
+            filled_price = info.get("filled_avg_price") or 0.0
+            filled_qty = info.get("filled_qty") or 0.0
+            slip = self._exec_logger.log_fill(
+                client_id,
+                filled_avg_price=float(filled_price or 0.0),
+                filled_qty=float(filled_qty or 0.0),
+                status=str(status),
+                filled_at=info.get("filled_at"),
+            )
+            if slip is not None:
+                self.session_stats["slippage_bps_sum"] += slip
+                self.session_stats["slippage_bps_count"] += 1
+            to_drop.append(broker_id)
+        for bid in to_drop:
+            self._pending_reconcile.pop(bid, None)
+
+    def _track_for_reconcile(self, order: dict) -> None:
+        bid = order.get("id")
+        cid = order.get("client_id")
+        if bid and cid:
+            self._pending_reconcile[bid] = cid
+
     # ── Legacy Position Cleanup ─────────────────────────────────
 
     async def _cleanup_legacy_positions(self):
-        """Sell ALL existing positions from old strategy. V3 starts with a clean slate."""
         try:
             positions = self._alpaca.get_positions()
             if not positions:
@@ -527,15 +611,12 @@ class TradingEngine:
             for pos in positions:
                 symbol = pos["symbol"]
                 raw_qty = int(pos["qty"])
-                
                 if raw_qty == 0:
                     continue
-                
                 if raw_qty > 0:
                     self._log("info", f"  Selling {raw_qty}x {symbol} (legacy cleanup)")
                     res = self._alpaca.submit_market_order(symbol, raw_qty, "sell")
                 else:
-                    # Negative qty (short): cover with a buy
                     cover_qty = abs(raw_qty)
                     self._log("info", f"  Covering {cover_qty}x {symbol} short position (legacy cleanup)")
                     res = self._alpaca.submit_market_order(symbol, cover_qty, "buy")
@@ -545,7 +626,7 @@ class TradingEngine:
                 else:
                     self._log("info", f"  ✅ Closed {symbol}")
 
-            self._log("info", "🧹 Legacy cleanup complete — ready for $3,000 scalping!")
+            self._log("info", "🧹 Legacy cleanup complete — ready for scalping!")
 
         except Exception as e:
             self._log("error", f"Legacy cleanup error: {e}")
@@ -554,15 +635,16 @@ class TradingEngine:
     # ─── Daily Reset ──────────────────────────────────────────
 
     def _reset_daily(self, today: date):
-        """Reset daily tracking for a new trading day."""
         self._trading_date = today
         self._daily_pnl = 0.0
         self._daily_trades = 0
         self._daily_target_reached = False
         self._daily_loss_limit_hit = False
         self._position_peaks.clear()
+        self._pending_reconcile.clear()
+        self.session_stats["slippage_bps_sum"] = 0.0
+        self.session_stats["slippage_bps_count"] = 0
 
-        # Get current equity as day start
         try:
             account = self._alpaca.get_account()
             self._day_start_equity = account["equity"]
@@ -593,8 +675,7 @@ class TradingEngine:
     # ─── Regime checks ────────────────────────────────────────
 
     def _apply_preset_from_score(self, score: float, source: str):
-        """Deterministic score → preset mapping. Logs only when it changes."""
-        new_preset = preset_for_score(score)
+        new_preset = preset_for_score(score, scale=self._scale)
         if new_preset.level != self._preset.level:
             self._log(
                 "info",
@@ -615,7 +696,6 @@ class TradingEngine:
         )
 
     def _quant_regime_check(self):
-        """Cheap quantitative regime using ETF proxies (no LLM)."""
         try:
             quant = self._regime.compute_scores()
             score = quant["composite"]
@@ -633,11 +713,10 @@ class TradingEngine:
                 self.focus_symbols = self._regime.suggested_universe(tilt)[: self._preset.universe_size]
                 self.regime_data["focus_symbols"] = self.focus_symbols
             self._apply_preset_from_score(score, source="quant")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("quant regime check failed: %s", exc)
 
     async def _ai_regime_check(self):
-        """Use AI to analyze news and adjust focus symbols."""
         try:
             from app.services.analysis_agent import analysis_agent
             news = self._alpaca.get_latest_news(
@@ -650,7 +729,6 @@ class TradingEngine:
                 old_strat = self.active_strategy
                 old_risk = settings.risk_level
 
-                # Apply focus symbols from AI
                 new_symbols = regime.get("focus_symbols", self.focus_symbols)
                 new_sectors = regime.get("focus_sectors", self.focus_sectors)
                 if new_symbols != self.focus_symbols:
@@ -658,7 +736,6 @@ class TradingEngine:
                     self.focus_symbols = new_symbols
                     self.focus_sectors = new_sectors
 
-                # Combine AI market_score with quantitative score (60/40)
                 ai_score = float(regime.get("market_score", 50.0))
                 quant_score = float(self.regime_data.get("market_score", 50.0))
                 blended = 0.6 * quant_score + 0.4 * ai_score
@@ -691,21 +768,14 @@ class TradingEngine:
     # ─── Scalping Strategy ────────────────────────────────────
 
     async def _run_scalp(self, account: dict, positions: list, pending: list):
-        """
-        Cash-account scalping with:
-        - High-water-mark trailing stop per position
-        - Marketable-limit orders + spread filter
-        - GFV tracking via self._compliance
-        - Daily trade cap + loss-streak cooldown
-        - Event / opening-auction / VIX blackout for entries only
-        """
         preset = self._preset
-        equity  = account["equity"]
-        cash    = account["cash"]
+        equity = account["equity"]
+        cash = account["cash"]
         settled = self._compliance.settled_cash(cash)
         now_et = datetime.now(ET)
         self._sync_regime_playbook_display(now_et)
         active_playbooks = list(self.regime_data.get("active_playbooks") or self._last_active_playbooks)
+        active_playbook_tag = ",".join(active_playbooks) if active_playbooks else None
 
         pending_symbols = [o["symbol"] for o in pending]
         current_symbols = [p["symbol"] for p in positions]
@@ -713,7 +783,7 @@ class TradingEngine:
         # ── 1. Manage open positions ────────────────────────────
         for pos in positions:
             symbol = pos["symbol"]
-            plpc   = pos["unrealized_plpc"]
+            plpc = pos["unrealized_plpc"]
             pl_usd = pos["unrealized_pl"]
             qty_to_sell = int(pos["qty"])
 
@@ -728,7 +798,6 @@ class TradingEngine:
             if not self._can_sell(symbol):
                 continue
 
-            # Maintain peak for trailing stop
             peak = self._position_peaks.get(symbol, plpc)
             if plpc > peak:
                 peak = plpc
@@ -748,10 +817,20 @@ class TradingEngine:
                 continue
 
             self._log("sell", f"{exit_reason} {symbol} (${pl_usd:+,.2f})")
-            res = self._executor.sell(symbol, qty_to_sell, snapshot, preset.spread_filter_percent)
+            res = self._executor.sell(
+                symbol,
+                qty_to_sell,
+                snapshot,
+                preset.spread_filter_percent,
+                tif="day",  # exits are always DAY so partial fills keep working
+                reasons=[exit_reason],
+                playbook=active_playbook_tag,
+                ref_price=float(pos.get("current_price") or pos.get("avg_entry_price") or 0.0),
+            )
             if "error" in res:
                 self._log("error", f"Exit failed {symbol}: {res['error']}")
                 continue
+            self._track_for_reconcile(res)
 
             exit_price = float(pos.get("current_price") or pos.get("avg_entry_price") or 0.0)
             cost_basis = qty_to_sell * float(pos.get("avg_entry_price") or 0.0)
@@ -762,10 +841,10 @@ class TradingEngine:
             self.session_stats["total_trades"] += 1
             if pl_usd > 0:
                 self.session_stats["winning_trades"] += 1
-                self.session_stats["win_sum"]        += pl_usd
+                self.session_stats["win_sum"] += pl_usd
             else:
-                self.session_stats["losing_trades"]  += 1
-                self.session_stats["loss_sum"]       += abs(pl_usd)
+                self.session_stats["losing_trades"] += 1
+                self.session_stats["loss_sum"] += abs(pl_usd)
             self.session_stats["total_pnl"] += pl_usd
 
         # Loss-streak circuit breaker
@@ -792,13 +871,14 @@ class TradingEngine:
         slots = preset.max_concurrent_positions - (len(current_symbols) + len(set(pending_buys)))
         if slots <= 0:
             return
-        if settled < 100:
+        # At 30k scale we need more headroom so a single scan-cash snapshot
+        # isn't misleading; use a proportional floor.
+        min_cash_floor = 100 if self._scale == "3k" else 500
+        if settled < min_cash_floor:
             self._log("info", f"💤 Settled cash too low: ${settled:,.2f}")
             return
 
         entry_threshold = preset.entry_score_threshold
-        # Opening momentum window (9:35–10:05 ET):
-        # allow slightly easier entries to increase scalp frequency.
         if time(9, 35) <= now_et.time() < time(10, 5):
             entry_threshold = max(20, entry_threshold - 8)
         if self._daily_target_reached:
@@ -812,7 +892,6 @@ class TradingEngine:
             block = self._compliance.can_enter(symbol)
             if block:
                 continue
-            # Earnings-today skip (earnings dates can be injected later)
             if symbol_is_earnings_today(symbol, getattr(self, "_earnings_today", {})):
                 continue
 
@@ -823,7 +902,7 @@ class TradingEngine:
                     if len(bars) < 14:
                         continue
 
-                closes  = [b["close"] for b in bars]
+                closes = [b["close"] for b in bars]
                 volumes = [b.get("volume", 0) for b in bars]
                 indicators = self._calculate_indicators(closes)
                 price = closes[-1]
@@ -847,24 +926,22 @@ class TradingEngine:
                 if total >= entry_threshold:
                     scored.append((total, symbol, price, reasons))
 
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning(f"Scan error for {symbol}: {exc}")
 
         # ── 4. Execute ──────────────────────────────────────────
         scored.sort(key=lambda x: -x[0])
-        for score, symbol, price, reasons in scored[:slots]:
+        fast_names = {"TSLA", "NVDA", "AMD", "META", "QQQ", "SMCI", "COIN"}
+        for score_val, symbol, price, reasons in scored[:slots]:
             if symbol in pending_symbols:
                 continue
 
             max_value = equity * (preset.max_position_percent / 100)
-            # Dynamic minimum notional by symbol "speed" bucket.
-            # Faster / high-beta names get slightly larger minimum size so entries
-            # are meaningful, while still bounded by settled-cash-only sizing.
-            fast_names = {"TSLA", "NVDA", "AMD", "META", "QQQ"}
-            min_notional = 300.0 if symbol in fast_names else 180.0
-            # Cash-safe aggressive mode:
-            # always size only from settled cash to avoid unsettled-fund reuse/GFV risk.
-            buy_power = min(max_value, settled * 0.60)
+            min_notional = (
+                preset.min_notional_fast if symbol in fast_names
+                else preset.min_notional_slow
+            )
+            buy_power = min(max_value, settled * preset.settled_cash_trade_cap)
             if buy_power < min_notional:
                 continue
             qty = int(buy_power / price)
@@ -883,15 +960,26 @@ class TradingEngine:
             cost = qty * price
             self._log(
                 "signal",
-                f"📊 BUY {symbol}: score={score} | {' + '.join(reasons)} | "
+                f"📊 BUY {symbol}: score={score_val} | {' + '.join(reasons)} | "
                 f"${price:.2f} × {qty} = ${cost:,.0f}",
             )
 
             settled_before = settled
-            res = self._executor.buy(symbol, qty, snapshot, preset.spread_filter_percent)
+            res = self._executor.buy(
+                symbol,
+                qty,
+                snapshot,
+                preset.spread_filter_percent,
+                tif=preset.default_tif,
+                score=float(score_val),
+                reasons=reasons,
+                playbook=active_playbook_tag,
+                ref_price=float(ask or price),
+            )
             if "error" in res:
                 self._log("error", f"Order failed {symbol}: {res['error']}")
                 continue
+            self._track_for_reconcile(res)
 
             self._compliance.record_buy(symbol, qty, price, settled_before)
             self._position_peaks[symbol] = 0.0
@@ -910,27 +998,27 @@ class TradingEngine:
 
         ema12 = self._ema(arr, 12)
         ema26 = self._ema(arr, 26) if len(arr) >= 26 else self._ema(arr, len(arr))
-        macd  = ema12[:len(ema26)] - ema26 if len(ema12) >= len(ema26) else ema12 - ema26[:len(ema12)]
-        sig   = self._ema(macd, 9) if len(macd) >= 9 else self._ema(macd, max(len(macd), 1))
+        macd = ema12[:len(ema26)] - ema26 if len(ema12) >= len(ema26) else ema12 - ema26[:len(ema12)]
+        sig = self._ema(macd, 9) if len(macd) >= 9 else self._ema(macd, max(len(macd), 1))
         macd_signal = "bullish" if len(macd) > 0 and len(sig) > 0 and macd[-1] > sig[-1] else "bearish"
 
         n = min(20, len(arr))
-        ma20    = float(np.mean(arr[-n:]))
-        std20   = float(np.std(arr[-n:]))
+        ma20 = float(np.mean(arr[-n:]))
+        std20 = float(np.std(arr[-n:]))
         bb_upper = ma20 + 2 * std20
         bb_lower = ma20 - 2 * std20
 
         ma50 = float(np.mean(arr[-min(50, len(arr)):])) if len(arr) >= 10 else float(np.mean(arr))
 
         return {
-            "rsi":         rsi,
-            "macd_line":   float(macd[-1]) if len(macd) > 0 else 0,
-            "macd_signal": macd_signal,
-            "bb_upper":    bb_upper,
-            "bb_lower":    bb_lower,
-            "bb_middle":   ma20,
-            "ma20":        ma20,
-            "ma50":        ma50,
+            "rsi":           rsi,
+            "macd_line":     float(macd[-1]) if len(macd) > 0 else 0,
+            "macd_signal":   macd_signal,
+            "bb_upper":      bb_upper,
+            "bb_lower":      bb_lower,
+            "bb_middle":     ma20,
+            "ma20":          ma20,
+            "ma50":          ma50,
             "current_price": float(arr[-1]),
         }
 
@@ -938,10 +1026,10 @@ class TradingEngine:
         import numpy as np
         if len(prices) < 2:
             return 50.0
-        deltas   = np.diff(prices)
+        deltas = np.diff(prices)
         p = min(period, len(deltas))
-        gains    = np.where(deltas[-p:] > 0, deltas[-p:], 0.0)
-        losses   = np.where(deltas[-p:] < 0, -deltas[-p:], 0.0)
+        gains = np.where(deltas[-p:] > 0, deltas[-p:], 0.0)
+        losses = np.where(deltas[-p:] < 0, -deltas[-p:], 0.0)
         avg_gain = np.mean(gains)
         avg_loss = np.mean(losses)
         if avg_loss == 0:
@@ -954,7 +1042,7 @@ class TradingEngine:
         if len(data) == 0:
             return np.array([0.0])
         alpha = 2 / (period + 1)
-        ema   = np.zeros_like(data, dtype=float)
+        ema = np.zeros_like(data, dtype=float)
         ema[0] = data[0]
         for i in range(1, len(data)):
             ema[i] = alpha * data[i] + (1 - alpha) * ema[i - 1]
@@ -981,6 +1069,8 @@ class TradingEngine:
         losses = self.session_stats["losing_trades"]
         win_sum = self.session_stats["win_sum"]
         loss_sum = self.session_stats["loss_sum"]
+        slip_sum = self.session_stats["slippage_bps_sum"]
+        slip_n = self.session_stats["slippage_bps_count"]
 
         return {
             **self.session_stats,
@@ -988,11 +1078,11 @@ class TradingEngine:
             "avg_win": (win_sum / wins) if wins > 0 else 0,
             "avg_loss": (loss_sum / losses) if losses > 0 else 0,
             "profit_factor": (win_sum / loss_sum) if loss_sum > 0 else (win_sum if win_sum > 0 else 0),
+            "avg_slippage_bps": round(slip_sum / slip_n, 2) if slip_n > 0 else 0.0,
             "daily_pnl": self._daily_pnl,
             "daily_trades": self._daily_trades,
             "daily_target_reached": self._daily_target_reached,
             "preset": self._preset.level,
+            "capital_scale": self._scale,
             "compliance": self._compliance.status(),
         }
-
-

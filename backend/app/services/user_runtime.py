@@ -4,8 +4,9 @@ Per-user Alpaca clients, compliance state, and trading engines.
 Legacy: when no JWT / first deploy, ``default_engine`` uses env Alpaca keys
 (``alpaca_service`` singleton) like before.
 
-Authenticated users: keys stored encrypted in SQLite; each user gets isolated
-``AlpacaService`` + ``ComplianceService`` + ``TradingEngine``.
+Authenticated users: keys stored encrypted in SQLite; each user gets
+isolated ``AlpacaService`` + ``ComplianceService`` + ``TradingEngine``
+with its own execution-quality log directory (``trade_logs/user_<id>/``).
 """
 from __future__ import annotations
 
@@ -69,10 +70,11 @@ def get_or_create_engine(user_id: int) -> TradingEngine:
             _engines[user_id].owner_email = str(row["email"]).strip().lower()
         return _engines[user_id]
     alpaca = get_or_create_alpaca(user_id)
-    comp = ComplianceService(log_dir=_log_dir_for_user(user_id))
+    log_dir = _log_dir_for_user(user_id)
+    comp = ComplianceService(log_dir=log_dir)
     row = users_db.get_user_by_id(user_id)
     owner_email = str(row["email"]).strip().lower() if row and row.get("email") else None
-    eng = TradingEngine(alpaca, comp, owner_email=owner_email)
+    eng = TradingEngine(alpaca, comp, owner_email=owner_email, log_dir=log_dir)
     _engines[user_id] = eng
     return eng
 
@@ -82,16 +84,17 @@ def refresh_user_alpaca(user_id: int) -> None:
     _alpacas.pop(user_id, None)
     if user_id in _engines:
         alpaca = get_or_create_alpaca(user_id)
-        comp = ComplianceService(log_dir=_log_dir_for_user(user_id))
+        log_dir = _log_dir_for_user(user_id)
+        comp = ComplianceService(log_dir=log_dir)
         row = users_db.get_user_by_id(user_id)
         owner_email = str(row["email"]).strip().lower() if row and row.get("email") else None
-        eng = TradingEngine(alpaca, comp, owner_email=owner_email)
+        eng = TradingEngine(alpaca, comp, owner_email=owner_email, log_dir=log_dir)
         _engines[user_id] = eng
 
 
 # Legacy default (env Alpaca) — same process-wide singleton as before
 _compliance_default = ComplianceService(log_dir=_log_root)
-default_engine = TradingEngine(alpaca_service, _compliance_default)
+default_engine = TradingEngine(alpaca_service, _compliance_default, log_dir=_log_root)
 
 
 def engines_to_run() -> list[TradingEngine]:

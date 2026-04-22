@@ -133,3 +133,24 @@ async def get_playbooks(engine=Depends(get_current_engine)):
 async def set_playbooks(req: PlaybookConfigRequest, engine=Depends(get_current_engine)):
     """Update AUTO flag and/or manual enabled set."""
     return engine.set_playbook_config(auto=req.auto, manual=req.manual)
+
+
+class CapitalScaleRequest(BaseModel):
+    scale: str  # "3k" | "10k" | "30k"
+
+
+@router.get("/scale")
+async def get_scale(engine=Depends(get_current_engine)):
+    """Return current capital scale + active preset details."""
+    return engine.get_scale_info()
+
+
+@router.post("/scale")
+async def set_scale(req: CapitalScaleRequest, engine=Depends(get_current_engine)):
+    """Switch the active preset table (3k / 10k / 30k) at runtime."""
+    try:
+        info = engine.set_capital_scale(req.scale)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return info
+
