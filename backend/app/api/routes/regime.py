@@ -1,15 +1,18 @@
 """TradeSense - Regime & compliance API routes."""
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import get_current_engine
-from app.core.risk_presets import RISK_PRESETS
+from app.core.risk_presets import RISK_PRESETS, RISK_PRESETS_FOR
 
 router = APIRouter(prefix="/regime", tags=["regime"])
 
 
 @router.get("/presets")
-async def list_presets():
-    return {name: preset.as_dict() for name, preset in RISK_PRESETS.items()}
+async def list_presets(scale: str = Query(default="")):
+    """Risk preset table. ``?scale=3k|10k|30k`` selects a table; empty
+    returns the legacy 3k table for back-compat."""
+    table = RISK_PRESETS_FOR(scale) if scale else RISK_PRESETS
+    return {name: preset.as_dict() for name, preset in table.items()}
 
 
 @router.get("/status")

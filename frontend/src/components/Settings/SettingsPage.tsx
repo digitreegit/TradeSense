@@ -1,8 +1,32 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import api from '../../services/api';
 import { useAppStore } from '../../stores/useAppStore';
 import { clearToken } from '../../auth/token';
 import { supabase } from '../../auth/supabase';
+
+type CapitalScale = '3k' | '10k' | '30k';
+
+const SCALE_OPTIONS: Array<{
+  id: CapitalScale;
+  title: string;
+  caption: string;
+}> = [
+  {
+    id: '3k',
+    title: '$3,000',
+    caption: 'Starter cash-scalp · IEX feed',
+  },
+  {
+    id: '10k',
+    title: '$10,000',
+    caption: 'Cash-only bridge · no PDT impact',
+  },
+  {
+    id: '30k',
+    title: '$30,000',
+    caption: 'HFT paper · SIP feed + us-east-1',
+  },
+];
 
 const SettingsPage: React.FC = () => {
   const {
@@ -19,8 +43,42 @@ const SettingsPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [scale, setScale] = useState<CapitalScale | null>(null);
+  const [scaleLoading, setScaleLoading] = useState(false);
+  const [scaleMsg, setScaleMsg] = useState<string | null>(null);
 
   const keysLocked = authAlpacaConfigured;
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getCapitalScale()
+      .then((info) => {
+        if (!cancelled) setScale(info.scale);
+      })
+      .catch(() => {
+        /* non-fatal */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const chooseScale = async (next: CapitalScale) => {
+    if (next === scale || scaleLoading) return;
+    setScaleLoading(true);
+    setScaleMsg(null);
+    setErr(null);
+    try {
+      const info = await api.setCapitalScale(next);
+      setScale(info.scale);
+      setScaleMsg(`Switched to ${info.scale.toUpperCase()} preset (${info.level}).`);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to switch capital scale');
+    } finally {
+      setScaleLoading(false);
+    }
+  };
 
   const saveKeys = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -161,6 +219,74 @@ const SettingsPage: React.FC = () => {
             </button>
           </form>
         )}
+
+        <div style={{ marginTop: '32px' }}>
+          <label
+            style={{
+              fontSize: '12px',
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              color: 'var(--text-tertiary)',
+            }}
+          >
+            Capital Scale
+          </label>
+          <p
+            style={{
+              fontSize: '12px',
+              color: 'var(--text-tertiary)',
+              margin: '6px 0 10px',
+              lineHeight: 1.5,
+            }}
+          >
+            Swaps the active risk preset table. PDT rule does not apply to cash
+            accounts — all three options are cash-only.
+          </p>
+          <div
+            role="radiogroup"
+            aria-label="Capital scale"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: '8px',
+            }}
+          >
+            {SCALE_OPTIONS.map((opt) => {
+              const selected = scale === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => chooseScale(opt.id)}
+                  disabled={scaleLoading}
+                  style={{
+                    textAlign: 'left',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    border: selected
+                      ? '1px solid var(--border-accent, var(--info))'
+                      : '1px solid var(--border-secondary)',
+                    background: selected ? 'var(--bg-tertiary, rgba(56,132,255,0.10))' : 'var(--bg-secondary)',
+                    color: 'inherit',
+                    cursor: scaleLoading ? 'progress' : 'pointer',
+                    transition: 'border-color 120ms, background 120ms',
+                  }}
+                >
+                  <div style={{ fontSize: '13px', fontWeight: 600 }}>{opt.title}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px', lineHeight: 1.3 }}>
+                    {opt.caption}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          {scaleMsg && (
+            <p style={{ color: 'var(--profit)', fontSize: '12px', marginTop: '8px' }}>{scaleMsg}</p>
+          )}
+        </div>
+
         <button
           type="button"
           className="btn btn-danger"

@@ -195,6 +195,55 @@ class TradingEngine:
         """Attach/update recipient email for per-user notifications."""
         self.owner_email = (email or "").strip().lower() or None
 
+    # ─── Capital scale (hot-swap 3k/10k/30k preset tables) ─────
+
+    def get_scale_info(self) -> dict:
+        """Report current scale + preset level so the UI can render the selector."""
+        return {
+            "scale": self._scale,
+            "level": self._preset.level,
+            "auto": True,
+            "available": ["3k", "10k", "30k"],
+            "preset": self._preset.as_dict(),
+        }
+
+    def set_capital_scale(self, scale: str) -> dict:
+        """Switch the active preset table at runtime.
+
+        Keeps the current risk *level* (conservative/moderate/aggressive)
+        and swaps only the scale-dependent parameters. Safe to call while
+        the bot is active — the change is visible on the next scan.
+        """
+        new_scale = (scale or "").strip().lower()
+        if new_scale not in ("3k", "10k", "30k"):
+            raise ValueError(f"unknown capital scale: {scale!r}")
+        if new_scale == self._scale:
+            return self.get_scale_info()
+
+        old_scale = self._scale
+        self._scale = new_scale
+        self._preset = preset_for_level(self._preset.level, scale=new_scale)
+
+        self.regime_data.update(
+            {
+                "capital_scale": self._scale,
+                "risk_level": self._preset.level,
+                "max_position_percent": self._preset.max_position_percent,
+                "stop_loss_percent": self._preset.stop_loss_percent,
+                "take_profit_percent": self._preset.take_profit_percent,
+                "daily_target": f"+{self._preset.daily_target_percent}%",
+                "timestamp": datetime.now().strftime("%b %d, %Y, %-I:%M%p"),
+            }
+        )
+        self._log(
+            "info",
+            f"🔧 Capital scale switched: {old_scale} → {new_scale} | "
+            f"preset={self._preset.level.upper()} | TIF={self._preset.default_tif.upper()} | "
+            f"slots={self._preset.max_concurrent_positions} | "
+            f"trades/day={self._preset.max_trades_per_day}",
+        )
+        return self.get_scale_info()
+
     # ─── Control ──────────────────────────────────────────────
 
     def start(

@@ -141,6 +141,25 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  getCapitalScale: () =>
+    request<{
+      scale: '3k' | '10k' | '30k';
+      level: string;
+      auto: boolean;
+      available: Array<'3k' | '10k' | '30k'>;
+      preset: Record<string, unknown>;
+    }>('/trading/scale'),
+
+  setCapitalScale: (scale: '3k' | '10k' | '30k') =>
+    request<{
+      scale: '3k' | '10k' | '30k';
+      level: string;
+      preset: Record<string, unknown>;
+    }>('/trading/scale', {
+      method: 'POST',
+      body: JSON.stringify({ scale }),
+    }),
+
   backtestStrategy: (strategy: string, params: Record<string, unknown>) =>
     request<unknown>('/trading/backtest', {
       method: 'POST',
