@@ -59,19 +59,17 @@ export function getChangeClass(value: number): string {
   return '';
 }
 
+/** US regular session (NYSE / NASDAQ): Mon–Fri 9:30–16:00 America/New_York. */
 export function isMarketOpen(): boolean {
   const now = new Date();
-  const day = now.getDay();
-  const hours = now.getHours();
-  const minutes = now.getMinutes();
-  const time = hours * 60 + minutes;
+  const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const day = et.getDay();
+  const timeInMinutes = et.getHours() * 60 + et.getMinutes();
 
-  // Weekends
   if (day === 0 || day === 6) return false;
 
-  // Market hours: 9:30 AM - 4:00 PM ET
   const marketOpen = 9 * 60 + 30;
   const marketClose = 16 * 60;
 
-  return time >= marketOpen && time < marketClose;
+  return timeInMinutes >= marketOpen && timeInMinutes < marketClose;
 }
