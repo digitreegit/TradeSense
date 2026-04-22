@@ -69,14 +69,72 @@ Before live trading, review:
 - **Quantitative Market Status** — `regime_service` uses VIXY / TLT / UUP / GLD / XLE / BITO / SPY to produce a 0–100 score mapped to risk presets (`core.risk_presets`).
 - **Risk presets** — Conservative / Moderate / Aggressive. Override: `POST /api/trading/bot/start` with `{"risk_level": "conservative"}`.
 - **Trailing high-water mark** — per-position peak P&L for trail exits.
-- **Marketable-limit + spread filter** — `execution_service` caps spread risk.
+- **Marketable-limit + spread filter** — `execution_service` caps spread risk; `DEFAULT_ORDER_TIF=ioc` discards unfilled remainders so settled cash recycles each scan.
 - **Loss-streak cooldown** — three consecutive losses → 15-minute pause on new entries.
-- **Streaming scaffold** — `streaming_service.start_streaming(...)` for low-latency `us-east` + SIP deployments.
+
+## 🏎 HFT paper mode ($30k scale)
+
+For high-frequency scalp testing with Alpaca Algo Trader Plus + cloud deploy:
+
+```bash
+# .env
+INITIAL_CAPITAL=30000
+CAPITAL_SCALE=30k            # or "auto" (auto-selects 30k when capital >= 15k)
+ALPACA_DATA_FEED=sip         # requires $99/mo Algo Trader Plus
+STREAMING_ENABLED=true
+DEFAULT_ORDER_TIF=ioc
+```
+
+What changes at the 30k scale:
+
+| Knob                         | 3k conservative → aggressive | 30k conservative → aggressive |
+|------------------------------|------------------------------|-------------------------------|
+| `max_concurrent_positions`   | 2 → 8                        | 6 → 14                        |
+| `max_trades_per_day`         | 20 → 160                     | 80 → **500**                  |
+| `entry_score_threshold`      | 65 → 28                      | 60 → 26                       |
+| `stop_loss_percent`          | 0.20 → 0.35                  | 0.15 → 0.22 (tighter)         |
+| `take_profit_percent`        | 0.50 → 0.70                  | 0.35 → 0.40 (faster turns)    |
+| `min_notional_fast`          | $300                         | $1,500–$1,800                 |
+| `settled_cash_trade_cap`     | 0.50–0.60 of settled cash    | 0.35–0.45 of settled cash     |
+| Default TIF                  | DAY                          | **IOC**                       |
+
+The cash-utilization cap drops at 30k because there's more absolute
+headroom — smaller per-trade % with more slots improves turnover without
+breaching GFV.
+
+### WebSocket streaming
+
+When `STREAMING_ENABLED=true` and Alpaca keys are present, the backend
+subscribes to trades + quotes via `StockDataStream` on boot. The stream
+is **best-effort**: `AlpacaService` prefers the in-memory cache over
+REST, but every path has a REST fallback. Inspect live state via:
+
+```
+GET /api/health/streaming
+```
+
+Returns `{connected, feed, subscribed, cached_symbols, last_error}`.
+
+### Execution-quality logs
+
+When `EXECUTION_LOG_ENABLED=true` (default), every outgoing order writes
+a JSONL record under `trade_logs/execution-YYYY-MM-DD.jsonl` (per user at
+`trade_logs/user_<id>/`). Each order produces four event types:
+
+- `signal` — strategy decided to enter; includes `ref_price`, bid/ask, score, reasons, playbook
+- `order` — submitted to broker; includes TIF, limit price, `signal_to_submit_ms`
+- `fill` — reconciled after fill; includes `filled_avg_price`, `slippage_bps`, `submit_to_fill_ms`
+- `reject` — quote/spread rejection or broker error
+
+Use these files to measure real slippage vs signal price and tune the
+marketable-limit buffer or spread filter.
 
 ### Extra API routes
 - `GET /api/regime/status` — market regime + active preset + compliance
 - `GET /api/regime/presets` — full preset parameter table
 - `GET /api/health/alpaca-usage` — Alpaca REST rate-limit snapshot
+- `GET /api/health/streaming` — WebSocket stream health
+- `GET /api/trading/bot/status` — includes `stats.avg_slippage_bps`, `stats.capital_scale`
 
 ## 📄 License
 MIT

@@ -1,9 +1,16 @@
 """
-Risk preset table for cash-account micro-scalping.
+Risk preset table for cash-account scalping.
 
-A single source of truth: both the trading engine and the REST API read
-from ``RISK_PRESETS``. Market-regime score maps deterministically to a
-preset via :func:`preset_for_score`, so UI, logs and execution all agree.
+Two scales are supported:
+
+- ``"3k"``  — legacy $3,000 cash-scalp (tight settled-cash turnover).
+- ``"30k"`` — $30,000 paper HFT test (Algo Trader Plus + SIP + us-east-1
+  cloud latency budget). More slots, tighter stops, larger daily trade
+  cap, and looser per-trade notional minimums so fills are meaningful.
+
+Both UI and trading engine read from ``RISK_PRESETS_FOR(scale)``, so the
+active scale is a single source of truth. Market-regime score maps
+deterministically to a preset via :func:`preset_for_score`.
 """
 from __future__ import annotations
 
@@ -11,29 +18,38 @@ from dataclasses import dataclass, asdict
 from typing import Dict, Literal
 
 RiskLevel = Literal["conservative", "moderate", "aggressive"]
+CapitalScale = Literal["3k", "30k"]
 
 
 @dataclass(frozen=True)
 class RiskPreset:
     level: RiskLevel
+    scale: CapitalScale = "3k"
     # Sizing
-    max_position_percent: float       # per-symbol % of equity
-    max_concurrent_positions: int
+    max_position_percent: float = 15.0       # per-symbol % of equity
+    max_concurrent_positions: int = 3
     # Exits
-    stop_loss_percent: float          # per-trade hard stop
-    take_profit_percent: float        # per-trade profit target
-    trailing_trigger_percent: float   # peak − now to trigger trail exit
+    stop_loss_percent: float = 0.30          # per-trade hard stop
+    take_profit_percent: float = 0.80        # per-trade profit target
+    trailing_trigger_percent: float = 0.20   # peak − now to trigger trail exit
     # Daily caps
-    daily_loss_limit_percent: float
-    daily_target_percent: float
-    max_trades_per_day: int
+    daily_loss_limit_percent: float = 0.50
+    daily_target_percent: float = 1.00
+    max_trades_per_day: int = 40
     # Entry gating
-    entry_score_threshold: int        # 0..100 signal score to enter
-    spread_filter_percent: float      # skip symbols with wider spread
-    universe_size: int
+    entry_score_threshold: int = 50          # 0..100 signal score to enter
+    spread_filter_percent: float = 0.05      # skip symbols with wider spread
+    universe_size: int = 10
     # Macro guards
-    vix_halt_level: float             # halt new entries if VIX above this
-    blackout_window_minutes: int      # ± minutes around macro events
+    vix_halt_level: float = 22.0             # halt new entries if VIX above this
+    blackout_window_minutes: int = 30        # ± minutes around macro events
+    # Sizing floors (USD notional) — symbol-type aware; engine may multiply
+    min_notional_slow: float = 180.0
+    min_notional_fast: float = 300.0
+    # Cash-utilization cap (fraction of settled cash allowed per trade)
+    settled_cash_trade_cap: float = 0.60
+    # Preferred TIF for limit entries: "day" | "ioc"
+    default_tif: str = "day"
     # Extended hours never allowed for cash-scalp
     allow_extended_hours: bool = False
 
@@ -41,9 +57,11 @@ class RiskPreset:
         return asdict(self)
 
 
-RISK_PRESETS: Dict[RiskLevel, RiskPreset] = {
+# ─── $3,000 cash-scalp (legacy) ────────────────────────────────────────
+_PRESETS_3K: Dict[RiskLevel, RiskPreset] = {
     "conservative": RiskPreset(
         level="conservative",
+        scale="3k",
         max_position_percent=10.0,
         max_concurrent_positions=2,
         stop_loss_percent=0.20,
@@ -56,10 +74,15 @@ RISK_PRESETS: Dict[RiskLevel, RiskPreset] = {
         spread_filter_percent=0.03,
         universe_size=6,
         vix_halt_level=18.0,
-        blackout_window_minutes=9999,  # whole day — skip macro event days
+        blackout_window_minutes=9999,
+        min_notional_slow=180.0,
+        min_notional_fast=300.0,
+        settled_cash_trade_cap=0.50,
+        default_tif="day",
     ),
     "moderate": RiskPreset(
         level="moderate",
+        scale="3k",
         max_position_percent=15.0,
         max_concurrent_positions=3,
         stop_loss_percent=0.30,
@@ -73,12 +96,14 @@ RISK_PRESETS: Dict[RiskLevel, RiskPreset] = {
         universe_size=10,
         vix_halt_level=22.0,
         blackout_window_minutes=30,
+        min_notional_slow=180.0,
+        min_notional_fast=300.0,
+        settled_cash_trade_cap=0.60,
+        default_tif="day",
     ),
     "aggressive": RiskPreset(
         level="aggressive",
-        # Cash-safe aggressive:
-        # - more opportunities (lower threshold / wider universe / more slots)
-        # - smaller per-position size to avoid exhausting settled cash too fast
+        scale="3k",
         max_position_percent=12.0,
         max_concurrent_positions=8,
         stop_loss_percent=0.35,
@@ -92,19 +117,121 @@ RISK_PRESETS: Dict[RiskLevel, RiskPreset] = {
         universe_size=20,
         vix_halt_level=28.0,
         blackout_window_minutes=5,
+        min_notional_slow=180.0,
+        min_notional_fast=300.0,
+        settled_cash_trade_cap=0.60,
+        default_tif="day",
     ),
 }
 
 
-def preset_for_level(level: str) -> RiskPreset:
+# ─── $30,000 HFT paper test ────────────────────────────────────────────
+# Rationale:
+# - With SIP + unlimited API + us-east-1 co-located compute, per-scan
+#   latency drops from ~250 ms to <30 ms. That justifies tighter stops
+#   and more trades per day.
+# - $30k settled-cash base lets GFV room compound: each trade is a
+#   smaller % of settled cash so turnover rises while GFV risk falls.
+# - Minimum notional goes up so fills aren't 1-share scraps that get
+#   crushed by SEC fee + TAF on the sell side.
+# - Default TIF is IOC to discard unfilled remainders; cash is recycled
+#   in the next scan.
+_PRESETS_30K: Dict[RiskLevel, RiskPreset] = {
+    "conservative": RiskPreset(
+        level="conservative",
+        scale="30k",
+        max_position_percent=6.0,
+        max_concurrent_positions=6,
+        stop_loss_percent=0.15,
+        take_profit_percent=0.35,
+        trailing_trigger_percent=0.12,
+        daily_loss_limit_percent=1.0,       # $300
+        daily_target_percent=0.60,          # $180
+        max_trades_per_day=80,
+        entry_score_threshold=60,
+        spread_filter_percent=0.03,
+        universe_size=12,
+        vix_halt_level=20.0,
+        blackout_window_minutes=45,
+        min_notional_slow=600.0,
+        min_notional_fast=1000.0,
+        settled_cash_trade_cap=0.35,
+        default_tif="ioc",
+    ),
+    "moderate": RiskPreset(
+        level="moderate",
+        scale="30k",
+        max_position_percent=8.0,
+        max_concurrent_positions=10,
+        stop_loss_percent=0.20,
+        take_profit_percent=0.45,
+        trailing_trigger_percent=0.15,
+        daily_loss_limit_percent=1.5,       # $450
+        daily_target_percent=1.00,          # $300
+        max_trades_per_day=200,
+        entry_score_threshold=45,
+        spread_filter_percent=0.05,
+        universe_size=18,
+        vix_halt_level=24.0,
+        blackout_window_minutes=20,
+        min_notional_slow=800.0,
+        min_notional_fast=1500.0,
+        settled_cash_trade_cap=0.40,
+        default_tif="ioc",
+    ),
+    "aggressive": RiskPreset(
+        level="aggressive",
+        scale="30k",
+        max_position_percent=7.0,
+        max_concurrent_positions=14,
+        stop_loss_percent=0.22,
+        take_profit_percent=0.40,
+        trailing_trigger_percent=0.14,
+        daily_loss_limit_percent=2.0,       # $600 — global killswitch
+        daily_target_percent=1.50,          # $450
+        max_trades_per_day=500,
+        entry_score_threshold=26,
+        spread_filter_percent=0.08,
+        universe_size=30,
+        vix_halt_level=28.0,
+        blackout_window_minutes=5,
+        min_notional_slow=900.0,
+        min_notional_fast=1800.0,
+        settled_cash_trade_cap=0.45,
+        default_tif="ioc",
+    ),
+}
+
+
+# Back-compat: code that still imports ``RISK_PRESETS`` gets the 3k scale.
+RISK_PRESETS: Dict[RiskLevel, RiskPreset] = _PRESETS_3K
+
+
+def RISK_PRESETS_FOR(scale: str) -> Dict[RiskLevel, RiskPreset]:
+    s = (scale or "3k").strip().lower()
+    if s == "30k":
+        return _PRESETS_30K
+    return _PRESETS_3K
+
+
+def _active_scale() -> str:
+    try:
+        from app.core.config import resolved_capital_scale
+        return resolved_capital_scale()
+    except Exception:
+        return "3k"
+
+
+def preset_for_level(level: str, scale: str = None) -> RiskPreset:
     """Return the preset for a level name (case-insensitive, safe fallback)."""
     key = (level or "moderate").strip().lower()
-    if key not in RISK_PRESETS:
+    table = RISK_PRESETS_FOR(scale or _active_scale())
+    if key not in table:
         key = "moderate"
-    return RISK_PRESETS[key]  # type: ignore[index]
+    return table[key]  # type: ignore[index]
 
 
-def preset_for_score(score: float) -> RiskPreset:
+def preset_for_score(score: float, scale: str = None) -> RiskPreset:
     """
     Deterministic Market-Status → Risk preset mapping.
 
@@ -116,11 +243,12 @@ def preset_for_score(score: float) -> RiskPreset:
       :func:`is_halted_score`.)
     """
     s = float(score)
+    table = RISK_PRESETS_FOR(scale or _active_scale())
     if s >= 75:
-        return RISK_PRESETS["aggressive"]
+        return table["aggressive"]
     if s >= 55:
-        return RISK_PRESETS["moderate"]
-    return RISK_PRESETS["conservative"]
+        return table["moderate"]
+    return table["conservative"]
 
 
 def is_halted_score(score: float) -> bool:
