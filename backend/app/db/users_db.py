@@ -47,6 +47,10 @@ def init_db() -> None:
         col_names = {str(c[1]) for c in cols}
         if "supabase_user_id" not in col_names:
             conn.execute("ALTER TABLE users ADD COLUMN supabase_user_id TEXT")
+        if "alpaca_paper_trading" not in col_names:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN alpaca_paper_trading INTEGER NOT NULL DEFAULT 1"
+            )
         conn.commit()
     finally:
         conn.close()
@@ -142,6 +146,29 @@ def set_user_alpaca_encrypted(
         conn.execute(
             "UPDATE users SET alpaca_key_enc = ?, alpaca_secret_enc = ? WHERE id = ?",
             (key_enc, secret_enc, user_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_alpaca_paper_trading(user_id: int) -> bool:
+    """True = paper API endpoint; False = live trading API."""
+    row = get_user_by_id(user_id)
+    if not row:
+        return True
+    v = row.get("alpaca_paper_trading")
+    if v is None:
+        return True
+    return bool(int(v))
+
+
+def set_alpaca_paper_trading(user_id: int, paper: bool) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE users SET alpaca_paper_trading = ? WHERE id = ?",
+            (1 if paper else 0, user_id),
         )
         conn.commit()
     finally:

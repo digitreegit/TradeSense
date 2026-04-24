@@ -3,7 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 
-from app.api.deps import get_current_engine
+from app.api.deps import get_current_engine, get_current_user_id
+from app.services.user_runtime import get_or_create_engine
 
 router = APIRouter(prefix="/trading", tags=["trading"])
 
@@ -153,4 +154,18 @@ async def set_scale(req: CapitalScaleRequest, engine=Depends(get_current_engine)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return info
+
+
+class TradingModeRequest(BaseModel):
+    paper: bool  # True = paper-api.alpaca.markets, False = live trading API
+
+
+@router.post("/mode")
+async def set_trading_mode(req: TradingModeRequest, user_id: int = Depends(get_current_user_id)):
+    """Switch Alpaca paper vs live API (signed-in users with saved keys only)."""
+    engine = get_or_create_engine(user_id)
+    try:
+        return engine.set_paper_trading(req.paper)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 

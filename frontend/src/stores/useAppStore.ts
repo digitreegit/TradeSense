@@ -84,7 +84,13 @@ interface AppState {
   /** Signed-in user (null = guest / legacy env Alpaca) */
   authEmail: string | null;
   authAlpacaConfigured: boolean;
-  setAuthProfile: (email: string | null, alpacaConfigured: boolean) => void;
+  /** Alpaca API endpoint: paper vs live (only meaningful when keys are saved). */
+  authAlpacaPaperTrading: boolean;
+  setAuthProfile: (
+    email: string | null,
+    alpacaConfigured: boolean,
+    alpacaPaperTrading?: boolean | null,
+  ) => void;
   authMethod: 'google' | 'email' | null;
   setAuthMethod: (method: 'google' | 'email' | null) => void;
 }
@@ -113,8 +119,18 @@ export const useAppStore = create<AppState>((set) => ({
 
   authEmail: null,
   authAlpacaConfigured: false,
-  setAuthProfile: (email, alpacaConfigured) =>
-    set({ authEmail: email, authAlpacaConfigured: alpacaConfigured }),
+  authAlpacaPaperTrading: true,
+  setAuthProfile: (email, alpacaConfigured, alpacaPaperTrading) =>
+    set({
+      authEmail: email,
+      authAlpacaConfigured: alpacaConfigured,
+      authAlpacaPaperTrading:
+        email === null
+          ? true
+          : alpacaPaperTrading !== undefined && alpacaPaperTrading !== null
+            ? Boolean(alpacaPaperTrading)
+            : useAppStore.getState().authAlpacaPaperTrading,
+    }),
   authMethod: null,
   setAuthMethod: (method) => set({ authMethod: method }),
 

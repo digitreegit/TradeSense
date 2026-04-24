@@ -28,10 +28,21 @@ const SCALE_OPTIONS: Array<{
   },
 ];
 
+type LiveSummary = {
+  equity: number;
+  cash: number;
+  buying_power: number;
+  portfolio_value: number;
+};
+
+const fmtUsd = (n: number) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(n);
+
 const SettingsPage: React.FC = () => {
   const {
     authEmail,
     authAlpacaConfigured,
+    authAlpacaPaperTrading,
     setAuthProfile,
     setCurrentPage,
     setAuthMethod,
@@ -46,6 +57,9 @@ const SettingsPage: React.FC = () => {
   const [scale, setScale] = useState<CapitalScale | null>(null);
   const [scaleLoading, setScaleLoading] = useState(false);
   const [scaleMsg, setScaleMsg] = useState<string | null>(null);
+  const [modeLoading, setModeLoading] = useState(false);
+  const [liveSummary, setLiveSummary] = useState<LiveSummary | null>(null);
+  const [liveLoading, setLiveLoading] = useState(false);
 
   const keysLocked = authAlpacaConfigured;
 
@@ -64,7 +78,68 @@ const SettingsPage: React.FC = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (!authEmail || !authAlpacaConfigured || authAlpacaPaperTrading) {
+      setLiveSummary(null);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      setLiveLoading(true);
+      try {
+        const acc = await api.getAccount();
+        if (cancelled || !acc || 'detail' in acc) return;
+        setLiveSummary({
+          equity: Number(acc.equity) || 0,
+          cash: Number(acc.cash) || 0,
+          buying_power: Number(acc.buying_power) || 0,
+          portfolio_value: Number(acc.portfolio_value) || 0,
+        });
+      } catch {
+        if (!cancelled) setLiveSummary(null);
+      } finally {
+        if (!cancelled) setLiveLoading(false);
+      }
+    };
+    void load();
+    const t = window.setInterval(load, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, [authEmail, authAlpacaConfigured, authAlpacaPaperTrading]);
+
+  const choosePaperOrLive = async (paper: boolean) => {
+    if (!authAlpacaConfigured) {
+      setErr('Save Alpaca keys first, then choose paper or live.');
+      return;
+    }
+    if (paper === authAlpacaPaperTrading || modeLoading) return;
+    setModeLoading(true);
+    setErr(null);
+    setScaleMsg(null);
+    try {
+      const info = await api.setTradingMode(paper);
+      if (authEmail) {
+        setAuthProfile(authEmail, true, Boolean(info.paper_trading));
+      }
+      setScaleMsg(
+        info.paper_trading
+          ? 'Switched to paper trading API. Capital scale presets apply.'
+          : 'Switched to live trading API. Balances shown are from your live Alpaca account.',
+      );
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to change trading mode');
+    } finally {
+      setModeLoading(false);
+    }
+  };
+
   const chooseScale = async (next: CapitalScale) => {
+    if (!authAlpacaPaperTrading) {
+      setErr('Capital scale presets apply to paper mode only. Switch to paper money to change them.');
+      return;
+    }
     if (next === scale || scaleLoading) return;
     setScaleLoading(true);
     setScaleMsg(null);
@@ -95,10 +170,10 @@ const SettingsPage: React.FC = () => {
     setLoading(true);
     try {
       await api.saveAlpacaKeys(key.trim(), secret.trim());
-      setAuthProfile(authEmail, true);
+      setAuthProfile(authEmail, true, true);
       setKey('');
       setSecret('');
-      setMsg('Alpaca paper keys saved (encrypted on the server).');
+      setMsg('Alpaca keys saved (encrypted on the server).');
     } catch (e2) {
       setErr(e2 instanceof Error ? e2.message : 'Failed to save');
     } finally {
@@ -136,15 +211,25 @@ const SettingsPage: React.FC = () => {
       <div className="card" style={{ padding: 'var(--space-xl)' }}>
         <h2 style={{ fontSize: '18px', marginBottom: '8px' }}>Settings</h2>
         <p style={{ fontSize: '13px', color: 'var(--text-tertiary)', marginBottom: '20px', lineHeight: 1.5 }}>
-          Connect your <strong>Alpaca paper trading</strong> account. Keys are encrypted and only your user can trade with them.
-          Create keys at{' '}
+          Connect your <strong>Alpaca</strong> account (paper or live). Keys are encrypted and only your user can trade with them.
+          Paper keys:{' '}
           <a
             href="https://app.alpaca.markets/paper/dashboard/overview"
             target="_blank"
             rel="noreferrer"
             style={{ color: 'var(--info)', textDecoration: 'none' }}
           >
-            Alpaca (Paper)
+            Alpaca Paper
+          </a>
+          {' · '}
+          Live keys:{' '}
+          <a
+            href="https://app.alpaca.markets/dashboard/overview"
+            target="_blank"
+            rel="noreferrer"
+            style={{ color: 'var(--info)', textDecoration: 'none' }}
+          >
+            Alpaca Live
           </a>
           .
         </p>
@@ -229,7 +314,7 @@ const SettingsPage: React.FC = () => {
               color: 'var(--text-tertiary)',
             }}
           >
-            Capital Scale
+            Trading mode
           </label>
           <p
             style={{
@@ -239,8 +324,143 @@ const SettingsPage: React.FC = () => {
               lineHeight: 1.5,
             }}
           >
-            Swaps the active risk preset table. PDT rule does not apply to cash
-            accounts — all three options are cash-only.
+            Paper uses Alpaca&apos;s paper API. Live uses your real brokerage account — use only with keys you intend
+            for production.
+          </p>
+          <div
+            role="radiogroup"
+            aria-label="Paper or live trading"
+            style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}
+          >
+            <button
+              type="button"
+              role="radio"
+              aria-checked={authAlpacaPaperTrading}
+              onClick={() => choosePaperOrLive(true)}
+              disabled={modeLoading || !authAlpacaConfigured}
+              style={{
+                textAlign: 'left',
+                padding: '10px 12px',
+                borderRadius: '8px',
+                border: authAlpacaPaperTrading
+                  ? '1px solid var(--border-accent, var(--info))'
+                  : '1px solid var(--border-secondary)',
+                background: authAlpacaPaperTrading
+                  ? 'var(--bg-tertiary, rgba(56,132,255,0.10))'
+                  : 'var(--bg-secondary)',
+                color: 'inherit',
+                cursor: modeLoading || !authAlpacaConfigured ? 'not-allowed' : 'pointer',
+                opacity: !authAlpacaConfigured ? 0.55 : 1,
+              }}
+            >
+              <div style={{ fontSize: '13px', fontWeight: 600 }}>Paper money</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px', lineHeight: 1.3 }}>
+                Virtual balances + 3k / 10k / 30k presets
+              </div>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={!authAlpacaPaperTrading}
+              onClick={() => choosePaperOrLive(false)}
+              disabled={modeLoading || !authAlpacaConfigured}
+              style={{
+                textAlign: 'left',
+                padding: '10px 12px',
+                borderRadius: '8px',
+                border: !authAlpacaPaperTrading
+                  ? '1px solid var(--border-accent, var(--loss))'
+                  : '1px solid var(--border-secondary)',
+                background: !authAlpacaPaperTrading
+                  ? 'var(--bg-tertiary, rgba(239,68,68,0.08))'
+                  : 'var(--bg-secondary)',
+                color: 'inherit',
+                cursor: modeLoading || !authAlpacaConfigured ? 'not-allowed' : 'pointer',
+                opacity: !authAlpacaConfigured ? 0.55 : 1,
+              }}
+            >
+              <div style={{ fontSize: '13px', fontWeight: 600 }}>Real money</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px', lineHeight: 1.3 }}>
+                Live Alpaca balances (real orders)
+              </div>
+            </button>
+          </div>
+          {!authAlpacaConfigured && (
+            <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '6px' }}>
+              Save keys above to enable paper vs live.
+            </p>
+          )}
+        </div>
+
+        {!authAlpacaPaperTrading && authAlpacaConfigured && (
+          <div style={{ marginTop: '24px' }}>
+            <label
+              style={{
+                fontSize: '12px',
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+                color: 'var(--text-tertiary)',
+              }}
+            >
+              Live account (Alpaca)
+            </label>
+            {liveLoading && !liveSummary ? (
+              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '8px' }}>Loading balances…</p>
+            ) : liveSummary ? (
+              <ul
+                style={{
+                  listStyle: 'none',
+                  padding: 0,
+                  margin: '10px 0 0',
+                  fontSize: '13px',
+                  lineHeight: 1.7,
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                <li>
+                  <strong style={{ color: 'var(--text-primary)' }}>Equity</strong> {fmtUsd(liveSummary.equity)}
+                </li>
+                <li>
+                  <strong style={{ color: 'var(--text-primary)' }}>Cash</strong> {fmtUsd(liveSummary.cash)}
+                </li>
+                <li>
+                  <strong style={{ color: 'var(--text-primary)' }}>Buying power</strong>{' '}
+                  {fmtUsd(liveSummary.buying_power)}
+                </li>
+                <li>
+                  <strong style={{ color: 'var(--text-primary)' }}>Portfolio value</strong>{' '}
+                  {fmtUsd(liveSummary.portfolio_value)}
+                </li>
+              </ul>
+            ) : (
+              <p style={{ fontSize: '12px', color: 'var(--loss)', marginTop: '8px' }}>
+                Could not load live balances. Confirm your keys are for a live Alpaca account.
+              </p>
+            )}
+          </div>
+        )}
+
+        <div style={{ marginTop: '32px' }}>
+          <label
+            style={{
+              fontSize: '12px',
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              color: 'var(--text-tertiary)',
+            }}
+          >
+            Capital scale (paper only)
+          </label>
+          <p
+            style={{
+              fontSize: '12px',
+              color: 'var(--text-tertiary)',
+              margin: '6px 0 10px',
+              lineHeight: 1.5,
+            }}
+          >
+            Swaps the active risk preset table when you are in paper mode. PDT rule does not apply to cash accounts —
+            all three options are cash-only.
           </p>
           <div
             role="radiogroup"
@@ -260,7 +480,7 @@ const SettingsPage: React.FC = () => {
                   role="radio"
                   aria-checked={selected}
                   onClick={() => chooseScale(opt.id)}
-                  disabled={scaleLoading}
+                  disabled={scaleLoading || !authAlpacaPaperTrading}
                   style={{
                     textAlign: 'left',
                     padding: '10px 12px',
@@ -270,7 +490,8 @@ const SettingsPage: React.FC = () => {
                       : '1px solid var(--border-secondary)',
                     background: selected ? 'var(--bg-tertiary, rgba(56,132,255,0.10))' : 'var(--bg-secondary)',
                     color: 'inherit',
-                    cursor: scaleLoading ? 'progress' : 'pointer',
+                    cursor: scaleLoading || !authAlpacaPaperTrading ? 'not-allowed' : 'pointer',
+                    opacity: !authAlpacaPaperTrading ? 0.5 : 1,
                     transition: 'border-color 120ms, background 120ms',
                   }}
                 >

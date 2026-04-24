@@ -27,11 +27,13 @@ async def me(user_id: Optional[int] = Depends(get_current_user_id_optional)):
     if not row:
         raise HTTPException(status_code=401, detail="User not found")
     has_alpaca = bool(row.get("alpaca_key_enc") and row.get("alpaca_secret_enc"))
+    paper = users_db.get_alpaca_paper_trading(user_id) if has_alpaca else True
     return {
         "authenticated": True,
         "user_id": user_id,
         "email": row["email"],
         "alpaca_configured": has_alpaca,
+        "alpaca_paper_trading": paper,
     }
 
 

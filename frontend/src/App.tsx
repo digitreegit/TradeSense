@@ -35,7 +35,11 @@ const App: React.FC = () => {
         const me = await api.getMe();
         if (cancelled) return;
         if (me.authenticated && me.email) {
-          setAuthProfile(me.email, Boolean(me.alpaca_configured));
+          setAuthProfile(
+            me.email,
+            Boolean(me.alpaca_configured),
+            typeof me.alpaca_paper_trading === 'boolean' ? me.alpaca_paper_trading : true,
+          );
           setAuthMethod(getLastAuthMethod());
         } else {
           setAuthProfile(null, false);

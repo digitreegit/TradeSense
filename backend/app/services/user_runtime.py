@@ -55,10 +55,11 @@ def get_or_create_alpaca(user_id: int) -> AlpacaService:
         return _alpacas[user_id]
     svc = AlpacaService()
     key, secret = load_alpaca_keys_for_user(user_id)
+    paper = users_db.get_alpaca_paper_trading(user_id)
     if key and secret:
-        svc.initialize_with_keys(key, secret)
+        svc.initialize_with_keys(key, secret, paper_trading=paper)
     else:
-        svc.initialize_with_keys("", "")
+        svc.initialize_with_keys("", "", paper_trading=paper)
     _alpacas[user_id] = svc
     return svc
 
@@ -74,7 +75,13 @@ def get_or_create_engine(user_id: int) -> TradingEngine:
     comp = ComplianceService(log_dir=log_dir)
     row = users_db.get_user_by_id(user_id)
     owner_email = str(row["email"]).strip().lower() if row and row.get("email") else None
-    eng = TradingEngine(alpaca, comp, owner_email=owner_email, log_dir=log_dir)
+    eng = TradingEngine(
+        alpaca,
+        comp,
+        owner_email=owner_email,
+        log_dir=log_dir,
+        owner_user_id=user_id,
+    )
     _engines[user_id] = eng
     return eng
 
@@ -88,7 +95,13 @@ def refresh_user_alpaca(user_id: int) -> None:
         comp = ComplianceService(log_dir=log_dir)
         row = users_db.get_user_by_id(user_id)
         owner_email = str(row["email"]).strip().lower() if row and row.get("email") else None
-        eng = TradingEngine(alpaca, comp, owner_email=owner_email, log_dir=log_dir)
+        eng = TradingEngine(
+            alpaca,
+            comp,
+            owner_email=owner_email,
+            log_dir=log_dir,
+            owner_user_id=user_id,
+        )
         _engines[user_id] = eng
 
 

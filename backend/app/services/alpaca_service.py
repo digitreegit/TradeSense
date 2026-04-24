@@ -41,20 +41,51 @@ class AlpacaService:
         self.trading_client: Optional[TradingClient] = None
         self.data_client: Optional[StockHistoricalDataClient] = None
         self._initialized = False
+        self.paper_trading: bool = True
+        self.initial_capital_override: Optional[float] = None
         self.virtual_base_equity: float = 0.0  # Used for virtual re-base to $30k
         self.is_virtual_reset = False
 
+    def _reset_virtual_account_state(self) -> None:
+        self.virtual_base_equity = 0.0
+        if hasattr(self, "virtual_daily_open"):
+            self.virtual_daily_open = 0.0
+
+    def reset_paper_virtual_baseline(self) -> None:
+        """Re-anchor paper virtual equity after scale or initial-capital change."""
+        self._reset_virtual_account_state()
+
+    def set_paper_trading(self, paper: bool) -> None:
+        """Switch paper vs live API endpoint; clears virtual baseline on change."""
+        if paper == self.paper_trading:
+            return
+        self.paper_trading = bool(paper)
+        self._reset_virtual_account_state()
+        self.trading_client = None
+        self.data_client = None
+        self._initialized = False
+
     def initialize(self):
         """Initialize Alpaca API clients from global settings (.env)."""
+        _paper = (settings.trading_mode or "paper").strip().lower() != "live"
         return self.initialize_with_keys(
-            settings.alpaca_api_key, settings.alpaca_secret_key
+            settings.alpaca_api_key,
+            settings.alpaca_secret_key,
+            paper_trading=_paper,
         )
 
-    def initialize_with_keys(self, api_key: str, secret_key: str) -> bool:
+    def initialize_with_keys(
+        self,
+        api_key: str,
+        secret_key: str,
+        *,
+        paper_trading: bool = True,
+    ) -> bool:
         """Initialize clients from explicit keys (per-user or env)."""
         self.trading_client = None
         self.data_client = None
         self._initialized = False
+        self.paper_trading = bool(paper_trading)
         if not api_key or not secret_key:
             logger.warning("Alpaca API keys not configured. Running in demo mode.")
             return False
@@ -62,14 +93,15 @@ class AlpacaService:
             self.trading_client = TradingClient(
                 api_key=api_key,
                 secret_key=secret_key,
-                paper=True,
+                paper=self.paper_trading,
             )
             self.data_client = StockHistoricalDataClient(
                 api_key=api_key,
                 secret_key=secret_key,
             )
             self._initialized = True
-            logger.info("✅ Alpaca API clients initialized (Paper Trading)")
+            mode = "Paper Trading" if self.paper_trading else "Live Trading"
+            logger.info("✅ Alpaca API clients initialized (%s)", mode)
             return True
         except Exception as e:
             logger.error(f"❌ Failed to initialize Alpaca: {e}")
@@ -81,6 +113,11 @@ class AlpacaService:
         if not self._initialized:
             self.initialize()
         return self._initialized
+
+    def _initial_capital_for_display(self) -> float:
+        if self.initial_capital_override is not None:
+            return float(self.initial_capital_override)
+        return float(settings.initial_capital)
 
     # ─── Account ───────────────────────────────────────────────
     def get_account(self) -> dict:
@@ -95,18 +132,117 @@ class AlpacaService:
             real_equity = float(account.equity)
             real_cash = float(account.cash)
 
+            # Live: show broker balances and P&L vs Alpaca last_equity (prior close).
+            if not self.paper_trading:
+                last_eq = float(getattr(account, "last_equity", None) or real_equity)
+                if last_eq <= 0:
+                    last_eq = real_equity
+                bp = float(getattr(account, "buying_power", None) or real_cash)
+                pv = float(getattr(account, "portfolio_value", None) or real_equity)
+                daily_pl = real_equity - last_eq
+                daily_pl_pct = (daily_pl / last_eq * 100) if last_eq > 0 else 0.0
+                initial = last_eq
+
+                metrics = {
+                    "win_rate": 0.0,
+                    "avg_win": 0.0,
+                    "avg_loss": 0.0,
+                    "profit_factor": 0.0,
+                    "sharpe_ratio": 0.0,
+                }
+                try:
+                    try:
+                        from alpaca.trading.requests import GetPortfolioHistoryRequest  # type: ignore
+                        history = self.trading_client.get_portfolio_history(
+                            GetPortfolioHistoryRequest(period="1D", timeframe="5Min")
+                        )
+                    except Exception:
+                        history = self.trading_client.get_portfolio_history()
+
+                    if history and hasattr(history, "equity") and len(history.equity) > 2:
+                        equities = np.array(history.equity, dtype=float)
+                        equities = equities[equities > 0]
+                        if len(equities) > 2:
+                            returns = np.diff(equities) / equities[:-1]
+                            returns = returns[np.isfinite(returns)]
+                            if len(returns) > 1:
+                                avg_ret = np.mean(returns)
+                                std_ret = np.std(returns)
+                                if std_ret > 0:
+                                    factor = np.sqrt(252 * 78) if len(equities) < 100 else np.sqrt(252)
+                                    metrics["sharpe_ratio"] = round((avg_ret / std_ret) * factor, 2)
+                                    if metrics["sharpe_ratio"] > 10:
+                                        metrics["sharpe_ratio"] = 9.99
+                                elif avg_ret > 0:
+                                    metrics["sharpe_ratio"] = 1.0
+
+                    orders = self.get_orders(status="all", limit=100)
+                    filled_orders = [o for o in orders if o["status"] == "filled" and o["filled_avg_price"]]
+
+                    trades = []
+                    symbols = set(o["symbol"] for o in filled_orders)
+                    for sym in symbols:
+                        sym_orders = [o for o in filled_orders if o["symbol"] == sym]
+                        sym_orders.sort(key=lambda x: x["filled_at"] or x["submitted_at"])
+                        open_qty = 0
+                        entry_value = 0
+                        for o in sym_orders:
+                            if o["side"] == "buy":
+                                open_qty += o["qty"]
+                                entry_value += o["qty"] * o["filled_avg_price"]
+                            elif o["side"] == "sell" and open_qty > 0:
+                                close_qty = min(o["qty"], open_qty)
+                                rel_entry_value = (entry_value / open_qty) * close_qty
+                                realized_pnl = (o["filled_avg_price"] * close_qty) - rel_entry_value
+                                trades.append(realized_pnl)
+                                entry_value -= rel_entry_value
+                                open_qty -= close_qty
+
+                    if trades:
+                        wins = [t for t in trades if t > 0]
+                        losses = [t for t in trades if t <= 0]
+                        metrics["win_rate"] = round(len(wins) / len(trades) * 100, 1)
+                        metrics["avg_win"] = round(np.mean(wins), 2) if wins else 0.0
+                        metrics["avg_loss"] = round(np.mean(losses), 2) if losses else 0.0
+                        sum_win = sum(wins)
+                        sum_loss = abs(sum(losses))
+                        metrics["profit_factor"] = (
+                            round(sum_win / sum_loss, 2) if sum_loss > 0 else (round(sum_win, 2) if sum_win > 0 else 0.0)
+                        )
+                except Exception as me:
+                    logger.warning(f"Error calculating live account metrics: {me}")
+
+                total_pl = real_equity - initial
+                total_pl_pct = (total_pl / initial * 100) if initial > 0 else 0.0
+
+                return {
+                    "equity": round(real_equity, 2),
+                    "cash": round(real_cash, 2),
+                    "buying_power": round(bp, 2),
+                    "portfolio_value": round(pv, 2),
+                    "profit_loss": round(total_pl, 2),
+                    "profit_loss_pct": round(total_pl_pct, 2),
+                    "daily_profit_loss": round(daily_pl, 2),
+                    "daily_profit_loss_pct": round(daily_pl_pct, 2),
+                    "day_trade_count": int(account.daytrade_count or 0),
+                    "initial_capital": round(initial, 2),
+                    **metrics,
+                }
+
+            initial_cfg = self._initial_capital_for_display()
+
             if self.virtual_base_equity == 0:
                 self.virtual_base_equity = real_equity
                 logger.info(
                     "🔄 Virtual Portfolio Reset: Real Equity $%s -> Displayed Start at $%s",
-                    real_equity, settings.initial_capital,
+                    real_equity, initial_cfg,
                 )
 
             pl_since_reset = real_equity - self.virtual_base_equity
-            equity = settings.initial_capital + pl_since_reset
+            equity = initial_cfg + pl_since_reset
 
             if not hasattr(self, 'virtual_daily_open') or self.virtual_daily_open == 0:
-                self.virtual_daily_open = settings.initial_capital
+                self.virtual_daily_open = initial_cfg
 
             daily_profit_loss = equity - self.virtual_daily_open
             daily_profit_loss_pct = (
@@ -120,7 +256,7 @@ class AlpacaService:
             displayed_bp = displayed_cash
 
             pv = equity
-            initial = settings.initial_capital
+            initial = initial_cfg
 
             total_profit_loss = equity - initial
             total_profit_loss_pct = (total_profit_loss / initial) * 100 if initial > 0 else 0
@@ -603,15 +739,16 @@ class AlpacaService:
 
     # ─── Demo Data ─────────────────────────────────────────────
     def _demo_account(self) -> dict:
+        ic = self._initial_capital_for_display()
         return {
-            "equity": settings.initial_capital,
-            "cash": settings.initial_capital,
-            "buying_power": settings.initial_capital,
-            "portfolio_value": settings.initial_capital,
+            "equity": ic,
+            "cash": ic,
+            "buying_power": ic,
+            "portfolio_value": ic,
             "profit_loss": 0,
             "profit_loss_pct": 0,
             "day_trade_count": 0,
-            "initial_capital": settings.initial_capital,
+            "initial_capital": ic,
         }
 
     def _demo_bars(self, symbol: str, limit: int, start_price: float = None) -> list:
@@ -805,6 +942,6 @@ class AlpacaService:
         }
 
 
-# Singleton instance
+# Singleton instance (paper vs live follows ``TRADING_MODE`` in settings)
 alpaca_service = AlpacaService()
-alpaca_service.initialize()  # Initialize immediately at import time
+alpaca_service.initialize()

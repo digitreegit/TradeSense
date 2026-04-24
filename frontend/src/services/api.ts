@@ -148,6 +148,8 @@ export const api = {
       auto: boolean;
       available: Array<'3k' | '10k' | '30k'>;
       preset: Record<string, unknown>;
+      paper_trading?: boolean;
+      initial_capital?: number;
     }>('/trading/scale'),
 
   setCapitalScale: (scale: '3k' | '10k' | '30k') =>
@@ -155,9 +157,23 @@ export const api = {
       scale: '3k' | '10k' | '30k';
       level: string;
       preset: Record<string, unknown>;
+      paper_trading?: boolean;
+      initial_capital?: number;
     }>('/trading/scale', {
       method: 'POST',
       body: JSON.stringify({ scale }),
+    }),
+
+  setTradingMode: (paper: boolean) =>
+    request<{
+      scale: '3k' | '10k' | '30k';
+      level: string;
+      preset: Record<string, unknown>;
+      paper_trading: boolean;
+      initial_capital?: number;
+    }>('/trading/mode', {
+      method: 'POST',
+      body: JSON.stringify({ paper }),
     }),
 
   backtestStrategy: (strategy: string, params: Record<string, unknown>) =>
@@ -172,6 +188,7 @@ export const api = {
       user_id?: number;
       email?: string;
       alpaca_configured?: boolean;
+      alpaca_paper_trading?: boolean;
     }>('/auth/me'),
 
   saveAlpacaKeys: (api_key: string, secret_key: string) =>

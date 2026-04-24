@@ -97,6 +97,16 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
+def initial_capital_for_scale(scale: str) -> float:
+    """Notional starting capital for paper UI / virtual re-base (3k / 10k / 30k)."""
+    s = (scale or "").strip().lower()
+    if s == "10k":
+        return 10_000.0
+    if s == "30k":
+        return 30_000.0
+    return 3_000.0
+
+
 def resolved_capital_scale() -> str:
     """Return '3k', '10k', or '30k'.
 

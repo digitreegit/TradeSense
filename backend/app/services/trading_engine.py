@@ -27,7 +27,7 @@ from typing import Optional
 
 import pytz
 
-from app.core.config import resolved_capital_scale, settings
+from app.core.config import initial_capital_for_scale, resolved_capital_scale, settings
 from app.core.risk_presets import (
     RISK_PRESETS_FOR,
     is_halted_score,
@@ -103,10 +103,17 @@ class TradingEngine:
         compliance: ComplianceService,
         owner_email: Optional[str] = None,
         log_dir: Optional[Path] = None,
+        owner_user_id: Optional[int] = None,
     ):
         self._alpaca = alpaca
         self._compliance = compliance
+        self._owner_user_id = owner_user_id
         self._scale = resolved_capital_scale()
+        self._initial_capital = initial_capital_for_scale(self._scale)
+        if self._alpaca.paper_trading:
+            self._alpaca.initial_capital_override = self._initial_capital
+        else:
+            self._alpaca.initial_capital_override = None
 
         self._exec_logger = ExecutionLogger(
             log_dir=log_dir,
@@ -131,7 +138,7 @@ class TradingEngine:
         self._daily_trades: int = 0
         self._daily_target_reached: bool = False
         self._daily_loss_limit_hit: bool = False
-        self._day_start_equity: float = settings.initial_capital
+        self._day_start_equity: float = self._initial_capital
 
         # Per-position peaks for trailing stop high-water mark
         self._position_peaks: dict = {}
@@ -149,7 +156,7 @@ class TradingEngine:
             "strategy": "scalp",
             "reasoning": (
                 f"{self._scale}-scale scalp — "
-                f"${settings.initial_capital:,.0f} → "
+                f"${self._initial_capital:,.0f} → "
                 f"+{self._preset.daily_target_percent}%/day"
             ),
             "risk_level": self._preset.level,
@@ -205,6 +212,8 @@ class TradingEngine:
             "auto": True,
             "available": ["3k", "10k", "30k"],
             "preset": self._preset.as_dict(),
+            "paper_trading": self._alpaca.paper_trading,
+            "initial_capital": self._initial_capital,
         }
 
     def set_capital_scale(self, scale: str) -> dict:
@@ -218,10 +227,15 @@ class TradingEngine:
         if new_scale not in ("3k", "10k", "30k"):
             raise ValueError(f"unknown capital scale: {scale!r}")
         if new_scale == self._scale:
-            return self.get_scale_info()
+            return {**self.get_scale_info(), "paper_trading": self._alpaca.paper_trading}
 
         old_scale = self._scale
         self._scale = new_scale
+        self._initial_capital = initial_capital_for_scale(new_scale)
+        if self._alpaca.paper_trading:
+            self._alpaca.initial_capital_override = self._initial_capital
+            self._alpaca.reset_paper_virtual_baseline()
+
         self._preset = preset_for_level(self._preset.level, scale=new_scale)
 
         self.regime_data.update(
@@ -243,6 +257,42 @@ class TradingEngine:
             f"trades/day={self._preset.max_trades_per_day}",
         )
         return self.get_scale_info()
+
+    def set_paper_trading(self, paper: bool) -> dict:
+        """Switch Alpaca paper vs live endpoint (requires stored API keys)."""
+        from app.db import users_db
+        from app.services.user_runtime import load_alpaca_keys_for_user
+
+        if self._owner_user_id is None:
+            raise ValueError("paper/live mode can only be changed for signed-in users with saved keys")
+        uid = self._owner_user_id
+        row = users_db.get_user_by_id(uid)
+        if not row or not (row.get("alpaca_key_enc") and row.get("alpaca_secret_enc")):
+            raise ValueError("save Alpaca API keys before switching paper or live mode")
+
+        want = bool(paper)
+        if want == self._alpaca.paper_trading:
+            return {**self.get_scale_info(), "paper_trading": want}
+
+        self._alpaca.set_paper_trading(want)
+        k, s = load_alpaca_keys_for_user(uid)
+        ok = self._alpaca.initialize_with_keys(k, s, paper_trading=want)
+        if not ok:
+            self._alpaca.set_paper_trading(not want)
+            self._alpaca.initialize_with_keys(k, s, paper_trading=not want)
+            raise ValueError("could not connect with the selected mode; check that your keys match paper or live")
+
+        users_db.set_alpaca_paper_trading(uid, want)
+        if want:
+            self._alpaca.initial_capital_override = self._initial_capital
+        else:
+            self._alpaca.initial_capital_override = None
+        if want:
+            self._alpaca.reset_paper_virtual_baseline()
+
+        mode = "paper" if want else "live"
+        self._log("info", f"🔀 Alpaca mode: {mode.upper()} trading API")
+        return {**self.get_scale_info(), "paper_trading": want}
 
     # ─── Control ──────────────────────────────────────────────
 
@@ -280,7 +330,7 @@ class TradingEngine:
         self._log(
             "info",
             f"🚀 Bot started [{self._scale}] — {preset.level.upper()} | "
-            f"Capital: ${settings.initial_capital:,.0f} | TIF: {preset.default_tif.upper()}",
+            f"Capital: ${self._initial_capital:,.0f} | TIF: {preset.default_tif.upper()}",
         )
         self._log(
             "info",
@@ -649,7 +699,7 @@ class TradingEngine:
             account = self._alpaca.get_account()
             self._day_start_equity = account["equity"]
         except Exception:
-            self._day_start_equity = settings.initial_capital
+            self._day_start_equity = self._initial_capital
 
         self._log("info", f"📅 New trading day: {today} | Start equity: ${self._day_start_equity:,.2f}")
         self._log(
