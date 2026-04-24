@@ -152,5 +152,66 @@ class NotificationService:
         except Exception as exc:  # noqa: BLE001
             logger.error("Telegram send failed: %s", exc)
 
+    def try_send_telegram_test(self, user_id: int) -> dict:
+        """Send a one-off test message; return {ok, message?} or {ok: False, error}."""
+        token = (settings.telegram_bot_token or "").strip()
+        if not token:
+            return {
+                "ok": False,
+                "error": (
+                    "Server has no TELEGRAM_BOT_TOKEN. Put it in backend/.env (or repo root .env), "
+                    "then restart uvicorn so the process reloads environment variables."
+                ),
+            }
+
+        row = _load_user_notify_row(user_id)
+        if not row:
+            return {"ok": False, "error": "User not found."}
+
+        if not bool(int(row.get("notify_telegram") or 0)):
+            return {
+                "ok": False,
+                "error": "Turn on “Send alerts to Telegram”, enter your chat ID, then click Save before Send test.",
+            }
+
+        chat_id = (row.get("telegram_chat_id") or "").strip()
+        if not chat_id:
+            return {
+                "ok": False,
+                "error": "Enter your Telegram chat ID and click Save first.",
+            }
+
+        title = "TradeSense test"
+        message = "If you see this, Telegram alerts are configured correctly."
+        body = _telegram_text(title, message, "INFO")
+        if len(body) > 4000:
+            body = body[:3990] + "\n…"
+
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        try:
+            r = httpx.post(
+                url,
+                json={"chat_id": chat_id, "text": body},
+                timeout=15.0,
+            )
+            data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Telegram test failed: %s", exc)
+            return {"ok": False, "error": f"Network error calling Telegram: {exc}"}
+
+        if not data.get("ok"):
+            desc = data.get("description") or data.get("error_code") or r.text or "unknown error"
+            hint = ""
+            low = str(desc).lower()
+            if "chat not found" in low or "chat_id" in low:
+                hint = " Check the chat ID (digits only for private chats). Open @userinfobot in Telegram to copy your id."
+            elif "forbidden" in low or "blocked" in low:
+                hint = " Open your bot in Telegram and tap Start (/start) so it can message you."
+            logger.error("Telegram test API error: %s", data)
+            return {"ok": False, "error": f"Telegram: {desc}.{hint}"}
+
+        logger.info("📱 Telegram test message sent to chat_id=%s", chat_id)
+        return {"ok": True, "message": "Message delivered to Telegram."}
+
 
 notification_service = NotificationService()

@@ -183,8 +183,8 @@ const SettingsPage: React.FC = () => {
     setNotifMsg(null);
     setErr(null);
     try {
-      await api.testNotification();
-      setNotifMsg('Test message sent. Check Telegram if enabled.');
+      const res = await api.testNotification();
+      setNotifMsg(res.message || 'Test message sent.');
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Test send failed');
     } finally {

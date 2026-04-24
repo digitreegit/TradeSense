@@ -99,12 +99,8 @@ async def set_notification_prefs(
 
 @router.post("/notification-test")
 async def test_notification(user_id: int = Depends(get_current_user_id)):
-    """Send a short test message to Telegram if enabled."""
-    notification_service.send_alert(
-        "TradeSense test",
-        "If you received this, your Telegram notification settings are working.",
-        "INFO",
-        to_email="",
-        user_id=user_id,
-    )
-    return {"ok": True, "message": "Test sent (check Telegram if enabled)."}
+    """Send a short test message; returns explicit error if Telegram rejects or prefs missing."""
+    result = notification_service.try_send_telegram_test(user_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Telegram test failed"))
+    return {"ok": True, "message": result.get("message", "Delivered.")}
