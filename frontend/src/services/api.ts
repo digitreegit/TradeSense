@@ -191,35 +191,21 @@ export const api = {
       alpaca_paper_trading?: boolean;
       notify_telegram?: boolean;
       telegram_chat_id?: string;
-      notify_whatsapp?: boolean;
-      whatsapp_e164?: string;
       telegram_bot_configured?: boolean;
-      whatsapp_provider_configured?: boolean;
     }>('/auth/me'),
 
   getNotificationPrefs: () =>
     request<{
       notify_telegram: boolean;
       telegram_chat_id: string;
-      notify_whatsapp: boolean;
-      whatsapp_e164: string;
       telegram_bot_configured: boolean;
-      whatsapp_provider_configured: boolean;
     }>('/auth/notification-prefs'),
 
-  setNotificationPrefs: (body: {
-    notify_telegram: boolean;
-    telegram_chat_id: string;
-    notify_whatsapp: boolean;
-    whatsapp_e164: string;
-  }) =>
+  setNotificationPrefs: (body: { notify_telegram: boolean; telegram_chat_id: string }) =>
     request<{
       notify_telegram: boolean;
       telegram_chat_id: string;
-      notify_whatsapp: boolean;
-      whatsapp_e164: string;
       telegram_bot_configured: boolean;
-      whatsapp_provider_configured: boolean;
     }>('/auth/notification-prefs', {
       method: 'POST',
       body: JSON.stringify(body),

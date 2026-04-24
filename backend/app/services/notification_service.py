@@ -34,7 +34,7 @@ class NotificationService:
         to_email: Optional[str] = None,
         user_id: Optional[int] = None,
     ):
-        """Send alert: log + optional Resend + Telegram + WhatsApp."""
+        """Send alert: log + optional Resend + Telegram."""
         full_msg = f"[{level}] {title}\n\n{message}"
 
         logger.info(f"🔔 ALERT: {title} - {message}")
@@ -48,7 +48,6 @@ class NotificationService:
             )
 
         self._send_telegram_alert(title, message, level, user_id=user_id)
-        self._send_whatsapp_alert(title, message, level, user_id=user_id)
 
     def send_daily_summary(
         self,
@@ -78,7 +77,6 @@ class NotificationService:
             self._send_resend_email(subject=subject, text=text, to_email=to_email)
         body = text.strip()
         self._send_telegram_alert(subject, body, "INFO", user_id=user_id)
-        self._send_whatsapp_alert(subject, body, "INFO", user_id=user_id)
 
     def _send_resend_email(self, *, subject: str, text: str, to_email: str) -> None:
         if not self.resend_api_key or not self.resend_from_email:
@@ -153,66 +151,6 @@ class NotificationService:
             logger.info("📱 Telegram alert sent.")
         except Exception as exc:  # noqa: BLE001
             logger.error("Telegram send failed: %s", exc)
-
-    def _send_whatsapp_alert(
-        self,
-        title: str,
-        message: str,
-        level: str,
-        *,
-        user_id: Optional[int],
-    ) -> None:
-        sid = (settings.twilio_account_sid or "").strip()
-        auth = (settings.twilio_auth_token or "").strip()
-        from_wa = (settings.twilio_whatsapp_from or "").strip()
-        if not sid or not auth or not from_wa:
-            return
-
-        to_num = ""
-        if user_id is not None:
-            row = _load_user_notify_row(user_id)
-            if not row:
-                return
-            if not bool(int(row.get("notify_whatsapp") or 0)):
-                return
-            raw = (row.get("whatsapp_e164") or "").strip()
-            if raw.startswith("whatsapp:"):
-                raw = raw.replace("whatsapp:", "", 1).strip()
-            to_num = raw
-        else:
-            return
-
-        if not to_num.startswith("+"):
-            logger.warning("WhatsApp number should be E.164 with + prefix")
-            return
-
-        to_wa = f"whatsapp:{to_num}"
-        body = _telegram_text(title, message, level)
-        if len(body) > 1500:
-            body = body[:1490] + "\n…"
-
-        from_norm = from_wa if from_wa.startswith("whatsapp:") else (
-            f"whatsapp:{from_wa}" if from_wa.startswith("+") else f"whatsapp:+{from_wa.lstrip('+')}"
-        )
-
-        tw_url = f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
-        try:
-            r = httpx.post(
-                tw_url,
-                auth=(sid, auth),
-                data={
-                    "From": from_norm,
-                    "To": to_wa,
-                    "Body": body,
-                },
-                timeout=20.0,
-            )
-            if r.status_code >= 400:
-                logger.error("WhatsApp (Twilio) failed: %s %s", r.status_code, r.text)
-                return
-            logger.info("💬 WhatsApp alert sent.")
-        except Exception as exc:  # noqa: BLE001
-            logger.error("WhatsApp (Twilio) failed: %s", exc)
 
 
 notification_service = NotificationService()

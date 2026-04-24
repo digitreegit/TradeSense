@@ -38,14 +38,7 @@ async def me(user_id: Optional[int] = Depends(get_current_user_id_optional)):
         "alpaca_paper_trading": paper,
         "notify_telegram": bool(int(row.get("notify_telegram") or 0)),
         "telegram_chat_id": (row.get("telegram_chat_id") or "") or "",
-        "notify_whatsapp": bool(int(row.get("notify_whatsapp") or 0)),
-        "whatsapp_e164": (row.get("whatsapp_e164") or "") or "",
         "telegram_bot_configured": bool((settings.telegram_bot_token or "").strip()),
-        "whatsapp_provider_configured": bool(
-            (settings.twilio_account_sid or "").strip()
-            and (settings.twilio_auth_token or "").strip()
-            and (settings.twilio_whatsapp_from or "").strip()
-        ),
     }
 
 
@@ -73,8 +66,6 @@ async def delete_alpaca_keys(user_id: int = Depends(get_current_user_id)):
 class NotificationPrefsBody(BaseModel):
     notify_telegram: bool = False
     telegram_chat_id: str = Field(default="", max_length=64)
-    notify_whatsapp: bool = False
-    whatsapp_e164: str = Field(default="", max_length=32)
 
 
 def _notification_prefs_dict(user_id: int) -> dict:
@@ -84,14 +75,7 @@ def _notification_prefs_dict(user_id: int) -> dict:
     return {
         "notify_telegram": bool(int(row.get("notify_telegram") or 0)),
         "telegram_chat_id": (row.get("telegram_chat_id") or "") or "",
-        "notify_whatsapp": bool(int(row.get("notify_whatsapp") or 0)),
-        "whatsapp_e164": (row.get("whatsapp_e164") or "") or "",
         "telegram_bot_configured": bool((settings.telegram_bot_token or "").strip()),
-        "whatsapp_provider_configured": bool(
-            (settings.twilio_account_sid or "").strip()
-            and (settings.twilio_auth_token or "").strip()
-            and (settings.twilio_whatsapp_from or "").strip()
-        ),
     }
 
 
@@ -105,30 +89,22 @@ async def set_notification_prefs(
     body: NotificationPrefsBody,
     user_id: int = Depends(get_current_user_id),
 ):
-    wa = body.whatsapp_e164.strip()
-    if wa and not wa.startswith("+"):
-        raise HTTPException(
-            status_code=400,
-            detail="WhatsApp number must be in E.164 format starting with + (e.g. +14155551234)",
-        )
     users_db.update_user_notification_prefs(
         user_id,
         notify_telegram=body.notify_telegram,
         telegram_chat_id=body.telegram_chat_id,
-        notify_whatsapp=body.notify_whatsapp,
-        whatsapp_e164=body.whatsapp_e164,
     )
     return _notification_prefs_dict(user_id)
 
 
 @router.post("/notification-test")
 async def test_notification(user_id: int = Depends(get_current_user_id)):
-    """Send a short test message to enabled Telegram / WhatsApp channels."""
+    """Send a short test message to Telegram if enabled."""
     notification_service.send_alert(
         "TradeSense test",
-        "If you received this, your notification settings are working.",
+        "If you received this, your Telegram notification settings are working.",
         "INFO",
         to_email="",
         user_id=user_id,
     )
-    return {"ok": True, "message": "Test sent (check Telegram / WhatsApp if enabled)."}
+    return {"ok": True, "message": "Test sent (check Telegram if enabled)."}

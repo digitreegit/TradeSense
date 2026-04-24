@@ -63,10 +63,7 @@ const SettingsPage: React.FC = () => {
 
   const [notifyTg, setNotifyTg] = useState(false);
   const [tgChatId, setTgChatId] = useState('');
-  const [notifyWa, setNotifyWa] = useState(false);
-  const [waE164, setWaE164] = useState('');
   const [tgBotOk, setTgBotOk] = useState(false);
-  const [waProviderOk, setWaProviderOk] = useState(false);
   const [notifLoading, setNotifLoading] = useState(false);
   const [notifSaving, setNotifSaving] = useState(false);
   const [notifMsg, setNotifMsg] = useState<string | null>(null);
@@ -96,10 +93,7 @@ const SettingsPage: React.FC = () => {
         if (cancelled) return;
         setNotifyTg(Boolean(p.notify_telegram));
         setTgChatId(p.telegram_chat_id || '');
-        setNotifyWa(Boolean(p.notify_whatsapp));
-        setWaE164(p.whatsapp_e164 || '');
         setTgBotOk(Boolean(p.telegram_bot_configured));
-        setWaProviderOk(Boolean(p.whatsapp_provider_configured));
       })
       .catch(() => {
         /* non-fatal */
@@ -174,11 +168,8 @@ const SettingsPage: React.FC = () => {
       const p = await api.setNotificationPrefs({
         notify_telegram: notifyTg,
         telegram_chat_id: tgChatId.trim(),
-        notify_whatsapp: notifyWa,
-        whatsapp_e164: waE164.trim(),
       });
       setTgBotOk(Boolean(p.telegram_bot_configured));
-      setWaProviderOk(Boolean(p.whatsapp_provider_configured));
       setNotifMsg('Notification preferences saved.');
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to save notifications');
@@ -193,7 +184,7 @@ const SettingsPage: React.FC = () => {
     setErr(null);
     try {
       await api.testNotification();
-      setNotifMsg('Test message sent. Check Telegram / WhatsApp if enabled.');
+      setNotifMsg('Test message sent. Check Telegram if enabled.');
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Test send failed');
     } finally {
@@ -588,36 +579,19 @@ const SettingsPage: React.FC = () => {
               color: 'var(--text-tertiary)',
             }}
           >
-            Alerts (Telegram & WhatsApp)
+            Telegram alerts
           </label>
           <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', margin: '6px 0 14px', lineHeight: 1.55 }}>
-            Trading alerts (bot start/stop, daily summary, loss limit, target hit, regime changes) can go to Telegram
-            and/or WhatsApp. The server must have a shared{' '}
-            <strong>Telegram bot token</strong> and (for WhatsApp) <strong>Twilio</strong> credentials in{' '}
-            <code style={{ fontSize: '11px' }}>.env</code> — see{' '}
-            <a href="https://core.telegram.org/bots/tutorial" target="_blank" rel="noreferrer" style={{ color: 'var(--info)' }}>
-              Telegram bots
-            </a>{' '}
-            and{' '}
-            <a
-              href="https://www.twilio.com/docs/whatsapp"
-              target="_blank"
-              rel="noreferrer"
-              style={{ color: 'var(--info)' }}
-            >
-              Twilio WhatsApp
+            Trading alerts (bot start/stop, daily summary, loss limit, target hit, regime changes) can be sent to
+            Telegram. Add <strong>TELEGRAM_BOT_TOKEN</strong> to server <code style={{ fontSize: '11px' }}>.env</code>{' '}
+            (<a href="https://core.telegram.org/bots/tutorial" target="_blank" rel="noreferrer" style={{ color: 'var(--info)' }}>
+              bot setup
             </a>
-            .
+            ), then paste your <strong>chat ID</strong> here.
           </p>
           {!tgBotOk && (
             <p style={{ fontSize: '12px', color: 'var(--loss)', marginBottom: '10px' }}>
               Telegram is not configured on the server (<code>TELEGRAM_BOT_TOKEN</code> missing).
-            </p>
-          )}
-          {!waProviderOk && (
-            <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '10px' }}>
-              WhatsApp is not configured on the server (set <code>TWILIO_ACCOUNT_SID</code>,{' '}
-              <code>TWILIO_AUTH_TOKEN</code>, <code>TWILIO_WHATSAPP_FROM</code>).
             </p>
           )}
           <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', marginBottom: '8px' }}>
@@ -627,7 +601,7 @@ const SettingsPage: React.FC = () => {
               onChange={(e) => setNotifyTg(e.target.checked)}
               disabled={!tgBotOk}
             />
-            Telegram
+            Send alerts to Telegram
           </label>
           <label style={{ fontSize: '12px' }}>Telegram chat ID</label>
           <input
@@ -636,33 +610,6 @@ const SettingsPage: React.FC = () => {
             onChange={(e) => setTgChatId(e.target.value)}
             placeholder="e.g. 123456789 (from @userinfobot or getUpdates)"
             disabled={!tgBotOk}
-            style={{
-              display: 'block',
-              width: '100%',
-              margin: '6px 0 14px',
-              padding: '10px',
-              borderRadius: '8px',
-              border: '2px solid var(--border-secondary)',
-              background: 'var(--bg-secondary)',
-              color: 'inherit',
-            }}
-          />
-          <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', marginBottom: '8px' }}>
-            <input
-              type="checkbox"
-              checked={notifyWa}
-              onChange={(e) => setNotifyWa(e.target.checked)}
-              disabled={!waProviderOk}
-            />
-            WhatsApp (Twilio)
-          </label>
-          <label style={{ fontSize: '12px' }}>Your mobile (E.164)</label>
-          <input
-            type="text"
-            value={waE164}
-            onChange={(e) => setWaE164(e.target.value)}
-            placeholder="+14155551234"
-            disabled={!waProviderOk}
             style={{
               display: 'block',
               width: '100%',
@@ -687,7 +634,7 @@ const SettingsPage: React.FC = () => {
               type="button"
               className="btn btn-secondary"
               onClick={() => void sendTestNotification()}
-              disabled={notifLoading || (!notifyTg && !notifyWa)}
+              disabled={notifLoading || !notifyTg}
             >
               {notifLoading ? 'Sending…' : 'Send test'}
             </button>
