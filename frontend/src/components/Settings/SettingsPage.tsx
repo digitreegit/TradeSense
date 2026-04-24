@@ -260,6 +260,91 @@ const SettingsPage: React.FC = () => {
         {err && <p style={{ color: 'var(--loss)', fontSize: '13px', marginBottom: '8px' }}>{err}</p>}
         {msg && <p style={{ color: 'var(--profit)', fontSize: '13px', marginBottom: '8px' }}>{msg}</p>}
 
+        <div style={{ marginTop: '8px', marginBottom: '8px' }}>
+          <label
+            style={{
+              fontSize: '12px',
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              color: 'var(--text-tertiary)',
+            }}
+          >
+            Trading mode
+          </label>
+          <p
+            style={{
+              fontSize: '12px',
+              color: 'var(--text-tertiary)',
+              margin: '6px 0 10px',
+              lineHeight: 1.5,
+            }}
+          >
+            <strong>Paper money</strong> (Alpaca paper API) vs <strong>real money</strong> (live API). Save Alpaca keys
+            below first, then tap the mode you want.
+          </p>
+          <div
+            role="radiogroup"
+            aria-label="Paper or live trading"
+            style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}
+          >
+            <button
+              type="button"
+              role="radio"
+              aria-checked={authAlpacaPaperTrading}
+              onClick={() => choosePaperOrLive(true)}
+              disabled={modeLoading || !authAlpacaConfigured}
+              style={{
+                textAlign: 'left',
+                padding: '12px 14px',
+                borderRadius: '8px',
+                border: authAlpacaPaperTrading
+                  ? '2px solid var(--border-accent, var(--info))'
+                  : '1px solid var(--border-secondary)',
+                background: authAlpacaPaperTrading
+                  ? 'var(--bg-tertiary, rgba(56,132,255,0.12))'
+                  : 'var(--bg-secondary)',
+                color: 'var(--text-primary)',
+                cursor: modeLoading || !authAlpacaConfigured ? 'not-allowed' : 'pointer',
+              }}
+            >
+              <div style={{ fontSize: '14px', fontWeight: 700 }}>Paper money</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px', lineHeight: 1.35 }}>
+                Virtual balances + 3k / 10k / 30k presets
+              </div>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={!authAlpacaPaperTrading}
+              onClick={() => choosePaperOrLive(false)}
+              disabled={modeLoading || !authAlpacaConfigured}
+              style={{
+                textAlign: 'left',
+                padding: '12px 14px',
+                borderRadius: '8px',
+                border: !authAlpacaPaperTrading
+                  ? '2px solid var(--border-accent, var(--loss))'
+                  : '1px solid var(--border-secondary)',
+                background: !authAlpacaPaperTrading
+                  ? 'var(--bg-tertiary, rgba(239,68,68,0.10))'
+                  : 'var(--bg-secondary)',
+                color: 'var(--text-primary)',
+                cursor: modeLoading || !authAlpacaConfigured ? 'not-allowed' : 'pointer',
+              }}
+            >
+              <div style={{ fontSize: '14px', fontWeight: 700 }}>Real money</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px', lineHeight: 1.35 }}>
+                Live Alpaca account (real orders)
+              </div>
+            </button>
+          </div>
+          {!authAlpacaConfigured && (
+            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '10px', lineHeight: 1.45 }}>
+              Keys not saved yet — both buttons stay inactive until you add your API key pair below.
+            </p>
+          )}
+        </div>
+
         {!keysLocked && (
           <form onSubmit={saveKeys}>
             <label style={{ fontSize: '12px' }}>Alpaca API Key ID</label>
@@ -305,92 +390,12 @@ const SettingsPage: React.FC = () => {
           </form>
         )}
 
-        <div style={{ marginTop: '32px' }}>
-          <label
-            style={{
-              fontSize: '12px',
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase',
-              color: 'var(--text-tertiary)',
-            }}
-          >
-            Trading mode
-          </label>
-          <p
-            style={{
-              fontSize: '12px',
-              color: 'var(--text-tertiary)',
-              margin: '6px 0 10px',
-              lineHeight: 1.5,
-            }}
-          >
-            Paper uses Alpaca&apos;s paper API. Live uses your real brokerage account — use only with keys you intend
-            for production.
+        {keysLocked && (
+          <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '12px', lineHeight: 1.5 }}>
+            Keys are on file. Use <strong>Trading mode</strong> above to switch paper vs live, or delete keys to replace
+            them.
           </p>
-          <div
-            role="radiogroup"
-            aria-label="Paper or live trading"
-            style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}
-          >
-            <button
-              type="button"
-              role="radio"
-              aria-checked={authAlpacaPaperTrading}
-              onClick={() => choosePaperOrLive(true)}
-              disabled={modeLoading || !authAlpacaConfigured}
-              style={{
-                textAlign: 'left',
-                padding: '10px 12px',
-                borderRadius: '8px',
-                border: authAlpacaPaperTrading
-                  ? '1px solid var(--border-accent, var(--info))'
-                  : '1px solid var(--border-secondary)',
-                background: authAlpacaPaperTrading
-                  ? 'var(--bg-tertiary, rgba(56,132,255,0.10))'
-                  : 'var(--bg-secondary)',
-                color: 'inherit',
-                cursor: modeLoading || !authAlpacaConfigured ? 'not-allowed' : 'pointer',
-                opacity: !authAlpacaConfigured ? 0.55 : 1,
-              }}
-            >
-              <div style={{ fontSize: '13px', fontWeight: 600 }}>Paper money</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px', lineHeight: 1.3 }}>
-                Virtual balances + 3k / 10k / 30k presets
-              </div>
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={!authAlpacaPaperTrading}
-              onClick={() => choosePaperOrLive(false)}
-              disabled={modeLoading || !authAlpacaConfigured}
-              style={{
-                textAlign: 'left',
-                padding: '10px 12px',
-                borderRadius: '8px',
-                border: !authAlpacaPaperTrading
-                  ? '1px solid var(--border-accent, var(--loss))'
-                  : '1px solid var(--border-secondary)',
-                background: !authAlpacaPaperTrading
-                  ? 'var(--bg-tertiary, rgba(239,68,68,0.08))'
-                  : 'var(--bg-secondary)',
-                color: 'inherit',
-                cursor: modeLoading || !authAlpacaConfigured ? 'not-allowed' : 'pointer',
-                opacity: !authAlpacaConfigured ? 0.55 : 1,
-              }}
-            >
-              <div style={{ fontSize: '13px', fontWeight: 600 }}>Real money</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px', lineHeight: 1.3 }}>
-                Live Alpaca balances (real orders)
-              </div>
-            </button>
-          </div>
-          {!authAlpacaConfigured && (
-            <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '6px' }}>
-              Save keys above to enable paper vs live.
-            </p>
-          )}
-        </div>
+        )}
 
         {!authAlpacaPaperTrading && authAlpacaConfigured && (
           <div style={{ marginTop: '24px' }}>
