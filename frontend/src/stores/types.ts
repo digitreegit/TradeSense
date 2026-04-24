@@ -1,5 +1,7 @@
 // Zustand store types and shared interfaces
 
+export type ColorTheme = 'dark' | 'light';
+
 export interface Position {
   symbol: string;
   qty: number;

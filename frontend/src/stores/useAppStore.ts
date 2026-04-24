@@ -11,7 +11,9 @@ import type {
   RegimeData,
   ComplianceStatus,
   AlpacaApiUsage,
+  ColorTheme,
 } from './types';
+import { applyThemeToDocument, persistTheme, readStoredTheme } from '../theme/theme';
 
 interface AppState {
   // Navigation
@@ -93,6 +95,9 @@ interface AppState {
   ) => void;
   authMethod: 'google' | 'email' | null;
   setAuthMethod: (method: 'google' | 'email' | null) => void;
+
+  colorTheme: ColorTheme;
+  setColorTheme: (theme: ColorTheme) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -133,6 +138,13 @@ export const useAppStore = create<AppState>((set) => ({
     }),
   authMethod: null,
   setAuthMethod: (method) => set({ authMethod: method }),
+
+  colorTheme: readStoredTheme(),
+  setColorTheme: (theme) => {
+    persistTheme(theme);
+    applyThemeToDocument(theme);
+    set({ colorTheme: theme });
+  },
 
   // Account - $3000 paper trading
   account: {

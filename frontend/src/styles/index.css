@@ -107,6 +107,65 @@
   --header-height: 64px;
 }
 
+/* Light theme — toggled via Profile (data-theme on <html>) */
+[data-theme="light"] {
+  --bg-primary: #f1f5f9;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e2e8f0;
+  --bg-card: rgba(255, 255, 255, 0.92);
+  --bg-card-hover: rgba(248, 250, 252, 0.98);
+  --bg-glass: rgba(255, 255, 255, 0.75);
+  --bg-input: rgba(241, 245, 249, 0.9);
+  --bg-overlay: rgba(15, 23, 42, 0.35);
+
+  --accent-primary: #059669;
+  --accent-primary-dim: rgba(5, 150, 105, 0.12);
+  --accent-primary-glow: rgba(5, 150, 105, 0.25);
+  --accent-secondary: #4f46e5;
+  --accent-secondary-dim: rgba(79, 70, 229, 0.12);
+  --accent-tertiary: #7c3aed;
+  --accent-gold: #d97706;
+  --accent-gold-dim: rgba(217, 119, 6, 0.12);
+
+  --profit: #059669;
+  --profit-dim: rgba(5, 150, 105, 0.12);
+  --profit-glow: rgba(5, 150, 105, 0.25);
+  --loss: #dc2626;
+  --loss-dim: rgba(220, 38, 38, 0.1);
+  --loss-glow: rgba(220, 38, 38, 0.2);
+  --warning: #d97706;
+  --info: #2563eb;
+
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-tertiary: #64748b;
+  --text-muted: #94a3b8;
+
+  --border-primary: rgba(15, 23, 42, 0.1);
+  --border-secondary: rgba(15, 23, 42, 0.08);
+  --border-accent: rgba(5, 150, 105, 0.35);
+
+  --gradient-primary: linear-gradient(135deg, #059669 0%, #4f46e5 100%);
+  --gradient-profit: linear-gradient(135deg, #059669 0%, #10b981 100%);
+  --gradient-loss: linear-gradient(135deg, #dc2626 0%, #f87171 100%);
+  --gradient-card: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 252, 0.9) 100%);
+  --gradient-glass: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(241, 245, 249, 0.6) 100%);
+  --gradient-sidebar: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 8px 28px rgba(15, 23, 42, 0.1);
+  --shadow-xl: 0 16px 40px rgba(15, 23, 42, 0.12);
+  --shadow-glow-green: 0 0 20px rgba(5, 150, 105, 0.2);
+  --shadow-glow-red: 0 0 20px rgba(220, 38, 38, 0.15);
+  --shadow-glow-purple: 0 0 20px rgba(79, 70, 229, 0.15);
+}
+
+[data-theme="light"] ::selection {
+  background: var(--accent-primary-dim);
+  color: var(--text-primary);
+}
+
 /* Reset & Base */
 *, *::before, *::after {
   box-sizing: border-box;
