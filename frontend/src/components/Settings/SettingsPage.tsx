@@ -298,8 +298,8 @@ const SettingsPage: React.FC = () => {
                 padding: '12px 14px',
                 borderRadius: '8px',
                 border: authAlpacaPaperTrading
-                  ? '2px solid var(--border-accent, var(--info))'
-                  : '1px solid var(--border-secondary)',
+                  ? '3px solid var(--border-accent, var(--info))'
+                  : '2px solid var(--border-secondary)',
                 background: authAlpacaPaperTrading
                   ? 'var(--bg-tertiary, rgba(56,132,255,0.12))'
                   : 'var(--bg-secondary)',
@@ -323,8 +323,8 @@ const SettingsPage: React.FC = () => {
                 padding: '12px 14px',
                 borderRadius: '8px',
                 border: !authAlpacaPaperTrading
-                  ? '2px solid var(--border-accent, var(--loss))'
-                  : '1px solid var(--border-secondary)',
+                  ? '3px solid var(--border-accent, var(--loss))'
+                  : '2px solid var(--border-secondary)',
                 background: !authAlpacaPaperTrading
                   ? 'var(--bg-tertiary, rgba(239,68,68,0.10))'
                   : 'var(--bg-secondary)',
@@ -491,8 +491,8 @@ const SettingsPage: React.FC = () => {
                     padding: '10px 12px',
                     borderRadius: '8px',
                     border: selected
-                      ? '1px solid var(--border-accent, var(--info))'
-                      : '1px solid var(--border-secondary)',
+                      ? '3px solid var(--border-accent, var(--info))'
+                      : '2px solid var(--border-secondary)',
                     background: selected ? 'var(--bg-tertiary, rgba(56,132,255,0.10))' : 'var(--bg-secondary)',
                     color: 'inherit',
                     cursor: scaleLoading || !authAlpacaPaperTrading ? 'not-allowed' : 'pointer',
