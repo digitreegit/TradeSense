@@ -89,6 +89,15 @@ class Settings(BaseSettings):
         or os.getenv("RECEIVER_EMAIL", "")
     )
 
+    # Telegram Bot API (shared bot; users set chat_id in Settings)
+    telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    telegram_default_chat_id: str = os.getenv("TELEGRAM_DEFAULT_CHAT_ID", "")
+
+    # Twilio WhatsApp (https://console.twilio.com — Messaging → Try WhatsApp)
+    twilio_account_sid: str = os.getenv("TWILIO_ACCOUNT_SID", "")
+    twilio_auth_token: str = os.getenv("TWILIO_AUTH_TOKEN", "")
+    twilio_whatsapp_from: str = os.getenv("TWILIO_WHATSAPP_FROM", "")  # e.g. whatsapp:+14155238886
+
     class Config:
         env_file = _env_file_path or ".env"
         extra = "allow"

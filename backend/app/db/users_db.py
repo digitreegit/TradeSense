@@ -51,6 +51,18 @@ def init_db() -> None:
             conn.execute(
                 "ALTER TABLE users ADD COLUMN alpaca_paper_trading INTEGER NOT NULL DEFAULT 1"
             )
+        if "notify_telegram" not in col_names:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN notify_telegram INTEGER NOT NULL DEFAULT 0"
+            )
+        if "telegram_chat_id" not in col_names:
+            conn.execute("ALTER TABLE users ADD COLUMN telegram_chat_id TEXT")
+        if "notify_whatsapp" not in col_names:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN notify_whatsapp INTEGER NOT NULL DEFAULT 0"
+            )
+        if "whatsapp_e164" not in col_names:
+            conn.execute("ALTER TABLE users ADD COLUMN whatsapp_e164 TEXT")
         conn.commit()
     finally:
         conn.close()
@@ -181,6 +193,50 @@ def clear_user_alpaca_encrypted(user_id: int) -> None:
         conn.execute(
             "UPDATE users SET alpaca_key_enc = NULL, alpaca_secret_enc = NULL WHERE id = ?",
             (user_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_user_notification_prefs(
+    user_id: int,
+    *,
+    notify_telegram: Optional[bool] = None,
+    telegram_chat_id: Optional[str] = None,
+    notify_whatsapp: Optional[bool] = None,
+    whatsapp_e164: Optional[str] = None,
+) -> None:
+    """Update notification columns; pass None to leave a field unchanged."""
+    row = get_user_by_id(user_id)
+    if not row:
+        return
+    nt = bool(int(row["notify_telegram"])) if row.get("notify_telegram") is not None else False
+    tid = (row.get("telegram_chat_id") or "").strip()
+    nw = bool(int(row["notify_whatsapp"])) if row.get("notify_whatsapp") is not None else False
+    we = (row.get("whatsapp_e164") or "").strip()
+
+    if notify_telegram is not None:
+        nt = bool(notify_telegram)
+    if telegram_chat_id is not None:
+        tid = telegram_chat_id.strip()
+    if notify_whatsapp is not None:
+        nw = bool(notify_whatsapp)
+    if whatsapp_e164 is not None:
+        we = whatsapp_e164.strip()
+
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            UPDATE users SET
+                notify_telegram = ?,
+                telegram_chat_id = NULLIF(?, ''),
+                notify_whatsapp = ?,
+                whatsapp_e164 = NULLIF(?, '')
+            WHERE id = ?
+            """,
+            (1 if nt else 0, tid, 1 if nw else 0, we, user_id),
         )
         conn.commit()
     finally:

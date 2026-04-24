@@ -189,7 +189,46 @@ export const api = {
       email?: string;
       alpaca_configured?: boolean;
       alpaca_paper_trading?: boolean;
+      notify_telegram?: boolean;
+      telegram_chat_id?: string;
+      notify_whatsapp?: boolean;
+      whatsapp_e164?: string;
+      telegram_bot_configured?: boolean;
+      whatsapp_provider_configured?: boolean;
     }>('/auth/me'),
+
+  getNotificationPrefs: () =>
+    request<{
+      notify_telegram: boolean;
+      telegram_chat_id: string;
+      notify_whatsapp: boolean;
+      whatsapp_e164: string;
+      telegram_bot_configured: boolean;
+      whatsapp_provider_configured: boolean;
+    }>('/auth/notification-prefs'),
+
+  setNotificationPrefs: (body: {
+    notify_telegram: boolean;
+    telegram_chat_id: string;
+    notify_whatsapp: boolean;
+    whatsapp_e164: string;
+  }) =>
+    request<{
+      notify_telegram: boolean;
+      telegram_chat_id: string;
+      notify_whatsapp: boolean;
+      whatsapp_e164: string;
+      telegram_bot_configured: boolean;
+      whatsapp_provider_configured: boolean;
+    }>('/auth/notification-prefs', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  testNotification: () =>
+    request<{ ok: boolean; message: string }>('/auth/notification-test', {
+      method: 'POST',
+    }),
 
   saveAlpacaKeys: (api_key: string, secret_key: string) =>
     request<{ ok: boolean; message: string }>('/auth/alpaca-keys', {

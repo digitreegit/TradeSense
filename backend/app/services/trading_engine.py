@@ -108,6 +108,7 @@ class TradingEngine:
         self._alpaca = alpaca
         self._compliance = compliance
         self._owner_user_id = owner_user_id
+        self._notify_user_id: Optional[int] = owner_user_id
         self._scale = resolved_capital_scale()
         self._initial_capital = initial_capital_for_scale(self._scale)
         if self._alpaca.paper_trading:
@@ -463,6 +464,7 @@ class TradingEngine:
                         f"(${self._day_start_equity * self._preset.daily_target_percent / 100:,.0f})",
                         "SUCCESS",
                         to_email=self.owner_email,
+                        user_id=self._notify_user_id,
                     )
 
             if market_time >= time(16, 10) and self.active:
@@ -487,6 +489,7 @@ class TradingEngine:
                         cash=float(account.get("cash", 0.0)),
                         trades=int(self._daily_trades),
                         win_rate_pct=float(self.get_stats().get("win_rate", 0.0)),
+                        user_id=self._notify_user_id,
                     )
                 except Exception as exc:
                     logger.warning("Failed to send daily summary email: %s", exc)
@@ -563,6 +566,7 @@ class TradingEngine:
                     f"P&L: ${self._daily_pnl:+,.2f} ({daily_pnl_pct:+.2f}%)\nNo more trades today.",
                     "CRITICAL",
                     to_email=self.owner_email,
+                    user_id=self._notify_user_id,
                 )
                 return
 
@@ -575,6 +579,7 @@ class TradingEngine:
                     f"P&L: ${self._daily_pnl:+,.2f} (+{daily_pnl_pct:.2f}%)\nReducing aggressiveness to protect gains.",
                     "SUCCESS",
                     to_email=self.owner_email,
+                    user_id=self._notify_user_id,
                 )
 
             preset = self._preset
@@ -810,6 +815,8 @@ class TradingEngine:
                         "🔄 Market Regime Update",
                         f"Risk: {old_risk} → {self._preset.level}\nReason: {regime.get('reasoning', '')}",
                         "INFO",
+                        to_email=self.owner_email,
+                        user_id=self._notify_user_id,
                     )
 
         except Exception as e:
