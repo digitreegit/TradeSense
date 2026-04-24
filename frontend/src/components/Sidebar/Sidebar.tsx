@@ -164,7 +164,7 @@ const Sidebar: React.FC = () => {
                 style={{
                   fontSize: '10px',
                   lineHeight: 1.35,
-                  color: 'rgba(255,255,255,0.72)',
+                  color: 'var(--text-secondary)',
                   fontFamily: 'var(--font-mono, ui-monospace, monospace)',
                   wordBreak: 'break-word',
                 }}
@@ -194,7 +194,7 @@ const Sidebar: React.FC = () => {
             )}
             {showConnected && alpacaUsage && !alpacaUsage.ok && (
               <span
-                style={{ fontSize: '10px', color: 'rgba(255,255,255,0.65)', opacity: 0.9 }}
+                style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}
                 title={alpacaUsage.error}
               >
                 API quota: error (hover)
