@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
+import type { PaperCapitalOption, TradingMode } from '../../stores/types';
+import { PAPER_CAPITAL_OPTIONS } from '../../stores/types';
 import { formatCurrency, formatPercent } from '../../utils/helpers';
 import api from '../../services/api';
 
@@ -25,6 +27,13 @@ const StopIcon = (props: React.ComponentProps<'svg'>) => (
 const ShieldIcon = (props: React.ComponentProps<'svg'>) => (
   <svg {...props} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
+  </svg>
+);
+
+const CogIcon = (props: React.ComponentProps<'svg'>) => (
+  <svg {...props} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.24-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.99l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.37.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.99l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281Z" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
   </svg>
 );
 
@@ -86,7 +95,21 @@ const TradingBot: React.FC = () => {
     activeStrategy,
     setActiveStrategy,
     account,
+    tradingMode,
+    paperStartingCapital,
+    setTradingMode,
+    setPaperStartingCapital,
   } = useAppStore();
+
+  const [draftMode, setDraftMode] = useState<TradingMode>(tradingMode);
+  const [draftPaperCapital, setDraftPaperCapital] = useState<PaperCapitalOption>(paperStartingCapital);
+  const [configSaving, setConfigSaving] = useState(false);
+  const [configMessage, setConfigMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraftMode(tradingMode);
+    setDraftPaperCapital(paperStartingCapital);
+  }, [tradingMode, paperStartingCapital]);
 
   const [riskLevel, setRiskLevel] = useState<'conservative' | 'moderate' | 'aggressive'>('moderate');
   const [maxPositionSize, setMaxPositionSize] = useState(15);
@@ -191,7 +214,7 @@ const TradingBot: React.FC = () => {
                 TradeSense Trading Bot
               </h2>
               <p style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
-                Automated quant trading • Paper Trading Mode • Capital: {formatCurrency(account.equity)}
+                Automated quant trading • {tradingMode === 'live' ? 'Live (Alpaca)' : 'Paper'} • Equity: {formatCurrency(account.equity)}
               </p>
             </div>
           </div>
@@ -312,6 +335,132 @@ const TradingBot: React.FC = () => {
 
         {/* Right Column - Settings */}
         <div className="dashboard-right">
+          <div className="card">
+            <div className="card-header">
+              <span className="card-title">
+                <CogIcon className="card-icon" /> Alpaca &amp; Capital
+              </span>
+            </div>
+            <div style={{ padding: 'var(--space-xl)', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{
+                  fontSize: '12px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '1px',
+                  color: 'var(--text-muted)',
+                  fontWeight: 600,
+                  display: 'block',
+                  marginBottom: '8px',
+                }}>
+                  Account type
+                </label>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  {(['paper', 'live'] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      className={`btn btn-sm ${draftMode === m ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => setDraftMode(m)}
+                      style={{ flex: 1, textTransform: 'capitalize' }}
+                    >
+                      {m === 'paper' ? 'Paper' : 'Live'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {draftMode === 'paper' && (
+                <div>
+                  <label style={{
+                    fontSize: '12px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '1px',
+                    color: 'var(--text-muted)',
+                    fontWeight: 600,
+                    display: 'block',
+                    marginBottom: '8px',
+                  }}>
+                    Simulated starting capital
+                  </label>
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    {PAPER_CAPITAL_OPTIONS.map((amt) => (
+                      <button
+                        key={amt}
+                        type="button"
+                        className={`btn btn-sm ${draftPaperCapital === amt ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => setDraftPaperCapital(amt)}
+                        style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+                      >
+                        {amt === 3000 ? '$3k' : amt === 10000 ? '$10k' : '$30k'}
+                      </button>
+                    ))}
+                  </div>
+                  <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '8px', lineHeight: 1.5 }}>
+                    Paper mode maps Alpaca P&amp;L onto this starting balance. Live mode shows your real Alpaca equity and cash.
+                  </p>
+                </div>
+              )}
+
+              {draftMode === 'live' && (
+                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                  Live uses your funded Alpaca account. Balances update from the API after you apply. Use only keys authorized for live trading.
+                </p>
+              )}
+
+              {configMessage && (
+                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>{configMessage}</p>
+              )}
+
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={configSaving}
+                onClick={async () => {
+                  setConfigSaving(true);
+                  setConfigMessage(null);
+                  try {
+                    await api.setTradingConfig({
+                      trading_mode: draftMode,
+                      ...(draftMode === 'paper' ? { initial_capital: draftPaperCapital } : {}),
+                    });
+                    setTradingMode(draftMode);
+                    if (draftMode === 'paper') {
+                      setPaperStartingCapital(draftPaperCapital);
+                    }
+                    setConfigMessage('Saved. Refreshing account…');
+                    const acc = await api.getAccount() as Record<string, unknown>;
+                    if (acc && !('detail' in acc)) {
+                      useAppStore.getState().setAccount({
+                        equity: Number(acc.equity) || 0,
+                        cash: Number(acc.cash) || 0,
+                        buying_power: Number(acc.buying_power) || 0,
+                        portfolio_value: Number(acc.portfolio_value) || 0,
+                        profit_loss: Number(acc.profit_loss) || 0,
+                        profit_loss_pct: Number(acc.profit_loss_pct) || 0,
+                        daily_profit_loss: Number(acc.daily_profit_loss) || 0,
+                        daily_profit_loss_pct: Number(acc.daily_profit_loss_pct) || 0,
+                        day_trade_count: Number(acc.day_trade_count) || 0,
+                        initial_capital: Number(acc.initial_capital) || 0,
+                        win_rate: Number(acc.win_rate) || 0,
+                        avg_win: Number(acc.avg_win) || 0,
+                        avg_loss: Number(acc.avg_loss) || 0,
+                        profit_factor: Number(acc.profit_factor) || 0,
+                        sharpe_ratio: Number(acc.sharpe_ratio) || 0,
+                      });
+                    }
+                    setConfigMessage('Applied successfully.');
+                  } catch (e) {
+                    setConfigMessage(e instanceof Error ? e.message : 'Save failed');
+                  } finally {
+                    setConfigSaving(false);
+                  }
+                }}
+              >
+                {configSaving ? 'Saving…' : 'Apply to server'}
+              </button>
+            </div>
+          </div>
+
           <div className="card">
             <div className="card-header">
               <span className="card-title">

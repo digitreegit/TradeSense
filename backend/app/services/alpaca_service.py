@@ -1,6 +1,6 @@
 """
 TradeSense - Alpaca Trading Service
-Handles all communication with Alpaca Markets API for paper trading.
+Handles communication with Alpaca Markets API (paper or live per settings).
 """
 import logging
 from datetime import datetime, timedelta
@@ -32,6 +32,16 @@ class AlpacaService:
         self.virtual_base_equity: float = 0.0  # Used for virtual re-base to $30k
         self.is_virtual_reset = False
 
+    @staticmethod
+    def _use_paper_trading() -> bool:
+        return (settings.trading_mode or "paper").lower() != "live"
+
+    def _reset_paper_virtual_state(self):
+        """Clear virtual portfolio anchors when paper capital or mode changes."""
+        self.virtual_base_equity = 0.0
+        if hasattr(self, "virtual_daily_open"):
+            self.virtual_daily_open = 0.0
+
     def initialize(self):
         """Initialize Alpaca API clients."""
         if not settings.alpaca_api_key or not settings.alpaca_secret_key:
@@ -39,11 +49,11 @@ class AlpacaService:
             return
 
         try:
-            # Paper trading client
+            paper = self._use_paper_trading()
             self.trading_client = TradingClient(
                 api_key=settings.alpaca_api_key,
                 secret_key=settings.alpaca_secret_key,
-                paper=True,  # Always use paper trading
+                paper=paper,
             )
 
             self.data_client = StockHistoricalDataClient(
@@ -52,10 +62,18 @@ class AlpacaService:
             )
 
             self._initialized = True
-            logger.info("✅ Alpaca API clients initialized (Paper Trading)")
+            mode_label = "Paper Trading" if paper else "Live Trading"
+            logger.info(f"✅ Alpaca API clients initialized ({mode_label})")
         except Exception as e:
             logger.error(f"❌ Failed to initialize Alpaca: {e}")
             self._initialized = False
+
+    def reconfigure_trading_endpoint(self):
+        """Recreate trading client when paper/live or keys change; keep data client."""
+        self._initialized = False
+        self.trading_client = None
+        self._reset_paper_virtual_state()
+        self.initialize()
 
     @property
     def is_ready(self) -> bool:
@@ -76,6 +94,32 @@ class AlpacaService:
             # Use raw Alpaca values directly
             real_equity = float(account.equity)
             real_cash = float(account.cash)
+
+            # Live: show real Alpaca balances (no virtual paper reset)
+            if not self._use_paper_trading():
+                last_eq = float(account.last_equity) if getattr(account, "last_equity", None) else real_equity
+                if last_eq <= 0:
+                    last_eq = real_equity
+                change = real_equity - last_eq
+                change_pct = (change / last_eq * 100) if last_eq > 0 else 0.0
+                bp = float(account.buying_power) if getattr(account, "buying_power", None) is not None else real_cash
+                return {
+                    "equity": round(real_equity, 2),
+                    "cash": round(real_cash, 2),
+                    "buying_power": round(bp, 2),
+                    "portfolio_value": round(real_equity, 2),
+                    "profit_loss": round(change, 2),
+                    "profit_loss_pct": round(change_pct, 2),
+                    "daily_profit_loss": round(change, 2),
+                    "daily_profit_loss_pct": round(change_pct, 2),
+                    "day_trade_count": int(account.daytrade_count or 0),
+                    "initial_capital": round(last_eq, 2),
+                    "win_rate": 0.0,
+                    "avg_win": 0.0,
+                    "avg_loss": 0.0,
+                    "profit_factor": 0.0,
+                    "sharpe_ratio": 0.0,
+                }
             
             # Virtual Reset Logic: Always start from settings.initial_capital ($3,000)
             # This ignores legacy Alpaca paper trading remnants.

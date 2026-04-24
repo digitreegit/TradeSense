@@ -96,3 +96,8 @@ export interface RegimeData {
 }
 
 export type PageId = 'dashboard' | 'chart' | 'agent' | 'trading' | 'portfolio' | 'history';
+
+export type TradingMode = 'paper' | 'live';
+
+export const PAPER_CAPITAL_OPTIONS = [3000, 10000, 30000] as const;
+export type PaperCapitalOption = (typeof PAPER_CAPITAL_OPTIONS)[number];
