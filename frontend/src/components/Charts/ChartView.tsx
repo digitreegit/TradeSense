@@ -10,7 +10,7 @@ const TF_MAP: Record<string, string> = {
 };
 
 const ChartView: React.FC = () => {
-  const { selectedSymbol, setSelectedSymbol, watchlist } = useAppStore();
+  const { selectedSymbol, setSelectedSymbol, watchlist, colorTheme } = useAppStore();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [timeframe, setTimeframe] = useState('1D');
   const [searchInput, setSearchInput] = useState(selectedSymbol);
@@ -64,8 +64,13 @@ const ChartView: React.FC = () => {
     const volumeHeight = height * 0.2;
     const volumeTop = chartHeight + 10;
 
+    const cs = getComputedStyle(document.documentElement);
+    const chartBg = (cs.getPropertyValue('--chart-canvas-bg').trim() || '#060a13');
+    const gridCol = (cs.getPropertyValue('--chart-grid').trim() || 'rgba(148, 163, 184, 0.08)');
+    const axisLbl = (cs.getPropertyValue('--chart-axis-label').trim() || '#64748b');
+
     // Clear
-    ctx.fillStyle = '#060a13';
+    ctx.fillStyle = chartBg;
     ctx.fillRect(0, 0, width, height);
 
     // Calculate price range
@@ -83,7 +88,7 @@ const ChartView: React.FC = () => {
     const bodyWidth = Math.max(candleWidth * 0.6, 2);
 
     // Grid lines
-    ctx.strokeStyle = 'rgba(148, 163, 184, 0.06)';
+    ctx.strokeStyle = gridCol;
     ctx.lineWidth = 1;
     const gridLines = 6;
     for (let i = 0; i <= gridLines; i++) {
@@ -95,7 +100,7 @@ const ChartView: React.FC = () => {
 
       // Price labels
       const price = adjustedMax - (i / gridLines) * adjustedRange;
-      ctx.fillStyle = '#64748b';
+      ctx.fillStyle = axisLbl;
       ctx.font = '11px Inter, sans-serif';
       ctx.textAlign = 'right';
       ctx.fillText(price.toFixed(2), width - 4, y + 3);
@@ -205,7 +210,7 @@ const ChartView: React.FC = () => {
       ctx.textAlign = 'center';
       ctx.fillText(lastCandle.close.toFixed(2), width - 26, lastY + 4);
     }
-  }, [candleData, indicators]);
+  }, [candleData, indicators, colorTheme]);
 
   useEffect(() => {
     drawChart();
@@ -338,7 +343,7 @@ const ChartView: React.FC = () => {
             <div style={{
               position: 'absolute', inset: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'rgba(6,10,19,0.8)', zIndex: 10, gap: '12px',
+              background: 'var(--chart-loading-bg)', zIndex: 10, gap: '12px',
               fontSize: '13px', color: 'var(--text-tertiary)',
             }}>
               <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span>
@@ -394,7 +399,12 @@ const ChartView: React.FC = () => {
           >
             {item.symbol}
             <span style={{
-              color: item.change >= 0 ? 'var(--profit)' : 'var(--loss)',
+              color:
+                selectedSymbol === item.symbol
+                  ? '#ffffff'
+                  : item.change >= 0
+                    ? 'var(--profit)'
+                    : 'var(--loss)',
               marginLeft: '4px',
             }}>
               {formatPercent(item.changePercent)}

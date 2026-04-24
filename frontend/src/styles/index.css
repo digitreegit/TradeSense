@@ -105,6 +105,12 @@
   --sidebar-width: 260px;
   --sidebar-collapsed: 72px;
   --header-height: 64px;
+
+  --header-bg: rgba(6, 10, 19, 0.88);
+  --chart-canvas-bg: #060a13;
+  --chart-grid: rgba(148, 163, 184, 0.08);
+  --chart-axis-label: #64748b;
+  --chart-loading-bg: rgba(6, 10, 19, 0.82);
 }
 
 /* Light theme — toggled via Profile (data-theme on <html>) */
@@ -159,6 +165,12 @@
   --shadow-glow-green: 0 0 20px rgba(5, 150, 105, 0.2);
   --shadow-glow-red: 0 0 20px rgba(220, 38, 38, 0.15);
   --shadow-glow-purple: 0 0 20px rgba(79, 70, 229, 0.15);
+
+  --header-bg: rgba(255, 255, 255, 0.92);
+  --chart-canvas-bg: #f8fafc;
+  --chart-grid: rgba(15, 23, 42, 0.1);
+  --chart-axis-label: #64748b;
+  --chart-loading-bg: rgba(241, 245, 249, 0.92);
 }
 
 [data-theme="light"] ::selection {
@@ -491,7 +503,7 @@ body {
   justify-content: space-between;
   padding: 0 var(--space-xl);
   border-bottom: 1px solid var(--border-primary);
-  background: rgba(6, 10, 19, 0.8);
+  background: var(--header-bg);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   flex-shrink: 0;
