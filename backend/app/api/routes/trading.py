@@ -1,20 +1,12 @@
 """TradeSense - Trading API Routes"""
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
-from typing import Literal, Optional
+from pydantic import BaseModel
+from typing import Optional
 
-from app.core.config import settings
 from app.services.alpaca_service import alpaca_service
 from app.services.trading_engine import trading_engine
 
 router = APIRouter(prefix="/trading", tags=["trading"])
-
-ALLOWED_PAPER_CAPITAL = (3000.0, 10000.0, 30000.0)
-
-
-class TradingConfigBody(BaseModel):
-    trading_mode: Literal["paper", "live"] = "paper"
-    initial_capital: Optional[float] = Field(default=None, description="Paper only: 3000, 10000, or 30000")
 
 
 class OrderRequest(BaseModel):
@@ -30,48 +22,6 @@ class BotRequest(BaseModel):
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
     max_position: Optional[float] = None
-
-
-@router.get("/config")
-async def get_trading_config():
-    """Runtime trading mode and paper capital (mirrors env; UI can read/write)."""
-    cap = float(settings.initial_capital)
-    return {
-        "trading_mode": (settings.trading_mode or "paper").lower(),
-        "initial_capital": cap,
-        "paper_capital_options": list(ALLOWED_PAPER_CAPITAL),
-        "alpaca_ready": alpaca_service.is_ready,
-    }
-
-
-@router.post("/config")
-async def set_trading_config(body: TradingConfigBody):
-    """Switch paper vs live Alpaca endpoint; set simulated paper starting capital."""
-    mode = body.trading_mode.lower()
-    if mode not in ("paper", "live"):
-        raise HTTPException(status_code=400, detail="trading_mode must be 'paper' or 'live'")
-
-    if body.initial_capital is not None:
-        cap = float(body.initial_capital)
-        if cap not in ALLOWED_PAPER_CAPITAL:
-            raise HTTPException(
-                status_code=400,
-                detail=f"initial_capital must be one of {list(ALLOWED_PAPER_CAPITAL)}",
-            )
-        settings.initial_capital = cap
-
-    settings.trading_mode = mode
-    alpaca_service.reconfigure_trading_endpoint()
-
-    if mode == "paper":
-        trading_engine._day_start_equity = float(settings.initial_capital)
-
-    return {
-        "trading_mode": settings.trading_mode,
-        "initial_capital": float(settings.initial_capital),
-        "alpaca_ready": alpaca_service.is_ready,
-        "message": "Trading configuration updated",
-    }
 
 
 @router.get("/orders")

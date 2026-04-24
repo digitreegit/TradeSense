@@ -32,8 +32,8 @@ class Settings(BaseSettings):
     alpaca_base_url: str = os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
     alpaca_data_url: str = os.getenv("ALPACA_DATA_URL", "https://data.alpaca.markets")
 
-    # Trading (paper | live — UI can override at runtime via /api/trading/config)
-    trading_mode: str = os.getenv("TRADING_MODE", "paper").lower()
+    # Trading
+    trading_mode: str = os.getenv("TRADING_MODE", "paper")
     initial_capital: float = float(os.getenv("INITIAL_CAPITAL", "3000"))
     max_position_percent: float = float(os.getenv("MAX_POSITION_PERCENT", "15"))
     stop_loss_percent: float = float(os.getenv("STOP_LOSS_PERCENT", "0.3"))

@@ -98,27 +98,6 @@ class ApiService {
     return this.request('/trading/bot/status');
   }
 
-  async getTradingConfig() {
-    return this.request<{
-      trading_mode: string;
-      initial_capital: number;
-      paper_capital_options: number[];
-      alpaca_ready: boolean;
-    }>('/trading/config');
-  }
-
-  async setTradingConfig(body: { trading_mode: 'paper' | 'live'; initial_capital?: number }) {
-    return this.request<{
-      trading_mode: string;
-      initial_capital: number;
-      alpaca_ready: boolean;
-      message?: string;
-    }>('/trading/config', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
-  }
-
   // Strategies
   async getStrategies() {
     return this.request('/trading/strategies');

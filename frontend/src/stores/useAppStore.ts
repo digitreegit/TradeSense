@@ -1,17 +1,5 @@
 import { create } from 'zustand';
-import type {
-  AccountInfo,
-  Position,
-  WatchlistItem,
-  TradeLog,
-  AgentMessage,
-  Strategy,
-  Order,
-  PageId,
-  TradingMode,
-  PaperCapitalOption,
-  RegimeData,
-} from './types';
+import type { AccountInfo, Position, WatchlistItem, TradeLog, AgentMessage, Strategy, Order, PageId } from './types';
 
 interface AppState {
   // Navigation
@@ -66,13 +54,6 @@ interface AppState {
   setRegimeData: (data: RegimeData | null) => void;
   dismissedRegimeTimestamp: string | null;
   setDismissedRegimeTimestamp: (ts: string | null) => void;
-
-  // Alpaca endpoint: paper vs live (server + UI)
-  tradingMode: TradingMode;
-  paperStartingCapital: PaperCapitalOption;
-  setTradingMode: (mode: TradingMode) => void;
-  setPaperStartingCapital: (amount: PaperCapitalOption) => void;
-  applyTradingConfigFromServer: (mode: TradingMode, paperCapital: number) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -193,16 +174,4 @@ export const useAppStore = create<AppState>((set) => ({
   setMarketOpen: (open) => set({ marketOpen: open }),
   marketNotification: null,
   setMarketNotification: (msg) => set({ marketNotification: msg }),
-
-  tradingMode: 'paper',
-  paperStartingCapital: 3000,
-  setTradingMode: (tradingMode) => set({ tradingMode }),
-  setPaperStartingCapital: (paperStartingCapital) => set({ paperStartingCapital }),
-  applyTradingConfigFromServer: (mode, paperCapital) => {
-    const allowed: PaperCapitalOption[] = [3000, 10000, 30000];
-    const cap = allowed.includes(paperCapital as PaperCapitalOption)
-      ? (paperCapital as PaperCapitalOption)
-      : 3000;
-    set({ tradingMode: mode, paperStartingCapital: cap });
-  },
 }));

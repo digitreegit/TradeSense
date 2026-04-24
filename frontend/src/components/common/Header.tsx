@@ -10,7 +10,7 @@ const DocumentCheckIcon = (props: React.ComponentProps<'svg'>) => (
 );
 
 const Header: React.FC = () => {
-  const { currentPage, marketOpen, tradingMode } = useAppStore();
+  const { currentPage, marketOpen } = useAppStore();
   const [time, setTime] = React.useState(new Date());
 
   React.useEffect(() => {
@@ -46,12 +46,9 @@ const Header: React.FC = () => {
           <span className={`dot ${isMarketOpen() || marketOpen ? 'open' : 'closed'}`} />
           <span>{isMarketOpen() || marketOpen ? 'Market Open' : 'Market Closed'}</span>
         </div>
-        <div
-          className={`header-badge ${tradingMode === 'live' ? 'live' : 'paper'}`}
-          style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-        >
+        <div className="header-badge paper" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <DocumentCheckIcon style={{ width: '14px', height: '14px' }} />
-          {tradingMode === 'live' ? 'Live (Alpaca)' : 'Paper Trading'}
+          Paper Trading
         </div>
         <div style={{
           fontSize: '12px',

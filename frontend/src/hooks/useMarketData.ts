@@ -16,19 +16,6 @@ export function useMarketData() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchAll = async () => {
-    // ── Trading mode / paper capital (server) ─
-    try {
-      const cfg = await api.getTradingConfig();
-      if (cfg?.trading_mode != null) {
-        useAppStore.getState().applyTradingConfigFromServer(
-          cfg.trading_mode === 'live' ? 'live' : 'paper',
-          Number(cfg.initial_capital) || 3000,
-        );
-      }
-    } catch {
-      // ignore
-    }
-
     // ── Bot status ────────────────────────────
     try {
       const botStatus = await api.getBotStatus() as {
