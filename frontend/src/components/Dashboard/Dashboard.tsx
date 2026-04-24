@@ -109,8 +109,8 @@ const Dashboard: React.FC = () => {
         regimeData.timestamp &&
         (dismissedRegimeTimestamp !== regimeData.timestamp) && (
           <div className="card regime-notification" style={{
-            background: 'rgba(59, 130, 246, 0.1)',
-            border: '1px solid rgba(59, 130, 246, 0.3)',
+            background: 'rgba(59, 130, 246, 0.05)',
+            border: '1px solid rgba(59, 130, 246, 0.18)',
             color: 'var(--text-primary)',
             marginBottom: '24px',
             padding: '20px',
@@ -180,7 +180,7 @@ const Dashboard: React.FC = () => {
                 <strong style={{ 
                   color: (regimeData.market_level?.toUpperCase() === 'EXCELLENT' || regimeData.risk_level?.toUpperCase() === 'LOW') ? 'var(--profit)' : 
                          (regimeData.market_level?.toUpperCase() === 'GOOD') ? '#34d399' :
-                         (regimeData.market_level?.toUpperCase() === 'NORMAL' || regimeData.risk_level?.toUpperCase() === 'MODERATE') ? '#fef08a' :
+                         (regimeData.market_level?.toUpperCase() === 'NORMAL' || regimeData.risk_level?.toUpperCase() === 'MODERATE') ? '#ca8a04' :
                          (regimeData.market_level?.toUpperCase() === 'BAD') ? '#f97316' : 
                          (regimeData.market_level?.toUpperCase() === 'DANGEROUS' || regimeData.risk_level?.toUpperCase() === 'AGGRESSIVE') ? 'var(--loss)' : '#ffffff',
                   padding: '2px 8px',
@@ -196,7 +196,7 @@ const Dashboard: React.FC = () => {
                 <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Risk Setting:</span>
                 <strong style={{ 
                   color: regimeData.risk_level === 'aggressive' ? 'var(--loss)' : 
-                         regimeData.risk_level === 'moderate' ? '#fef08a' : 'var(--profit)' 
+                         regimeData.risk_level === 'moderate' ? '#ca8a04' : 'var(--profit)' 
                 }}>
                   {regimeData.risk_level?.toUpperCase() || 'MODERATE'}
                 </strong>
