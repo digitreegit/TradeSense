@@ -46,6 +46,7 @@ const Dashboard: React.FC = () => {
   const t = useUiStrings();
   const d = t.dashboard;
   const c = t.common;
+  const tr = t.trading;
   const {
     account,
     positions,
@@ -67,7 +68,14 @@ const Dashboard: React.FC = () => {
     manualPlaybooks,
     botDailyTrades,
     colorTheme,
+    appLocale,
   } = useAppStore();
+
+  const playbookName = (id: string, fallback: string) => {
+    if (appLocale !== 'ko') return fallback;
+    const loc = tr.playbookById[id as keyof typeof tr.playbookById];
+    return loc?.name ?? fallback;
+  };
 
   const regimeDivider =
     colorTheme === 'light' ? '1px solid rgba(15, 23, 42, 0.16)' : '1px solid rgba(255, 255, 255, 0.12)';
@@ -695,7 +703,7 @@ const Dashboard: React.FC = () => {
                       display: 'inline-block',
                     }} />
                     <span style={{ fontSize: '13px', fontWeight: 600 }}>
-                      {strat.name}
+                      {playbookName(strat.id, strat.name)}
                     </span>
                   </div>
                   <span style={{

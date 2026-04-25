@@ -31,6 +31,11 @@ export type UiStrings = {
   };
   trading: {
     title: string; subtitle: (eq: string) => string; running: string; stopped: string; idleLine: string; startBot: string; stopBot: string;
+    /** Playbook cards — by engine id; Korean locale uses these when UI is in Korean. */
+    playbookById: Record<
+      'scalp' | 'vwap' | 'orb' | 'eod' | 'news-fade',
+      { name: string; description: string }
+    >;
     strategies: string; manual: string; auto: string; autoHelp: string; activityLog: string; events: (n: string) => string;
     riskSettings: string; riskLocked: string; riskSaveHint: string; riskRunHint: string;
     riskLevel: string; conservative: string; moderate: string; aggressive: string; maxPos: (pct: string, cur: string) => string;
@@ -119,6 +124,28 @@ const en: UiStrings = {
   },
   trading: {
     title: 'TradeSense trading bot', subtitle: (eq) => `Automated quant trading · paper mode · capital: ${eq}`, running: '● Running', stopped: '○ Stopped', idleLine: '○ idle', startBot: 'Start bot', stopBot: 'Stop bot',
+    playbookById: {
+      scalp: {
+        name: 'Micro-Scalping v4',
+        description: 'RSI/MACD/BB + volume surge on 5-min bars',
+      },
+      vwap: {
+        name: 'VWAP mean-reversion',
+        description: 'Fade deviations from VWAP during RTH',
+      },
+      orb: {
+        name: 'Opening range breakout',
+        description: 'Buy a break above the 9:30–9:35 range (valid until 11:00 ET)',
+      },
+      eod: {
+        name: 'End-of-day drift',
+        description: 'Favor up-trending names into the 15:50–15:58 close',
+      },
+      'news-fade': {
+        name: 'News spike fade',
+        description: 'Fade exhaustion after AI-detected panic',
+      },
+    },
     strategies: 'Trading strategies', manual: 'Manual', auto: 'Auto', autoHelp: 'Engine routes playbooks (time + regime). Turn auto off to use only the ticked set below.',
     activityLog: 'Activity log', events: (n) => `${n} events`, riskSettings: 'Risk settings', riskLocked: 'Live (real money) mode: risk is fixed to the moderate server preset. You cannot change it here for safety.',
     riskSaveHint: 'Values are saved in this browser and apply when you start the bot.',
@@ -214,7 +241,30 @@ const ko: UiStrings = {
     tableSymbol: '심볼', tableQty: '수량', tableAvg: '평균가', tableCurrent: '현재가', tablePL: '손익',
   },
   trading: {
-    title: 'TradeSense 트레이딩 봇', subtitle: (eq) => `퀀트 자동거래 · 모의 · 자본: ${eq}`, running: '● 가동', stopped: '○ 정지', idleLine: '○ 대기', startBot: '봇 시작', stopBot: '봇 정지', strategies: '트레이딩 전략', manual: '수동', auto: '자동', autoHelp: '엔진이 시점·시장에 따라 전략을 배치합니다. 아래에서만 쓰려면 자동을 끄세요.',
+    title: 'TradeSense 트레이딩 봇', subtitle: (eq) => `퀀트 자동거래 · 모의 · 자본: ${eq}`, running: '● 가동', stopped: '○ 정지', idleLine: '○ 대기', startBot: '봇 시작', stopBot: '봇 정지',
+    playbookById: {
+      scalp: {
+        name: '마이크로 스캘핑 v4',
+        description: '5분봉 기준 RSI·MACD·볼린저 + 거래량 급등',
+      },
+      vwap: {
+        name: 'VWAP 평균회귀',
+        description: '정규장(RTH) 동안 VWAP에서 벗어난 가격의 되돌림(페이드) 매매',
+      },
+      orb: {
+        name: '오프닝 레인지 돌파',
+        description: '9:30–9:35 구간을 위로 돌파할 때 매수(11:00 ET까지 유효)',
+      },
+      eod: {
+        name: '장마감 드리프트',
+        description: '15:50–15:58 마감 전 상승 추세 종목에 유리하게',
+      },
+      'news-fade': {
+        name: '뉴스 급등 후 페이드',
+        description: 'AI로 감지한 패닉 이후, 과열 구간이 소진될 때 역방향(페이드)',
+      },
+    },
+    strategies: '트레이딩 전략', manual: '수동', auto: '자동', autoHelp: '엔진이 시점·시장에 따라 전략을 배치합니다. 아래에서만 쓰려면 자동을 끄세요.',
     activityLog: '활동 로그', events: (n) => `이벤트 ${n}건`, riskSettings: '리스크 설정', riskLocked: '라이브(실거래) 모드: 리스크는 서버의 보통(moderate) 프리셋으로 고정됩니다. 안전을 위해 앱에서 변경할 수 없습니다.',
     riskSaveHint: '값은 이 브라우저에 저장되며 봇을 시작할 때 적용됩니다.', riskRunHint: ' 이미 가동 중이면 엔진 설정이 유지됩니다. 바꾸려면 정지 → 조정 → 다시 시작하세요.',
     riskLevel: '리스크 수준', conservative: '보수', moderate: '보통', aggressive: '공격', maxPos: (pct, cur) => `최대 포지션: ${pct}% (${cur})`, stopLossL: (p) => `손절: -${p}%`, takeProfitL: (p) => `익절: +${p}%`, resetDefaults: '기본값으로', configSummary: '요약', cap: '자본', strategyLine: (a, s) => `전략: ${a} · ${s}`, maxPer: '건당 최대', sl: '손절', tp: '익절', rr: '리스크/보상', liveLockNote: '라이브: 엔진은 보통 프리셋을 사용(클라이언트 무시).',

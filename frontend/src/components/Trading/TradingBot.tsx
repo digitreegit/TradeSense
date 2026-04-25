@@ -87,6 +87,7 @@ const ErrorIcon = (props: React.ComponentProps<'svg'>) => (
 const TradingBot: React.FC = () => {
   const t = useUiStrings();
   const u = t.trading;
+  const pbLabels = u.playbookById;
   const riskLevelLabel: Record<StoredRiskLevel, string> = {
     conservative: u.conservative,
     moderate: u.moderate,
@@ -109,7 +110,19 @@ const TradingBot: React.FC = () => {
     activePlaybooks,
     setActivePlaybooks,
     colorTheme,
+    appLocale,
   } = useAppStore();
+
+  const getPlaybookText = (strat: { id: string; name: string; description: string }) => {
+    if (appLocale !== 'ko') {
+      return { name: strat.name, description: strat.description };
+    }
+    const loc = pbLabels[strat.id as keyof typeof pbLabels];
+    if (loc) {
+      return { name: loc.name, description: loc.description };
+    }
+    return { name: strat.name, description: strat.description };
+  };
 
   const isLight = colorTheme === 'light';
   const playbookSwitchStyle = useMemo(() => {
@@ -430,6 +443,7 @@ const TradingBot: React.FC = () => {
               )}
               <div className="strategy-grid">
                 {strategies.map((strat) => {
+                  const { name: pbName, description: pbDesc } = getPlaybookText(strat);
                   const isActiveNow = activePlaybooks.includes(strat.id);
                   const isManualOn = manualPlaybooks.includes(strat.id);
                   const isOn = playbookAuto ? isActiveNow : isManualOn;
@@ -453,7 +467,7 @@ const TradingBot: React.FC = () => {
                       }
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span className="strategy-name">{strat.name}</span>
+                        <span className="strategy-name">{pbName}</span>
                         <span style={{
                           width: 14,
                           height: 14,
@@ -471,7 +485,7 @@ const TradingBot: React.FC = () => {
                           {isOn ? '✓' : ''}
                         </span>
                       </div>
-                      <p className="strategy-description">{strat.description}</p>
+                      <p className="strategy-description">{pbDesc}</p>
                       <div style={{
                         marginTop: '6px',
                         fontSize: '10px',
