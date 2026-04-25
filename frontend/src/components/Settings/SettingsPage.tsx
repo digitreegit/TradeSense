@@ -23,6 +23,16 @@ const selectedBorder2 = (selected: boolean, accent: 'info' | 'loss') =>
     ? `2px solid var(--border-accent, var(--${accent === 'loss' ? 'loss' : 'info'}))`
     : '2px solid var(--border-secondary)';
 
+/** Uppercase section titles (Language, Appearance, etc.) */
+const settingsSectionLabel: React.CSSProperties = {
+  fontSize: '14px',
+  fontWeight: 700,
+  letterSpacing: '0.04em',
+  textTransform: 'uppercase',
+  color: 'var(--text-secondary)',
+  display: 'block',
+};
+
 const SettingsRadioIcon: React.FC<{ selected: boolean; accent: 'info' | 'loss' }> = ({ selected, accent }) => {
   const ring = accent === 'loss' ? 'var(--loss)' : 'var(--info)';
   return (
@@ -323,11 +333,7 @@ const SettingsPage: React.FC = () => {
         <div style={{ marginBottom: '28px', paddingBottom: '24px', borderBottom: '1px solid var(--border-secondary)' }}>
           <label
             style={{
-              fontSize: '12px',
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase',
-              color: 'var(--text-tertiary)',
-              display: 'block',
+              ...settingsSectionLabel,
               marginBottom: '10px',
             }}
           >
@@ -399,11 +405,7 @@ const SettingsPage: React.FC = () => {
         <div style={{ marginBottom: '28px', paddingBottom: '24px', borderBottom: '1px solid var(--border-secondary)' }}>
           <label
             style={{
-              fontSize: '12px',
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase',
-              color: 'var(--text-tertiary)',
-              display: 'block',
+              ...settingsSectionLabel,
               marginBottom: '10px',
             }}
           >
@@ -530,14 +532,7 @@ const SettingsPage: React.FC = () => {
         {msg && <p style={{ color: 'var(--profit)', fontSize: '13px', marginBottom: '8px' }}>{msg}</p>}
 
         <div style={{ marginTop: '8px', marginBottom: '8px' }}>
-          <label
-            style={{
-              fontSize: '12px',
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase',
-              color: 'var(--text-tertiary)',
-            }}
-          >
+          <label style={settingsSectionLabel}>
             {t.settings.tradingMode}
           </label>
           <p
@@ -674,14 +669,7 @@ const SettingsPage: React.FC = () => {
 
         {!authAlpacaPaperTrading && authAlpacaConfigured && (
           <div style={{ marginTop: '24px' }}>
-            <label
-              style={{
-                fontSize: '12px',
-                letterSpacing: '0.04em',
-                textTransform: 'uppercase',
-                color: 'var(--text-tertiary)',
-              }}
-            >
+            <label style={settingsSectionLabel}>
               {t.settings.liveAccount}
             </label>
             {liveLoading && !liveSummary ? (
@@ -721,14 +709,7 @@ const SettingsPage: React.FC = () => {
         )}
 
         <div style={{ marginTop: '32px' }}>
-          <label
-            style={{
-              fontSize: '12px',
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase',
-              color: 'var(--text-tertiary)',
-            }}
-          >
+          <label style={settingsSectionLabel}>
             {t.settings.capitalScale}
           </label>
           <p
@@ -792,14 +773,7 @@ const SettingsPage: React.FC = () => {
         </div>
 
         <div style={{ marginTop: '36px' }}>
-          <label
-            style={{
-              fontSize: '12px',
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase',
-              color: 'var(--text-tertiary)',
-            }}
-          >
+          <label style={settingsSectionLabel}>
             {t.settings.telegram}
           </label>
           <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', margin: '6px 0 14px', lineHeight: 1.55 }}>
