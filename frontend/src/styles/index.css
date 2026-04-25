@@ -1335,6 +1335,12 @@ body {
   border-radius: var(--btn-radius-sm);
 }
 
+/* Page cards (e.g. dashboard "Start"/"trading bot"): same --btn-primary-bg as trading + chart CTA */
+.page-enter .card .btn.btn-primary {
+  background: var(--btn-primary-bg);
+  color: #fff;
+}
+
 /* Unclassed or minimally styled <button> — same default tier as .btn */
 button {
   border-radius: var(--btn-radius);
