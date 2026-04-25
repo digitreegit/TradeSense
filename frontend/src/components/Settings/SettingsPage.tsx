@@ -359,7 +359,7 @@ const SettingsPage: React.FC = () => {
       }}
     >
       <div className="card" style={{ padding: 'var(--space-xl)' }}>
-        <h2 style={{ fontSize: '18px', marginBottom: '8px' }}>{t.settings.settingsTitle}</h2>
+        <h2 style={{ fontSize: '18px', marginBottom: '20px' }}>{t.settings.settingsTitle}</h2>
 
         <div style={{ marginBottom: '28px', paddingBottom: '24px', borderBottom: '1px solid var(--border-secondary)' }}>
           <label style={sectionSubheadingStyle}>
