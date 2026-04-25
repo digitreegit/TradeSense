@@ -1111,6 +1111,8 @@ body {
   gap: 1px;
   max-height: 300px;
   overflow-y: auto;
+  padding-bottom: var(--space-md);
+  box-sizing: border-box;
 }
 
 .bot-log-entry {
