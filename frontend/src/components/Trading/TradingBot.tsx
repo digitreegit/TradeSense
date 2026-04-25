@@ -2,6 +2,13 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import { formatCurrency, formatPercent } from '../../utils/helpers';
 import api from '../../services/api';
+import {
+  readStoredRiskSettings,
+  persistRiskSettings,
+  DEFAULT_RISK_SETTINGS,
+  type StoredRiskLevel,
+  type StoredRiskSettings,
+} from '../../trading/riskSettingsStorage';
 
 // Heroicons v2 Outline SVGs
 const BoltIcon = (props: React.ComponentProps<'svg'>) => (
@@ -123,10 +130,11 @@ const TradingBot: React.FC = () => {
     pushPlaybookConfig({ manual: next });
   };
 
-  const [riskLevel, setRiskLevel] = useState<'conservative' | 'moderate' | 'aggressive'>('moderate');
-  const [maxPositionSize, setMaxPositionSize] = useState(15);
-  const [stopLossPercent, setStopLossPercent] = useState(0.3);
-  const [takeProfitPercent, setTakeProfitPercent] = useState(0.8);
+  const [risk, setRisk] = useState<StoredRiskSettings>(() => readStoredRiskSettings());
+
+  useEffect(() => {
+    persistRiskSettings(risk);
+  }, [risk]);
 
   const [sessionStats, setSessionStats] = useState({
     total_trades: 0,
@@ -165,13 +173,46 @@ const TradingBot: React.FC = () => {
     return () => clearInterval(interval);
   }, [pollBotStatus]);
 
+  const applyRiskPreset = (level: StoredRiskLevel) => {
+    if (level === 'conservative') {
+      setRisk((s) => ({
+        ...s,
+        riskLevel: 'conservative',
+        maxPositionSize: 10,
+        stopLossPercent: 0.2,
+        takeProfitPercent: 0.4,
+      }));
+    } else if (level === 'moderate') {
+      setRisk((s) => ({
+        ...s,
+        riskLevel: 'moderate',
+        maxPositionSize: 15,
+        stopLossPercent: 0.3,
+        takeProfitPercent: 0.8,
+      }));
+    } else {
+      setRisk((s) => ({
+        ...s,
+        riskLevel: 'aggressive',
+        maxPositionSize: 20,
+        stopLossPercent: 0.5,
+        takeProfitPercent: 1.5,
+      }));
+    }
+  };
+
+  const handleResetRisk = () => {
+    setRisk({ ...DEFAULT_RISK_SETTINGS });
+  };
+
   const handleToggleBot = async () => {
     try {
       if (!botActive) {
         await api.startBot('scalp', {
-          stop_loss: stopLossPercent,
-          take_profit: takeProfitPercent,
-          max_position: maxPositionSize,
+          stop_loss: risk.stopLossPercent,
+          take_profit: risk.takeProfitPercent,
+          max_position: risk.maxPositionSize,
+          risk_level: risk.riskLevel,
         });
         setBotActive(true);
       } else {
@@ -445,6 +486,13 @@ const TradingBot: React.FC = () => {
               </span>
             </div>
             <div style={{ padding: 'var(--space-xl)', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', lineHeight: 1.5, margin: 0 }}>
+                Values are <strong>saved in this browser</strong> and applied when you <strong>Start Bot</strong>.
+                {botActive
+                  ? ' The running session keeps its previous engine settings — stop the bot, adjust, then start again to apply new numbers.'
+                  : ''}
+              </p>
+
               {/* Risk Level */}
               <div>
                 <label style={{
@@ -462,23 +510,8 @@ const TradingBot: React.FC = () => {
                   {(['conservative', 'moderate', 'aggressive'] as const).map((level) => (
                     <button
                       key={level}
-                      className={`btn btn-sm ${riskLevel === level ? 'btn-primary' : 'btn-secondary'}`}
-                      onClick={() => {
-                        setRiskLevel(level);
-                        if (level === 'conservative') {
-                          setMaxPositionSize(10);
-                          setStopLossPercent(0.2);
-                          setTakeProfitPercent(0.4);
-                        } else if (level === 'moderate') {
-                          setMaxPositionSize(15);
-                          setStopLossPercent(0.3);
-                          setTakeProfitPercent(0.8);
-                        } else if (level === 'aggressive') {
-                          setMaxPositionSize(20);
-                          setStopLossPercent(0.5);
-                          setTakeProfitPercent(1.5);
-                        }
-                      }}
+                      className={`btn btn-sm ${risk.riskLevel === level ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => applyRiskPreset(level)}
                       style={{ flex: 1, textTransform: 'capitalize' }}
                     >
                       {level}
@@ -498,15 +531,15 @@ const TradingBot: React.FC = () => {
                   display: 'block',
                   marginBottom: '8px',
                 }}>
-                  Max Position Size: {maxPositionSize}% ({formatCurrency(account.equity * maxPositionSize / 100)})
+                  Max Position Size: {risk.maxPositionSize}% ({formatCurrency(account.equity * risk.maxPositionSize / 100)})
                 </label>
                 <input
                   type="range"
                   min={5}
                   max={25}
                   step={1}
-                  value={maxPositionSize}
-                  onChange={(e) => setMaxPositionSize(parseInt(e.target.value))}
+                  value={risk.maxPositionSize}
+                  onChange={(e) => setRisk((s) => ({ ...s, maxPositionSize: parseInt(e.target.value, 10) }))}
                   style={{ width: '100%', accentColor: 'var(--accent-primary)' }}
                 />
               </div>
@@ -522,15 +555,15 @@ const TradingBot: React.FC = () => {
                   display: 'block',
                   marginBottom: '8px',
                 }}>
-                  Stop Loss: -{stopLossPercent}%
+                  Stop Loss: -{risk.stopLossPercent}%
                 </label>
                 <input
                   type="range"
                   min={0.1}
                   max={2.0}
                   step={0.05}
-                  value={stopLossPercent}
-                  onChange={(e) => setStopLossPercent(parseFloat(e.target.value))}
+                  value={risk.stopLossPercent}
+                  onChange={(e) => setRisk((s) => ({ ...s, stopLossPercent: parseFloat(e.target.value) }))}
                   style={{ width: '100%', accentColor: 'var(--loss)' }}
                 />
               </div>
@@ -546,17 +579,27 @@ const TradingBot: React.FC = () => {
                   display: 'block',
                   marginBottom: '8px',
                 }}>
-                  Take Profit: +{takeProfitPercent}%
+                  Take Profit: +{risk.takeProfitPercent}%
                 </label>
                 <input
                   type="range"
                   min={0.2}
                   max={5.0}
                   step={0.05}
-                  value={takeProfitPercent}
-                  onChange={(e) => setTakeProfitPercent(parseFloat(e.target.value))}
+                  value={risk.takeProfitPercent}
+                  onChange={(e) => setRisk((s) => ({ ...s, takeProfitPercent: parseFloat(e.target.value) }))}
                   style={{ width: '100%', accentColor: 'var(--profit)' }}
                 />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleResetRisk}
+                >
+                  Reset to defaults
+                </button>
               </div>
 
               {/* Summary */}
@@ -575,10 +618,10 @@ const TradingBot: React.FC = () => {
                   • Strategy: {playbookAuto
                     ? `AUTO · ${activePlaybooks.join(', ') || 'idle'}`
                     : `MANUAL · ${manualPlaybooks.join(', ') || 'none'}`}<br/>
-                  • Max per trade: {formatCurrency(account.equity * maxPositionSize / 100)}<br/>
-                  • Stop Loss: {formatPercent(-stopLossPercent)}<br/>
-                  • Take Profit: {formatPercent(takeProfitPercent)}<br/>
-                  • Risk/Reward: 1:{(takeProfitPercent / stopLossPercent).toFixed(1)}
+                  • Max per trade: {formatCurrency(account.equity * risk.maxPositionSize / 100)}<br/>
+                  • Stop Loss: {formatPercent(-risk.stopLossPercent)}<br/>
+                  • Take Profit: {formatPercent(risk.takeProfitPercent)}<br/>
+                  • Risk/Reward: 1:{(risk.takeProfitPercent / risk.stopLossPercent).toFixed(1)}
                 </div>
               </div>
             </div>

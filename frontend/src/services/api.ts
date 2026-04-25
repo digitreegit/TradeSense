@@ -93,7 +93,12 @@ export const api = {
 
   startBot: (
     strategy: string,
-    riskSettings?: { stop_loss?: number; take_profit?: number; max_position?: number },
+    riskSettings?: {
+      stop_loss?: number;
+      take_profit?: number;
+      max_position?: number;
+      risk_level?: 'conservative' | 'moderate' | 'aggressive';
+    },
   ) =>
     request<unknown>('/trading/bot/start', {
       method: 'POST',
