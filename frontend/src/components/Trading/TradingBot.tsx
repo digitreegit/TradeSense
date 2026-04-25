@@ -113,20 +113,23 @@ const TradingBot: React.FC = () => {
 
   const isLight = colorTheme === 'light';
   const playbookSwitchStyle = useMemo(() => {
+    const green = 'var(--profit)';
     if (isLight) {
       return {
         trackOff: 'rgba(0,0,0,0.1)',
-        trackOn: 'rgba(0,0,0,0.28)',
-        thumb: '#111827',
-        border: '1px solid rgba(0,0,0,0.35)',
-        thumbShadow: '0 1px 3px rgba(0,0,0,0.25)',
+        trackOn: green,
+        thumb: '#f8fafc',
+        trackBorderOff: '1px solid rgba(0,0,0,0.22)',
+        trackBorderOn: '1px solid rgba(5, 150, 105, 0.55)',
+        thumbShadow: '0 1px 3px rgba(0,0,0,0.2)',
       };
     }
     return {
       trackOff: 'rgba(255,255,255,0.14)',
-      trackOn: 'rgba(255,255,255,0.32)',
+      trackOn: green,
       thumb: '#f8fafc',
-      border: '1px solid rgba(255,255,255,0.4)',
+      trackBorderOff: '1px solid rgba(255,255,255,0.28)',
+      trackBorderOn: '1px solid rgba(16, 185, 129, 0.5)',
       thumbShadow: '0 1px 3px rgba(0,0,0,0.35)',
     };
   }, [isLight]);
@@ -378,13 +381,14 @@ const TradingBot: React.FC = () => {
                     width: 44,
                     height: 24,
                     flexShrink: 0,
-                    borderRadius: 'var(--btn-radius)',
-                    border: playbookSwitchStyle.border,
+                    borderRadius: 9999,
+                    boxSizing: 'border-box',
+                    border: playbookAuto ? playbookSwitchStyle.trackBorderOn : playbookSwitchStyle.trackBorderOff,
                     padding: 0,
                     cursor: savingPlaybooks ? 'not-allowed' : 'pointer',
                     opacity: savingPlaybooks ? 0.5 : 1,
                     background: playbookAuto ? playbookSwitchStyle.trackOn : playbookSwitchStyle.trackOff,
-                    transition: 'background 0.2s ease',
+                    transition: 'background 0.2s ease, border-color 0.2s ease',
                   }}
                 >
                   <span
