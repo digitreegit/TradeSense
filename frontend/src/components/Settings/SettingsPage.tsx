@@ -781,7 +781,12 @@ const SettingsPage: React.FC = () => {
             <strong>TELEGRAM_BOT_TOKEN</strong> {t.settings.telegramPMid}{' '}
             <code style={{ fontSize: '11px' }}>.env</code>{' '}
             (
-            <a href="https://core.telegram.org/bots/tutorial" target="_blank" rel="noreferrer" style={{ color: 'var(--info)' }}>
+            <a
+              href="https://core.telegram.org/bots/tutorial"
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: 'var(--info)', textDecoration: 'none' }}
+            >
               {t.settings.telegramSetup}
             </a>
             ), {t.settings.telegramPEnd}
