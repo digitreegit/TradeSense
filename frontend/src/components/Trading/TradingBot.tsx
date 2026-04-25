@@ -408,7 +408,8 @@ const TradingBot: React.FC = () => {
                     style={{
                       position: 'absolute',
                       top: 2,
-                      left: playbookAuto ? 24 : 2,
+                      /* 22 vs 24: nudge ON thumb left so it does not sit flush to the right edge (44 - 18 - 2px pad) */
+                      left: playbookAuto ? 22 : 2,
                       width: 18,
                       height: 18,
                       borderRadius: '50%',
