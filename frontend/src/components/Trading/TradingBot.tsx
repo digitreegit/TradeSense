@@ -91,6 +91,9 @@ const TradingBot: React.FC = () => {
     setTradeLogs,
     strategies,
     account,
+    authEmail,
+    authAlpacaConfigured,
+    authAlpacaPaperTrading,
     playbookAuto,
     setPlaybookAuto,
     manualPlaybooks,
@@ -98,6 +101,11 @@ const TradingBot: React.FC = () => {
     activePlaybooks,
     setActivePlaybooks,
   } = useAppStore();
+
+  /** Logged in + saved keys + live API — do not let the user tune risk in the browser. */
+  const riskControlLocked = Boolean(
+    authEmail && authAlpacaConfigured && !authAlpacaPaperTrading,
+  );
 
   const [savingPlaybooks, setSavingPlaybooks] = useState(false);
 
@@ -132,9 +140,14 @@ const TradingBot: React.FC = () => {
 
   const [risk, setRisk] = useState<StoredRiskSettings>(() => readStoredRiskSettings());
 
+  const effectiveRisk: StoredRiskSettings = riskControlLocked
+    ? { ...DEFAULT_RISK_SETTINGS }
+    : risk;
+
   useEffect(() => {
+    if (riskControlLocked) return;
     persistRiskSettings(risk);
-  }, [risk]);
+  }, [risk, riskControlLocked]);
 
   const [sessionStats, setSessionStats] = useState({
     total_trades: 0,
@@ -174,6 +187,7 @@ const TradingBot: React.FC = () => {
   }, [pollBotStatus]);
 
   const applyRiskPreset = (level: StoredRiskLevel) => {
+    if (riskControlLocked) return;
     if (level === 'conservative') {
       setRisk((s) => ({
         ...s,
@@ -202,6 +216,7 @@ const TradingBot: React.FC = () => {
   };
 
   const handleResetRisk = () => {
+    if (riskControlLocked) return;
     setRisk({ ...DEFAULT_RISK_SETTINGS });
   };
 
@@ -209,10 +224,10 @@ const TradingBot: React.FC = () => {
     try {
       if (!botActive) {
         await api.startBot('scalp', {
-          stop_loss: risk.stopLossPercent,
-          take_profit: risk.takeProfitPercent,
-          max_position: risk.maxPositionSize,
-          risk_level: risk.riskLevel,
+          stop_loss: effectiveRisk.stopLossPercent,
+          take_profit: effectiveRisk.takeProfitPercent,
+          max_position: effectiveRisk.maxPositionSize,
+          risk_level: effectiveRisk.riskLevel,
         });
         setBotActive(true);
       } else {
@@ -487,14 +502,28 @@ const TradingBot: React.FC = () => {
             </div>
             <div style={{ padding: 'var(--space-xl)', display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', lineHeight: 1.5, margin: 0 }}>
-                Values are <strong>saved in this browser</strong> and applied when you <strong>Start Bot</strong>.
-                {botActive
-                  ? ' The running session keeps its previous engine settings — stop the bot, adjust, then start again to apply new numbers.'
-                  : ''}
+                {riskControlLocked ? (
+                  <>
+                    <strong>Live (real money)</strong> mode: risk parameters are <strong>fixed to the moderate</strong> server
+                    preset. They cannot be changed from this app for safety.
+                  </>
+                ) : (
+                  <>
+                    Values are <strong>saved in this browser</strong> and applied when you <strong>Start Bot</strong>.
+                    {botActive
+                      ? ' The running session keeps its previous engine settings — stop the bot, adjust, then start again to apply new numbers.'
+                      : ''}
+                  </>
+                )}
               </p>
 
               {/* Risk Level */}
-              <div>
+              <div
+                style={{
+                  opacity: riskControlLocked ? 0.7 : 1,
+                  pointerEvents: riskControlLocked ? 'none' : 'auto',
+                }}
+              >
                 <label style={{
                   fontSize: '12px',
                   textTransform: 'uppercase',
@@ -510,7 +539,9 @@ const TradingBot: React.FC = () => {
                   {(['conservative', 'moderate', 'aggressive'] as const).map((level) => (
                     <button
                       key={level}
-                      className={`btn btn-sm ${risk.riskLevel === level ? 'btn-primary' : 'btn-secondary'}`}
+                      type="button"
+                      disabled={riskControlLocked}
+                      className={`btn btn-sm ${effectiveRisk.riskLevel === level ? 'btn-primary' : 'btn-secondary'}`}
                       onClick={() => applyRiskPreset(level)}
                       style={{ flex: 1, textTransform: 'capitalize' }}
                     >
@@ -521,7 +552,7 @@ const TradingBot: React.FC = () => {
               </div>
 
               {/* Max Position */}
-              <div>
+              <div style={{ opacity: riskControlLocked ? 0.7 : 1 }}>
                 <label style={{
                   fontSize: '12px',
                   textTransform: 'uppercase',
@@ -531,21 +562,22 @@ const TradingBot: React.FC = () => {
                   display: 'block',
                   marginBottom: '8px',
                 }}>
-                  Max Position Size: {risk.maxPositionSize}% ({formatCurrency(account.equity * risk.maxPositionSize / 100)})
+                  Max Position Size: {effectiveRisk.maxPositionSize}% ({formatCurrency(account.equity * effectiveRisk.maxPositionSize / 100)})
                 </label>
                 <input
                   type="range"
                   min={5}
                   max={25}
                   step={1}
-                  value={risk.maxPositionSize}
+                  value={effectiveRisk.maxPositionSize}
+                  disabled={riskControlLocked}
                   onChange={(e) => setRisk((s) => ({ ...s, maxPositionSize: parseInt(e.target.value, 10) }))}
                   style={{ width: '100%', accentColor: 'var(--accent-primary)' }}
                 />
               </div>
 
               {/* Stop Loss */}
-              <div>
+              <div style={{ opacity: riskControlLocked ? 0.7 : 1 }}>
                 <label style={{
                   fontSize: '12px',
                   textTransform: 'uppercase',
@@ -555,21 +587,22 @@ const TradingBot: React.FC = () => {
                   display: 'block',
                   marginBottom: '8px',
                 }}>
-                  Stop Loss: -{risk.stopLossPercent}%
+                  Stop Loss: -{effectiveRisk.stopLossPercent}%
                 </label>
                 <input
                   type="range"
                   min={0.1}
                   max={2.0}
                   step={0.05}
-                  value={risk.stopLossPercent}
+                  value={effectiveRisk.stopLossPercent}
+                  disabled={riskControlLocked}
                   onChange={(e) => setRisk((s) => ({ ...s, stopLossPercent: parseFloat(e.target.value) }))}
                   style={{ width: '100%', accentColor: 'var(--loss)' }}
                 />
               </div>
 
               {/* Take Profit */}
-              <div>
+              <div style={{ opacity: riskControlLocked ? 0.7 : 1 }}>
                 <label style={{
                   fontSize: '12px',
                   textTransform: 'uppercase',
@@ -579,14 +612,15 @@ const TradingBot: React.FC = () => {
                   display: 'block',
                   marginBottom: '8px',
                 }}>
-                  Take Profit: +{risk.takeProfitPercent}%
+                  Take Profit: +{effectiveRisk.takeProfitPercent}%
                 </label>
                 <input
                   type="range"
                   min={0.2}
                   max={5.0}
                   step={0.05}
-                  value={risk.takeProfitPercent}
+                  value={effectiveRisk.takeProfitPercent}
+                  disabled={riskControlLocked}
                   onChange={(e) => setRisk((s) => ({ ...s, takeProfitPercent: parseFloat(e.target.value) }))}
                   style={{ width: '100%', accentColor: 'var(--profit)' }}
                 />
@@ -597,6 +631,7 @@ const TradingBot: React.FC = () => {
                   type="button"
                   className="btn btn-secondary btn-sm"
                   onClick={handleResetRisk}
+                  disabled={riskControlLocked}
                 >
                   Reset to defaults
                 </button>
@@ -618,10 +653,18 @@ const TradingBot: React.FC = () => {
                   • Strategy: {playbookAuto
                     ? `AUTO · ${activePlaybooks.join(', ') || 'idle'}`
                     : `MANUAL · ${manualPlaybooks.join(', ') || 'none'}`}<br/>
-                  • Max per trade: {formatCurrency(account.equity * risk.maxPositionSize / 100)}<br/>
-                  • Stop Loss: {formatPercent(-risk.stopLossPercent)}<br/>
-                  • Take Profit: {formatPercent(risk.takeProfitPercent)}<br/>
-                  • Risk/Reward: 1:{(risk.takeProfitPercent / risk.stopLossPercent).toFixed(1)}
+                  • Max per trade: {formatCurrency(account.equity * effectiveRisk.maxPositionSize / 100)}<br/>
+                  • Stop Loss: {formatPercent(-effectiveRisk.stopLossPercent)}<br/>
+                  • Take Profit: {formatPercent(effectiveRisk.takeProfitPercent)}<br/>
+                  • Risk/Reward: 1:{(effectiveRisk.takeProfitPercent / effectiveRisk.stopLossPercent).toFixed(1)}
+                  {riskControlLocked && (
+                    <>
+                      <br />
+                      <span style={{ color: 'var(--text-tertiary)' }}>
+                        • Live: engine uses the moderate preset (client tuning ignored).
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
             </div>

@@ -58,18 +58,34 @@ async def cancel_all_orders(engine=Depends(get_current_engine)):
 
 @router.post("/bot/start")
 async def start_bot(req: BotRequest, engine=Depends(get_current_engine)):
-    """Start the trading bot."""
-    engine.start(
-        req.strategy,
-        stop_loss=req.stop_loss,
-        take_profit=req.take_profit,
-        max_position=req.max_position,
-        risk_level=req.risk_level,
-    )
+    """Start the trading bot.
+
+    Live (non-paper) Alpaca: risk tuning from the client is ignored — engine uses
+    the moderate server preset to reduce accidental over-leverage with real money.
+    """
+    live = not getattr(engine._alpaca, "paper_trading", True)
+    if live:
+        engine.start(
+            req.strategy,
+            stop_loss=None,
+            take_profit=None,
+            max_position=None,
+            risk_level="moderate",
+        )
+    else:
+        engine.start(
+            req.strategy,
+            stop_loss=req.stop_loss,
+            take_profit=req.take_profit,
+            max_position=req.max_position,
+            risk_level=req.risk_level,
+        )
     return {
         "status": "started",
         "strategy": req.strategy,
         "message": f"Trading bot started with {req.strategy} strategy",
+        "live_trading": live,
+        "risk_params_locked": live,
     }
 
 
