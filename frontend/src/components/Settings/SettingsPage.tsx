@@ -707,69 +707,70 @@ const SettingsPage: React.FC = () => {
           </div>
         )}
 
-        <div style={{ marginTop: '32px' }}>
-          <label style={settingsSectionTitleStyle}>
-            {t.settings.capitalScale}
-          </label>
-          <p
-            style={{
-              fontSize: '12px',
-              color: 'var(--text-tertiary)',
-              margin: '6px 0 10px',
-              lineHeight: 1.5,
-            }}
-          >
-            {t.settings.capitalScaleDesc}
-          </p>
-          <div
-            role="radiogroup"
-            aria-label={t.settings.capitalScale}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: '8px',
-            }}
-          >
-            {scaleOptions.map((opt) => {
-              const selected = scale === opt.id;
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  onClick={() => chooseScale(opt.id)}
-                  disabled={scaleLoading || !authAlpacaPaperTrading}
-                  style={{
-                    display: 'flex',
-                    gap: 10,
-                    alignItems: 'flex-start',
-                    textAlign: 'left',
-                    padding: '10px 12px',
-                    borderRadius: '8px',
-                    border: selectedBorder2(selected, 'info'),
-                    background: selected ? 'var(--bg-tertiary, rgba(56,132,255,0.10))' : 'var(--bg-secondary)',
-                    color: 'inherit',
-                    cursor: scaleLoading || !authAlpacaPaperTrading ? 'not-allowed' : 'pointer',
-                    opacity: !authAlpacaPaperTrading ? 0.5 : 1,
-                    transition: 'border-color 120ms, background 120ms',
-                  }}
-                >
-                  <SettingsRadioIcon selected={selected} accent="info" />
-                  <div>
-                    <div style={{ fontSize: '13px', fontWeight: 600 }}>{opt.title}</div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px', lineHeight: 1.3 }}>
-                      {opt.caption}
+        {authAlpacaPaperTrading && (
+          <div style={{ marginTop: '32px' }}>
+            <label style={settingsSectionTitleStyle}>
+              {t.settings.capitalScale}
+            </label>
+            <p
+              style={{
+                fontSize: '12px',
+                color: 'var(--text-tertiary)',
+                margin: '6px 0 10px',
+                lineHeight: 1.5,
+              }}
+            >
+              {t.settings.capitalScaleDesc}
+            </p>
+            <div
+              role="radiogroup"
+              aria-label={t.settings.capitalScale}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '8px',
+              }}
+            >
+              {scaleOptions.map((opt) => {
+                const selected = scale === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => chooseScale(opt.id)}
+                    disabled={scaleLoading}
+                    style={{
+                      display: 'flex',
+                      gap: 10,
+                      alignItems: 'flex-start',
+                      textAlign: 'left',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      border: selectedBorder2(selected, 'info'),
+                      background: selected ? 'var(--bg-tertiary, rgba(56,132,255,0.10))' : 'var(--bg-secondary)',
+                      color: 'inherit',
+                      cursor: scaleLoading ? 'not-allowed' : 'pointer',
+                      transition: 'border-color 120ms, background 120ms',
+                    }}
+                  >
+                    <SettingsRadioIcon selected={selected} accent="info" />
+                    <div>
+                      <div style={{ fontSize: '13px', fontWeight: 600 }}>{opt.title}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px', lineHeight: 1.3 }}>
+                        {opt.caption}
+                      </div>
                     </div>
-                  </div>
-                </button>
-              );
-            })}
+                  </button>
+                );
+              })}
+            </div>
+            {scaleMsg && (
+              <p style={{ color: 'var(--profit)', fontSize: '12px', marginTop: '8px' }}>{scaleMsg}</p>
+            )}
           </div>
-          {scaleMsg && (
-            <p style={{ color: 'var(--profit)', fontSize: '12px', marginTop: '8px' }}>{scaleMsg}</p>
-          )}
-        </div>
+        )}
 
         <div
           style={{
