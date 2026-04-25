@@ -113,7 +113,7 @@
   --chart-loading-bg: rgba(6, 10, 19, 0.82);
 }
 
-/* Light theme — toggled via Profile (data-theme on <html>) */
+/* Light theme — toggled via Settings (data-theme on <html>) */
 [data-theme="light"] {
   --bg-primary: #f1f5f9;
   --bg-secondary: #ffffff;

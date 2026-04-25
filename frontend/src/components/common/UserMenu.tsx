@@ -86,17 +86,6 @@ const UserMenu: React.FC = () => {
             role="menuitem"
             className="user-menu-item"
             onClick={() => {
-              setCurrentPage('profile');
-              setOpen(false);
-            }}
-          >
-            Profile
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="user-menu-item"
-            onClick={() => {
               setCurrentPage('settings');
               setOpen(false);
             }}

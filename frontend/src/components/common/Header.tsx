@@ -30,7 +30,6 @@ const Header: React.FC = () => {
     history: 'Trade History',
     auth: 'Sign in',
     settings: 'Settings',
-    profile: 'Profile',
   };
 
   const currentTime = time.toLocaleTimeString('en-US', {

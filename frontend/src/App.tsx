@@ -9,7 +9,6 @@ import Portfolio from './components/Portfolio/Portfolio';
 import History from './components/Portfolio/History';
 import AuthPage from './components/Auth/AuthPage';
 import SettingsPage from './components/Settings/SettingsPage';
-import ProfilePage from './components/Profile/ProfilePage';
 import { useAppStore } from './stores/useAppStore';
 import { useMarketData } from './hooks/useMarketData';
 import api from './services/api';
@@ -78,7 +77,6 @@ const App: React.FC = () => {
       case 'portfolio': return <Portfolio />;
       case 'history': return <History />;
       case 'settings': return <SettingsPage />;
-      case 'profile': return <ProfilePage />;
       default: return <Dashboard />;
     }
   };

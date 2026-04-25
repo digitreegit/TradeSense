@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import api from '../../services/api';
 import { useAppStore } from '../../stores/useAppStore';
+import type { AppLocale, ColorTheme } from '../../stores/types';
+import { settingsPageCopy } from '../../locale/settingsPageCopy';
 import { clearToken } from '../../auth/token';
 import { supabase } from '../../auth/supabase';
 
@@ -46,7 +48,23 @@ const SettingsPage: React.FC = () => {
     setAuthProfile,
     setCurrentPage,
     setAuthMethod,
+    colorTheme,
+    setColorTheme,
+    appLocale,
+    setAppLocale,
   } = useAppStore();
+
+  const t = settingsPageCopy[appLocale];
+
+  const chooseTheme = (next: ColorTheme) => {
+    if (next === colorTheme) return;
+    setColorTheme(next);
+  };
+
+  const chooseLocale = (next: AppLocale) => {
+    if (next === appLocale) return;
+    setAppLocale(next);
+  };
   const [key, setKey] = useState('');
   const [secret, setSecret] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
@@ -264,9 +282,169 @@ const SettingsPage: React.FC = () => {
   };
 
   return (
-    <div className="page-enter" style={{ maxWidth: 560, margin: '0 auto', padding: 'var(--space-xl)' }}>
+    <div
+      className="page-enter"
+      style={{
+        width: '100%',
+        maxWidth: 'min(1200px, 66.67vw)',
+        margin: '0 auto',
+        padding: 'var(--space-xl)',
+        boxSizing: 'border-box',
+      }}
+    >
       <div className="card" style={{ padding: 'var(--space-xl)' }}>
-        <h2 style={{ fontSize: '18px', marginBottom: '8px' }}>Settings</h2>
+        <h2 style={{ fontSize: '18px', marginBottom: '8px' }}>{t.settingsTitle}</h2>
+
+        <div style={{ marginBottom: '28px', paddingBottom: '24px', borderBottom: '1px solid var(--border-secondary)' }}>
+          <label
+            style={{
+              fontSize: '12px',
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              color: 'var(--text-tertiary)',
+              display: 'block',
+              marginBottom: '10px',
+            }}
+          >
+            {t.languageLabel}
+          </label>
+          <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '12px', lineHeight: 1.5 }}>
+            {t.languageDescription}
+          </p>
+          <div
+            role="radiogroup"
+            aria-label={t.languageLabel}
+            style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', maxWidth: 560 }}
+          >
+            <button
+              type="button"
+              role="radio"
+              aria-checked={appLocale === 'en'}
+              onClick={() => chooseLocale('en')}
+              style={{
+                textAlign: 'left',
+                padding: '12px 14px',
+                borderRadius: '8px',
+                border:
+                  appLocale === 'en'
+                    ? '3px solid var(--border-accent, var(--info))'
+                    : '2px solid var(--border-secondary)',
+                background: appLocale === 'en' ? 'var(--bg-tertiary)' : 'var(--bg-secondary)',
+                color: 'var(--text-primary)',
+                cursor: 'pointer',
+              }}
+            >
+              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.english}</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                {t.languageEnglishSub}
+              </div>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={appLocale === 'ko'}
+              onClick={() => chooseLocale('ko')}
+              style={{
+                textAlign: 'left',
+                padding: '12px 14px',
+                borderRadius: '8px',
+                border:
+                  appLocale === 'ko'
+                    ? '3px solid var(--border-accent, var(--info))'
+                    : '2px solid var(--border-secondary)',
+                background: appLocale === 'ko' ? 'var(--bg-tertiary)' : 'var(--bg-secondary)',
+                color: 'var(--text-primary)',
+                cursor: 'pointer',
+              }}
+            >
+              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.korean}</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                {t.languageKoreanSub}
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: '28px', paddingBottom: '24px', borderBottom: '1px solid var(--border-secondary)' }}>
+          <label
+            style={{
+              fontSize: '12px',
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              color: 'var(--text-tertiary)',
+              display: 'block',
+              marginBottom: '10px',
+            }}
+          >
+            {t.appearanceLabel}
+          </label>
+          <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '12px', lineHeight: 1.5 }}>
+            {t.appearanceDescription}
+          </p>
+          <div
+            role="radiogroup"
+            aria-label={t.appearanceLabel}
+            style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', maxWidth: 560 }}
+          >
+            <button
+              type="button"
+              role="radio"
+              aria-checked={colorTheme === 'dark'}
+              onClick={() => chooseTheme('dark')}
+              style={{
+                textAlign: 'left',
+                padding: '12px 14px',
+                borderRadius: '8px',
+                border:
+                  colorTheme === 'dark'
+                    ? '3px solid var(--border-accent, var(--info))'
+                    : '2px solid var(--border-secondary)',
+                background: colorTheme === 'dark' ? 'var(--bg-tertiary)' : 'var(--bg-secondary)',
+                color: 'var(--text-primary)',
+                cursor: 'pointer',
+              }}
+            >
+              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.dark}</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                {t.darkSub}
+              </div>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={colorTheme === 'light'}
+              onClick={() => chooseTheme('light')}
+              style={{
+                textAlign: 'left',
+                padding: '12px 14px',
+                borderRadius: '8px',
+                border:
+                  colorTheme === 'light'
+                    ? '3px solid var(--border-accent, var(--info))'
+                    : '2px solid var(--border-secondary)',
+                background: colorTheme === 'light' ? 'var(--bg-tertiary)' : 'var(--bg-secondary)',
+                color: 'var(--text-primary)',
+                cursor: 'pointer',
+              }}
+            >
+              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.light}</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                {t.lightSub}
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <h3
+          style={{
+            fontSize: '15px',
+            fontWeight: 700,
+            margin: '0 0 8px 0',
+            color: 'var(--text-primary)',
+          }}
+        >
+          {t.brokerSectionTitle}
+        </h3>
         <p style={{ fontSize: '13px', color: 'var(--text-tertiary)', marginBottom: '20px', lineHeight: 1.5 }}>
           Connect your <strong>Alpaca</strong> account (paper or live). Keys are encrypted and only your user can trade with them.
           Paper keys:{' '}

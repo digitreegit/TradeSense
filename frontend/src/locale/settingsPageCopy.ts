@@ -1,12 +1,9 @@
 import type { AppLocale } from '../stores/types';
 
-export const profilePageCopy: Record<
+export const settingsPageCopy: Record<
   AppLocale,
   {
-    pageTitle: string;
-    emailLabel: string;
-    alpacaNotSet: string;
-    alpacaSaved: string;
+    settingsTitle: string;
     languageLabel: string;
     languageDescription: string;
     english: string;
@@ -19,15 +16,14 @@ export const profilePageCopy: Record<
     darkSub: string;
     light: string;
     lightSub: string;
+    brokerSectionTitle: string;
   }
 > = {
   en: {
-    pageTitle: 'Profile',
-    emailLabel: 'Email',
-    alpacaNotSet: 'not set — add them in Settings',
-    alpacaSaved: 'saved on server (encrypted)',
+    settingsTitle: 'Settings',
     languageLabel: 'Language',
-    languageDescription: 'Applies to this screen (Profile) and can be used app-wide. Saved in this browser.',
+    languageDescription:
+      'Applies to this page and can be expanded app-wide later. Saved in this browser.',
     english: 'English',
     korean: 'Korean',
     languageEnglishSub: 'Interface in English',
@@ -38,14 +34,13 @@ export const profilePageCopy: Record<
     darkSub: 'Default trading dashboard',
     light: 'Light',
     lightSub: 'Bright UI for daytime',
+    brokerSectionTitle: 'Broker & API keys',
   },
   ko: {
-    pageTitle: '프로필',
-    emailLabel: '이메일',
-    alpacaNotSet: '미설정 — 설정에서 API 키를 추가하세요',
-    alpacaSaved: '서버에 저장됨(암호화)',
+    settingsTitle: '설정',
     languageLabel: '언어',
-    languageDescription: '이 화면(프로필)에 반영되며, 앱 전체에 확장될 수 있습니다. 이 브라우저에 저장됩니다.',
+    languageDescription:
+      '이 페이지에 반영되며, 이후 앱 전체로 확장될 수 있습니다. 이 브라우저에 저장됩니다.',
     english: 'English',
     korean: '한국어',
     languageEnglishSub: '영어 인터페이스',
@@ -56,5 +51,6 @@ export const profilePageCopy: Record<
     darkSub: '기본 대시보드 (어두운 배경)',
     light: '라이트',
     lightSub: '밝은 UI (낮 사용에 적합)',
+    brokerSectionTitle: '브로커 · API',
   },
 };
