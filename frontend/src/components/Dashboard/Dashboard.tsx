@@ -145,7 +145,7 @@ const Dashboard: React.FC = () => {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                borderRadius: '50%',
+                borderRadius: 'var(--btn-radius-sm)',
                 transition: 'all 0.2s'
               }}
               onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}

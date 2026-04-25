@@ -378,7 +378,7 @@ const TradingBot: React.FC = () => {
                     width: 44,
                     height: 24,
                     flexShrink: 0,
-                    borderRadius: 12,
+                    borderRadius: 'var(--btn-radius)',
                     border: playbookSwitchStyle.border,
                     padding: 0,
                     cursor: savingPlaybooks ? 'not-allowed' : 'pointer',

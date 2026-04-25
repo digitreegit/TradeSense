@@ -167,7 +167,7 @@ const AgentPanel: React.FC = () => {
               style={{
                 padding: '4px 12px',
                 border: '1px solid var(--border-primary)',
-                borderRadius: 'var(--radius-full)',
+                borderRadius: 'var(--btn-radius-sm)',
                 background: 'none',
                 color: 'var(--text-tertiary)',
                 fontSize: '12px',
