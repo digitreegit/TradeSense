@@ -158,6 +158,7 @@ const AgentPanel: React.FC = () => {
           display: 'flex',
           gap: '6px',
           padding: '8px 16px 0',
+          marginBottom: '12px',
           overflowX: 'auto',
         }}>
           {quickActions.map((action, i) => (
