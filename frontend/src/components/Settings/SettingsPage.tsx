@@ -23,7 +23,16 @@ const selectedBorder2 = (selected: boolean, accent: 'info' | 'loss') =>
     ? `2px solid var(--border-accent, var(--${accent === 'loss' ? 'loss' : 'info'}))`
     : '2px solid var(--border-secondary)';
 
-/** Uppercase section titles (Language, Appearance, etc.) */
+/** Section titles (Language, …) — match "Broker & API" / 브로커 · API heading */
+const settingsSectionTitleStyle: React.CSSProperties = {
+  fontSize: '15px',
+  fontWeight: 700,
+  margin: '0 0 8px 0',
+  color: 'var(--text-primary)',
+  display: 'block',
+};
+
+/** Smaller caps labels (live account, Telegram, …) */
 const settingsSectionLabel: React.CSSProperties = {
   fontSize: '14px',
   fontWeight: 700,
@@ -331,12 +340,7 @@ const SettingsPage: React.FC = () => {
         <h2 style={{ fontSize: '18px', marginBottom: '8px' }}>{t.settings.settingsTitle}</h2>
 
         <div style={{ marginBottom: '28px', paddingBottom: '24px', borderBottom: '1px solid var(--border-secondary)' }}>
-          <label
-            style={{
-              ...settingsSectionLabel,
-              marginBottom: '10px',
-            }}
-          >
+          <label style={settingsSectionTitleStyle}>
             {t.settings.languageLabel}
           </label>
           <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '12px', lineHeight: 1.5 }}>
@@ -403,12 +407,7 @@ const SettingsPage: React.FC = () => {
         </div>
 
         <div style={{ marginBottom: '28px', paddingBottom: '24px', borderBottom: '1px solid var(--border-secondary)' }}>
-          <label
-            style={{
-              ...settingsSectionLabel,
-              marginBottom: '10px',
-            }}
-          >
+          <label style={settingsSectionTitleStyle}>
             {t.settings.appearanceLabel}
           </label>
           <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '12px', lineHeight: 1.5 }}>
@@ -474,14 +473,7 @@ const SettingsPage: React.FC = () => {
           </div>
         </div>
 
-        <h3
-          style={{
-            fontSize: '15px',
-            fontWeight: 700,
-            margin: '0 0 8px 0',
-            color: 'var(--text-primary)',
-          }}
-        >
+        <h3 style={settingsSectionTitleStyle}>
           {t.settings.brokerSectionTitle}
         </h3>
         <p style={{ fontSize: '13px', color: 'var(--text-tertiary)', marginBottom: '20px', lineHeight: 1.5 }}>
@@ -532,7 +524,7 @@ const SettingsPage: React.FC = () => {
         {msg && <p style={{ color: 'var(--profit)', fontSize: '13px', marginBottom: '8px' }}>{msg}</p>}
 
         <div style={{ marginTop: '8px', marginBottom: '8px' }}>
-          <label style={settingsSectionLabel}>
+          <label style={settingsSectionTitleStyle}>
             {t.settings.tradingMode}
           </label>
           <p
@@ -709,7 +701,7 @@ const SettingsPage: React.FC = () => {
         )}
 
         <div style={{ marginTop: '32px' }}>
-          <label style={settingsSectionLabel}>
+          <label style={settingsSectionTitleStyle}>
             {t.settings.capitalScale}
           </label>
           <p
