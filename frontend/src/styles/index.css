@@ -119,6 +119,9 @@
   /* Agent: AI message bubble (very light gray on dark canvas) */
   --agent-ai-bubble-bg: rgba(248, 250, 252, 0.07);
   --agent-ai-bubble-border: rgba(148, 163, 184, 0.12);
+
+  /* Settings: unselected choice radio ring — visible on dark cards */
+  --settings-choice-radio-off: rgba(203, 213, 225, 0.42);
 }
 
 /* Korean UI — use Noto Sans (KR) for Hangul; English and numerals use Inter / JetBrains Mono first in the stack */
@@ -192,6 +195,9 @@ html[data-locale='ko'] body {
 
   --agent-ai-bubble-bg: #f8fafc;
   --agent-ai-bubble-border: rgba(15, 23, 42, 0.05);
+
+  /* Settings: softer ring on light cards (was too heavy vs text-tertiary) */
+  --settings-choice-radio-off: rgba(15, 23, 42, 0.12);
 }
 
 [data-theme="light"] ::selection {

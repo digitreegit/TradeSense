@@ -45,8 +45,8 @@ const settingsSectionLabel: React.CSSProperties = {
 
 const SettingsRadioIcon: React.FC<{ selected: boolean; accent: 'info' | 'loss' }> = ({ selected, accent }) => {
   const ring = accent === 'loss' ? 'var(--loss)' : 'var(--accent-primary)';
-  /** Unselected: transparent so the card surface shows; border visible on dark (not a black disc). */
-  const ringUnselected = 'var(--text-tertiary)';
+  /** Unselected ring: theme-tuned in index.css (lighter in light mode, more visible in dark). */
+  const ringUnselected = 'var(--settings-choice-radio-off)';
   return (
     <span
       aria-hidden
