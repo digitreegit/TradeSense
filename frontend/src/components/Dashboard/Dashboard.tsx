@@ -72,8 +72,6 @@ const Dashboard: React.FC = () => {
   const regimeDivider =
     colorTheme === 'light' ? '1px solid rgba(15, 23, 42, 0.16)' : '1px solid rgba(255, 255, 255, 0.12)';
 
-  const hasMarketScores = Boolean((regimeData as any)?.market_scores);
-
   const strategyBanner = useMemo(() => {
     const mode = playbookAuto ? 'AUTO' : 'MANUAL';
     const ids = playbookAuto
@@ -266,8 +264,6 @@ const Dashboard: React.FC = () => {
               <div
                 style={{
                   marginTop: '12px',
-                  paddingTop: hasMarketScores ? 0 : '12px',
-                  borderTop: hasMarketScores ? 'none' : regimeDivider,
                 }}
               >
                 <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '6px' }}>
