@@ -2,6 +2,9 @@
 
 export type ColorTheme = 'dark' | 'light';
 
+/** UI language (Profile and future i18n). */
+export type AppLocale = 'en' | 'ko';
+
 export interface Position {
   symbol: string;
   qty: number;

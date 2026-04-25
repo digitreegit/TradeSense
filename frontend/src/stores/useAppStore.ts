@@ -11,8 +11,10 @@ import type {
   RegimeData,
   ComplianceStatus,
   AlpacaApiUsage,
+  AppLocale,
   ColorTheme,
 } from './types';
+import { applyLocaleToDocument, persistLocale, readStoredLocale } from '../locale/locale';
 import { applyThemeToDocument, persistTheme, readStoredTheme } from '../theme/theme';
 
 interface AppState {
@@ -98,6 +100,9 @@ interface AppState {
 
   colorTheme: ColorTheme;
   setColorTheme: (theme: ColorTheme) => void;
+
+  appLocale: AppLocale;
+  setAppLocale: (locale: AppLocale) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -144,6 +149,13 @@ export const useAppStore = create<AppState>((set) => ({
     persistTheme(theme);
     applyThemeToDocument(theme);
     set({ colorTheme: theme });
+  },
+
+  appLocale: readStoredLocale(),
+  setAppLocale: (locale) => {
+    persistLocale(locale);
+    applyLocaleToDocument(locale);
+    set({ appLocale: locale });
   },
 
   // Account - $3000 paper trading
