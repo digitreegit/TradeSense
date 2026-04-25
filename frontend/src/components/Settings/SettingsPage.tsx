@@ -18,6 +18,44 @@ type LiveSummary = {
 const fmtUsd = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(n);
 
+const selectedBorder2 = (selected: boolean, accent: 'info' | 'loss') =>
+  selected
+    ? `2px solid var(--border-accent, var(--${accent === 'loss' ? 'loss' : 'info'}))`
+    : '2px solid var(--border-secondary)';
+
+const SettingsRadioIcon: React.FC<{ selected: boolean; accent: 'info' | 'loss' }> = ({ selected, accent }) => {
+  const ring = accent === 'loss' ? 'var(--loss)' : 'var(--info)';
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: 18,
+        height: 18,
+        minWidth: 18,
+        marginTop: 2,
+        borderRadius: '50%',
+        border: `2px solid ${selected ? ring : 'var(--border-secondary)'}`,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+        background: 'var(--bg-primary)',
+      }}
+    >
+      {selected && (
+        <span
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            background: ring,
+          }}
+        />
+      )}
+    </span>
+  );
+};
+
 const SettingsPage: React.FC = () => {
   const t = useUiStrings();
   const {
@@ -309,21 +347,24 @@ const SettingsPage: React.FC = () => {
               aria-checked={appLocale === 'en'}
               onClick={() => chooseLocale('en')}
               style={{
+                display: 'flex',
+                gap: 12,
+                alignItems: 'flex-start',
                 textAlign: 'left',
                 padding: '12px 14px',
                 borderRadius: '8px',
-                border:
-                  appLocale === 'en'
-                    ? '3px solid var(--border-accent, var(--info))'
-                    : '2px solid var(--border-secondary)',
+                border: selectedBorder2(appLocale === 'en', 'info'),
                 background: appLocale === 'en' ? 'var(--bg-tertiary)' : 'var(--bg-secondary)',
                 color: 'var(--text-primary)',
                 cursor: 'pointer',
               }}
             >
-              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.settings.english}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
-                {t.settings.languageEnglishSub}
+              <SettingsRadioIcon selected={appLocale === 'en'} accent="info" />
+              <div>
+                <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.settings.english}</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                  {t.settings.languageEnglishSub}
+                </div>
               </div>
             </button>
             <button
@@ -332,21 +373,24 @@ const SettingsPage: React.FC = () => {
               aria-checked={appLocale === 'ko'}
               onClick={() => chooseLocale('ko')}
               style={{
+                display: 'flex',
+                gap: 12,
+                alignItems: 'flex-start',
                 textAlign: 'left',
                 padding: '12px 14px',
                 borderRadius: '8px',
-                border:
-                  appLocale === 'ko'
-                    ? '3px solid var(--border-accent, var(--info))'
-                    : '2px solid var(--border-secondary)',
+                border: selectedBorder2(appLocale === 'ko', 'info'),
                 background: appLocale === 'ko' ? 'var(--bg-tertiary)' : 'var(--bg-secondary)',
                 color: 'var(--text-primary)',
                 cursor: 'pointer',
               }}
             >
-              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.settings.korean}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
-                {t.settings.languageKoreanSub}
+              <SettingsRadioIcon selected={appLocale === 'ko'} accent="info" />
+              <div>
+                <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.settings.korean}</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                  {t.settings.languageKoreanSub}
+                </div>
               </div>
             </button>
           </div>
@@ -379,21 +423,24 @@ const SettingsPage: React.FC = () => {
               aria-checked={colorTheme === 'dark'}
               onClick={() => chooseTheme('dark')}
               style={{
+                display: 'flex',
+                gap: 12,
+                alignItems: 'flex-start',
                 textAlign: 'left',
                 padding: '12px 14px',
                 borderRadius: '8px',
-                border:
-                  colorTheme === 'dark'
-                    ? '3px solid var(--border-accent, var(--info))'
-                    : '2px solid var(--border-secondary)',
+                border: selectedBorder2(colorTheme === 'dark', 'info'),
                 background: colorTheme === 'dark' ? 'var(--bg-tertiary)' : 'var(--bg-secondary)',
                 color: 'var(--text-primary)',
                 cursor: 'pointer',
               }}
             >
-              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.settings.dark}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
-                {t.settings.darkSub}
+              <SettingsRadioIcon selected={colorTheme === 'dark'} accent="info" />
+              <div>
+                <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.settings.dark}</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                  {t.settings.darkSub}
+                </div>
               </div>
             </button>
             <button
@@ -402,21 +449,24 @@ const SettingsPage: React.FC = () => {
               aria-checked={colorTheme === 'light'}
               onClick={() => chooseTheme('light')}
               style={{
+                display: 'flex',
+                gap: 12,
+                alignItems: 'flex-start',
                 textAlign: 'left',
                 padding: '12px 14px',
                 borderRadius: '8px',
-                border:
-                  colorTheme === 'light'
-                    ? '3px solid var(--border-accent, var(--info))'
-                    : '2px solid var(--border-secondary)',
+                border: selectedBorder2(colorTheme === 'light', 'info'),
                 background: colorTheme === 'light' ? 'var(--bg-tertiary)' : 'var(--bg-secondary)',
                 color: 'var(--text-primary)',
                 cursor: 'pointer',
               }}
             >
-              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.settings.light}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
-                {t.settings.lightSub}
+              <SettingsRadioIcon selected={colorTheme === 'light'} accent="info" />
+              <div>
+                <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.settings.light}</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                  {t.settings.lightSub}
+                </div>
               </div>
             </button>
           </div>
@@ -512,12 +562,13 @@ const SettingsPage: React.FC = () => {
               onClick={() => choosePaperOrLive(true)}
               disabled={modeLoading || !authAlpacaConfigured}
               style={{
+                display: 'flex',
+                gap: 12,
+                alignItems: 'flex-start',
                 textAlign: 'left',
                 padding: '12px 14px',
                 borderRadius: '8px',
-                border: authAlpacaPaperTrading
-                  ? '3px solid var(--border-accent, var(--info))'
-                  : '2px solid var(--border-secondary)',
+                border: selectedBorder2(authAlpacaPaperTrading, 'info'),
                 background: authAlpacaPaperTrading
                   ? 'var(--bg-tertiary, rgba(56,132,255,0.12))'
                   : 'var(--bg-secondary)',
@@ -525,9 +576,12 @@ const SettingsPage: React.FC = () => {
                 cursor: modeLoading || !authAlpacaConfigured ? 'not-allowed' : 'pointer',
               }}
             >
-              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.settings.paperMoney}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px', lineHeight: 1.35 }}>
-                {t.settings.paperSub}
+              <SettingsRadioIcon selected={authAlpacaPaperTrading} accent="info" />
+              <div>
+                <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.settings.paperMoney}</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px', lineHeight: 1.35 }}>
+                  {t.settings.paperSub}
+                </div>
               </div>
             </button>
             <button
@@ -537,12 +591,13 @@ const SettingsPage: React.FC = () => {
               onClick={() => choosePaperOrLive(false)}
               disabled={modeLoading || !authAlpacaConfigured}
               style={{
+                display: 'flex',
+                gap: 12,
+                alignItems: 'flex-start',
                 textAlign: 'left',
                 padding: '12px 14px',
                 borderRadius: '8px',
-                border: !authAlpacaPaperTrading
-                  ? '3px solid var(--border-accent, var(--loss))'
-                  : '2px solid var(--border-secondary)',
+                border: selectedBorder2(!authAlpacaPaperTrading, 'loss'),
                 background: !authAlpacaPaperTrading
                   ? 'var(--bg-tertiary, rgba(239,68,68,0.10))'
                   : 'var(--bg-secondary)',
@@ -550,9 +605,12 @@ const SettingsPage: React.FC = () => {
                 cursor: modeLoading || !authAlpacaConfigured ? 'not-allowed' : 'pointer',
               }}
             >
-              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.settings.realMoney}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px', lineHeight: 1.35 }}>
-                {t.settings.realSub}
+              <SettingsRadioIcon selected={!authAlpacaPaperTrading} accent="loss" />
+              <div>
+                <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.settings.realMoney}</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px', lineHeight: 1.35 }}>
+                  {t.settings.realSub}
+                </div>
               </div>
             </button>
           </div>
@@ -703,12 +761,13 @@ const SettingsPage: React.FC = () => {
                   onClick={() => chooseScale(opt.id)}
                   disabled={scaleLoading || !authAlpacaPaperTrading}
                   style={{
+                    display: 'flex',
+                    gap: 10,
+                    alignItems: 'flex-start',
                     textAlign: 'left',
                     padding: '10px 12px',
                     borderRadius: '8px',
-                    border: selected
-                      ? '3px solid var(--border-accent, var(--info))'
-                      : '2px solid var(--border-secondary)',
+                    border: selectedBorder2(selected, 'info'),
                     background: selected ? 'var(--bg-tertiary, rgba(56,132,255,0.10))' : 'var(--bg-secondary)',
                     color: 'inherit',
                     cursor: scaleLoading || !authAlpacaPaperTrading ? 'not-allowed' : 'pointer',
@@ -716,9 +775,12 @@ const SettingsPage: React.FC = () => {
                     transition: 'border-color 120ms, background 120ms',
                   }}
                 >
-                  <div style={{ fontSize: '13px', fontWeight: 600 }}>{opt.title}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px', lineHeight: 1.3 }}>
-                    {opt.caption}
+                  <SettingsRadioIcon selected={selected} accent="info" />
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 600 }}>{opt.title}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px', lineHeight: 1.3 }}>
+                      {opt.caption}
+                    </div>
                   </div>
                 </button>
               );
