@@ -116,9 +116,9 @@
   --chart-axis-label: #64748b;
   --chart-loading-bg: rgba(6, 10, 19, 0.82);
 
-  /* Agent: AI message bubble (light gray on dark canvas) */
-  --agent-ai-bubble-bg: rgba(226, 232, 240, 0.14);
-  --agent-ai-bubble-border: rgba(148, 163, 184, 0.22);
+  /* Agent: AI message bubble (very light gray on dark canvas) */
+  --agent-ai-bubble-bg: rgba(248, 250, 252, 0.07);
+  --agent-ai-bubble-border: rgba(148, 163, 184, 0.12);
 }
 
 /* Korean UI — use Noto Sans (KR) for Hangul; English and numerals use Inter / JetBrains Mono first in the stack */
@@ -190,8 +190,8 @@ html[data-locale='ko'] body {
   --chart-axis-label: #64748b;
   --chart-loading-bg: rgba(241, 245, 249, 0.92);
 
-  --agent-ai-bubble-bg: #e2e8f0;
-  --agent-ai-bubble-border: rgba(15, 23, 42, 0.08);
+  --agent-ai-bubble-bg: #f8fafc;
+  --agent-ai-bubble-border: rgba(15, 23, 42, 0.05);
 }
 
 [data-theme="light"] ::selection {
