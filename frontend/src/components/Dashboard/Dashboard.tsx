@@ -66,7 +66,11 @@ const Dashboard: React.FC = () => {
     activePlaybooks,
     manualPlaybooks,
     botDailyTrades,
+    colorTheme,
   } = useAppStore();
+
+  const regimeDivider =
+    colorTheme === 'light' ? '1px solid rgba(15, 23, 42, 0.16)' : '1px solid rgba(255, 255, 255, 0.12)';
 
   const strategyBanner = useMemo(() => {
     const mode = playbookAuto ? 'AUTO' : 'MANUAL';
@@ -229,7 +233,7 @@ const Dashboard: React.FC = () => {
                 gap: '8px', 
                 marginTop: '12px',
                 paddingTop: '12px',
-                borderTop: '1px solid rgba(255,255,255,0.08)'
+                borderTop: regimeDivider,
               }}>
                 {Object.entries((regimeData as any).market_scores).map(([key, val]) => {
                   const score = Number(val);
@@ -257,7 +261,13 @@ const Dashboard: React.FC = () => {
 
             {/* Focus Sectors & Symbols */}
             {(regimeData as any).focus_symbols && (
-              <div style={{ marginTop: '4px' }}>
+              <div
+                style={{
+                  marginTop: '12px',
+                  paddingTop: '12px',
+                  borderTop: regimeDivider,
+                }}
+              >
                 <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '6px' }}>
                   {d.focusSectors} <strong style={{ color: 'var(--text-secondary)' }}>{((regimeData as any).focus_sectors || []).join(', ')}</strong>
                 </div>
