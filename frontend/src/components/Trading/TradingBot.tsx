@@ -602,13 +602,13 @@ const TradingBot: React.FC = () => {
                 </label>
                 <input
                   type="range"
+                  className="risk-range-input risk-range--maxpos"
                   min={5}
                   max={25}
                   step={1}
                   value={effectiveRisk.maxPositionSize}
                   disabled={riskControlLocked}
                   onChange={(e) => setRisk((s) => ({ ...s, maxPositionSize: parseInt(e.target.value, 10) }))}
-                  style={{ width: '100%', accentColor: 'var(--accent-primary)' }}
                 />
               </div>
 
@@ -627,13 +627,13 @@ const TradingBot: React.FC = () => {
                 </label>
                 <input
                   type="range"
+                  className="risk-range-input risk-range--stop"
                   min={0.1}
                   max={2.0}
                   step={0.05}
                   value={effectiveRisk.stopLossPercent}
                   disabled={riskControlLocked}
                   onChange={(e) => setRisk((s) => ({ ...s, stopLossPercent: parseFloat(e.target.value) }))}
-                  style={{ width: '100%', accentColor: 'var(--loss)' }}
                 />
               </div>
 
@@ -652,13 +652,13 @@ const TradingBot: React.FC = () => {
                 </label>
                 <input
                   type="range"
+                  className="risk-range-input risk-range--take"
                   min={0.2}
                   max={5.0}
                   step={0.05}
                   value={effectiveRisk.takeProfitPercent}
                   disabled={riskControlLocked}
                   onChange={(e) => setRisk((s) => ({ ...s, takeProfitPercent: parseFloat(e.target.value) }))}
-                  style={{ width: '100%', accentColor: 'var(--profit)' }}
                 />
               </div>
 
