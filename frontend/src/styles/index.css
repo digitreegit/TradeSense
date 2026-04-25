@@ -1335,8 +1335,8 @@ body {
   border-radius: var(--btn-radius-sm);
 }
 
-/* Page cards (e.g. dashboard "Start"/"trading bot"): same --btn-primary-bg as trading + chart CTA */
-.page-enter .card .btn.btn-primary {
+/* Main pages (page-enter): all primary buttons — dashboard, settings (e.g. save alerts), chart, etc. */
+.page-enter .btn.btn-primary {
   background: var(--btn-primary-bg);
   color: #fff;
 }
