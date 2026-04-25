@@ -91,6 +91,15 @@ const SettingsPage: React.FC = () => {
     setAppLocale,
   } = useAppStore();
 
+  /** English: all-caps section subheads (same as Telegram / LIVE ACCOUNT). Korean: keep sentence-case titles. */
+  const sectionSubheadingStyle: React.CSSProperties = useMemo(
+    () =>
+      appLocale === 'en'
+        ? { ...settingsSectionLabel, margin: '0 0 8px 0' }
+        : { ...settingsSectionTitleStyle },
+    [appLocale],
+  );
+
   const scaleOptions = useMemo(
     () =>
       [
@@ -351,7 +360,7 @@ const SettingsPage: React.FC = () => {
         <h2 style={{ fontSize: '18px', marginBottom: '8px' }}>{t.settings.settingsTitle}</h2>
 
         <div style={{ marginBottom: '28px', paddingBottom: '24px', borderBottom: '1px solid var(--border-secondary)' }}>
-          <label style={settingsSectionTitleStyle}>
+          <label style={sectionSubheadingStyle}>
             {t.settings.languageLabel}
           </label>
           <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '12px', lineHeight: 1.5 }}>
@@ -418,7 +427,7 @@ const SettingsPage: React.FC = () => {
         </div>
 
         <div style={{ marginBottom: '28px', paddingBottom: '24px', borderBottom: '1px solid var(--border-secondary)' }}>
-          <label style={settingsSectionTitleStyle}>
+          <label style={sectionSubheadingStyle}>
             {t.settings.appearanceLabel}
           </label>
           <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '12px', lineHeight: 1.5 }}>
@@ -484,7 +493,7 @@ const SettingsPage: React.FC = () => {
           </div>
         </div>
 
-        <h3 style={settingsSectionTitleStyle}>
+        <h3 style={sectionSubheadingStyle}>
           {t.settings.brokerSectionTitle}
         </h3>
         <p style={{ fontSize: '13px', color: 'var(--text-tertiary)', marginBottom: '20px', lineHeight: 1.5 }}>
@@ -542,7 +551,7 @@ const SettingsPage: React.FC = () => {
             marginBottom: '8px',
           }}
         >
-          <label style={settingsSectionTitleStyle}>
+          <label style={sectionSubheadingStyle}>
             {t.settings.tradingMode}
           </label>
           <p
@@ -716,7 +725,7 @@ const SettingsPage: React.FC = () => {
 
         {authAlpacaPaperTrading && (
           <div style={{ marginTop: '32px' }}>
-            <label style={settingsSectionTitleStyle}>
+            <label style={sectionSubheadingStyle}>
               {t.settings.capitalScale}
             </label>
             <p
