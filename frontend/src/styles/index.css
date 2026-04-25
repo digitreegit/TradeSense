@@ -817,8 +817,10 @@ body {
 }
 
 .chart-timeframe button.active {
-  background: var(--accent-primary-dim);
-  color: var(--accent-primary);
+  /* Match .btn-primary / trading bot: darker in dark mode, strong contrast for label */
+  background: var(--btn-primary-bg);
+  color: #fff;
+  box-shadow: var(--shadow-sm);
 }
 
 .chart-symbol-search {
