@@ -105,7 +105,6 @@ const SettingsPage: React.FC = () => {
   const choiceCardBg = useMemo(
     () => ({
       unselected: isLight ? '#f8fafc' : 'var(--bg-secondary)',
-      selectedNeutral: isLight ? '#e2e8f0' : 'var(--bg-tertiary)',
       selectedInfo: isLight ? 'rgba(59, 130, 246, 0.14)' : 'var(--bg-tertiary, rgba(56,132,255,0.12))',
       selectedInfoDim: isLight ? 'rgba(59, 130, 246, 0.11)' : 'var(--bg-tertiary, rgba(56,132,255,0.10))',
       selectedLoss: isLight ? 'rgba(239, 68, 68, 0.10)' : 'var(--bg-tertiary, rgba(239,68,68,0.10))',
@@ -377,7 +376,7 @@ const SettingsPage: React.FC = () => {
                 padding: '12px 14px',
                 borderRadius: 'var(--btn-radius)',
                 border: selectedBorder2(appLocale === 'en', 'info'),
-                background: appLocale === 'en' ? choiceCardBg.selectedNeutral : choiceCardBg.unselected,
+                background: appLocale === 'en' ? choiceCardBg.selectedInfo : choiceCardBg.unselected,
                 color: 'var(--text-primary)',
                 cursor: 'pointer',
               }}
@@ -403,7 +402,7 @@ const SettingsPage: React.FC = () => {
                 padding: '12px 14px',
                 borderRadius: 'var(--btn-radius)',
                 border: selectedBorder2(appLocale === 'ko', 'info'),
-                background: appLocale === 'ko' ? choiceCardBg.selectedNeutral : choiceCardBg.unselected,
+                background: appLocale === 'ko' ? choiceCardBg.selectedInfo : choiceCardBg.unselected,
                 color: 'var(--text-primary)',
                 cursor: 'pointer',
               }}
@@ -444,7 +443,7 @@ const SettingsPage: React.FC = () => {
                 padding: '12px 14px',
                 borderRadius: 'var(--btn-radius)',
                 border: selectedBorder2(colorTheme === 'dark', 'info'),
-                background: colorTheme === 'dark' ? choiceCardBg.selectedNeutral : choiceCardBg.unselected,
+                background: colorTheme === 'dark' ? choiceCardBg.selectedInfo : choiceCardBg.unselected,
                 color: 'var(--text-primary)',
                 cursor: 'pointer',
               }}
@@ -470,7 +469,7 @@ const SettingsPage: React.FC = () => {
                 padding: '12px 14px',
                 borderRadius: 'var(--btn-radius)',
                 border: selectedBorder2(colorTheme === 'light', 'info'),
-                background: colorTheme === 'light' ? choiceCardBg.selectedNeutral : choiceCardBg.unselected,
+                background: colorTheme === 'light' ? choiceCardBg.selectedInfo : choiceCardBg.unselected,
                 color: 'var(--text-primary)',
                 cursor: 'pointer',
               }}
