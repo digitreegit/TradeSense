@@ -293,7 +293,7 @@ body {
 
 .btn-start {
   padding: 10px 16px;
-  background: linear-gradient(135deg, #059669 0%, #10b981 50%, #3b82f6 100%);
+  background: var(--accent-primary);
   color: white;
   border: none;
   border-radius: var(--btn-radius);
@@ -305,7 +305,7 @@ body {
   justify-content: center;
   gap: 12px;
   transition: all 0.2s ease;
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+  box-shadow: 0 4px 12px var(--accent-primary-dim);
 }
 
 .btn-start:hover {
@@ -1013,7 +1013,7 @@ body {
   height: 40px;
   border-radius: var(--btn-radius);
   border: none;
-  background: var(--gradient-primary);
+  background: var(--accent-primary);
   color: white;
   cursor: pointer;
   display: flex;
@@ -1272,7 +1272,7 @@ body {
 }
 
 .btn-primary {
-  background: var(--gradient-primary);
+  background: var(--accent-primary);
   color: white;
   box-shadow: var(--shadow-sm);
 }
@@ -1730,7 +1730,7 @@ button {
   height: 44px;
   border: none;
   border-radius: var(--btn-radius);
-  background: var(--gradient-primary);
+  background: var(--accent-primary);
   color: #fff;
   font-size: 16px;
   font-weight: 700;
