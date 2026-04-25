@@ -45,6 +45,8 @@ const settingsSectionLabel: React.CSSProperties = {
 
 const SettingsRadioIcon: React.FC<{ selected: boolean; accent: 'info' | 'loss' }> = ({ selected, accent }) => {
   const ring = accent === 'loss' ? 'var(--loss)' : 'var(--accent-primary)';
+  /** Unselected: transparent so the card surface shows; border visible on dark (not a black disc). */
+  const ringUnselected = 'var(--text-tertiary)';
   return (
     <span
       aria-hidden
@@ -54,12 +56,12 @@ const SettingsRadioIcon: React.FC<{ selected: boolean; accent: 'info' | 'loss' }
         minWidth: 18,
         marginTop: 2,
         borderRadius: '50%',
-        border: `2px solid ${selected ? ring : 'var(--border-secondary)'}`,
+        border: `2px solid ${selected ? ring : ringUnselected}`,
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
         flexShrink: 0,
-        background: 'var(--bg-primary)',
+        background: 'transparent',
       }}
     >
       {selected && (
