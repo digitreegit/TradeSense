@@ -523,7 +523,14 @@ const SettingsPage: React.FC = () => {
         {err && <p style={{ color: 'var(--loss)', fontSize: '13px', marginBottom: '8px' }}>{err}</p>}
         {msg && <p style={{ color: 'var(--profit)', fontSize: '13px', marginBottom: '8px' }}>{msg}</p>}
 
-        <div style={{ marginTop: '8px', marginBottom: '8px' }}>
+        <div
+          style={{
+            marginTop: '28px',
+            paddingTop: '24px',
+            borderTop: '1px solid var(--border-secondary)',
+            marginBottom: '8px',
+          }}
+        >
           <label style={settingsSectionTitleStyle}>
             {t.settings.tradingMode}
           </label>
@@ -764,7 +771,13 @@ const SettingsPage: React.FC = () => {
           )}
         </div>
 
-        <div style={{ marginTop: '36px' }}>
+        <div
+          style={{
+            marginTop: '28px',
+            paddingTop: '24px',
+            borderTop: '1px solid var(--border-secondary)',
+          }}
+        >
           <label style={settingsSectionLabel}>
             {t.settings.telegram}
           </label>
