@@ -22,4 +22,5 @@ export function persistLocale(locale: AppLocale): void {
 
 export function applyLocaleToDocument(locale: AppLocale): void {
   document.documentElement.lang = locale === 'ko' ? 'ko' : 'en';
+  document.documentElement.setAttribute('data-locale', locale);
 }

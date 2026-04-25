@@ -68,7 +68,7 @@
 
   /* Typography */
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'Inter', 'JetBrains Mono', ui-monospace, monospace;
 
   /* Font sizes */
   --text-xs:   12px;
@@ -111,6 +111,16 @@
   --chart-grid: rgba(148, 163, 184, 0.08);
   --chart-axis-label: #64748b;
   --chart-loading-bg: rgba(6, 10, 19, 0.82);
+}
+
+/* Korean UI — use Noto Sans (KR) for Hangul; English and numerals use Inter / JetBrains Mono first in the stack */
+html[data-locale='ko'] {
+  --font-sans: 'Noto Sans KR', 'Inter', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  --font-mono: 'Noto Sans KR', 'JetBrains Mono', 'Inter', ui-monospace, monospace;
+}
+
+html[data-locale='ko'] body {
+  letter-spacing: 0;
 }
 
 /* Light theme — toggled via Settings (data-theme on <html>) */
