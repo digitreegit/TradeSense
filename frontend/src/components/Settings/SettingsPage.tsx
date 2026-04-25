@@ -18,10 +18,11 @@ type LiveSummary = {
 const fmtUsd = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(n);
 
-const selectedBorder2 = (selected: boolean, accent: 'info' | 'loss') =>
-  selected
-    ? `2px solid var(--border-accent, var(--${accent === 'loss' ? 'loss' : 'info'}))`
-    : '2px solid var(--border-secondary)';
+/** Match `.strategy-card` / `.strategy-card.active` (Trading strategies panel). */
+const strategyChoiceBorder = (selected: boolean, variant: 'accent' | 'loss' = 'accent') => {
+  if (!selected) return '1px solid var(--border-primary)';
+  return variant === 'loss' ? '1px solid var(--loss)' : '1px solid var(--accent-primary)';
+};
 
 /** Section titles (Language, …) — match "Broker & API" / 브로커 · API heading */
 const settingsSectionTitleStyle: React.CSSProperties = {
@@ -43,7 +44,7 @@ const settingsSectionLabel: React.CSSProperties = {
 };
 
 const SettingsRadioIcon: React.FC<{ selected: boolean; accent: 'info' | 'loss' }> = ({ selected, accent }) => {
-  const ring = accent === 'loss' ? 'var(--loss)' : 'var(--info)';
+  const ring = accent === 'loss' ? 'var(--loss)' : 'var(--accent-primary)';
   return (
     <span
       aria-hidden
@@ -100,16 +101,14 @@ const SettingsPage: React.FC = () => {
     [t],
   );
 
-  /** Light mode: very light gray card surfaces; dark keeps theme tokens. */
-  const isLight = colorTheme === 'light';
+  /** Match Trading strategies `.strategy-card` (default / `.active`). */
   const choiceCardBg = useMemo(
     () => ({
-      unselected: isLight ? '#f8fafc' : 'var(--bg-secondary)',
-      selectedInfo: isLight ? 'rgba(59, 130, 246, 0.14)' : 'var(--bg-tertiary, rgba(56,132,255,0.12))',
-      selectedInfoDim: isLight ? 'rgba(59, 130, 246, 0.11)' : 'var(--bg-tertiary, rgba(56,132,255,0.10))',
-      selectedLoss: isLight ? 'rgba(239, 68, 68, 0.10)' : 'var(--bg-tertiary, rgba(239,68,68,0.10))',
+      unselected: 'var(--bg-card)',
+      selectedAccent: 'var(--accent-primary-dim)',
+      selectedLoss: 'var(--loss-dim)',
     }),
-    [isLight],
+    [],
   );
 
   const chooseTheme = (next: ColorTheme) => {
@@ -375,8 +374,8 @@ const SettingsPage: React.FC = () => {
                 textAlign: 'left',
                 padding: '12px 14px',
                 borderRadius: 'var(--btn-radius)',
-                border: selectedBorder2(appLocale === 'en', 'info'),
-                background: appLocale === 'en' ? choiceCardBg.selectedInfo : choiceCardBg.unselected,
+                border: strategyChoiceBorder(appLocale === 'en', 'accent'),
+                background: appLocale === 'en' ? choiceCardBg.selectedAccent : choiceCardBg.unselected,
                 color: 'var(--text-primary)',
                 cursor: 'pointer',
               }}
@@ -401,8 +400,8 @@ const SettingsPage: React.FC = () => {
                 textAlign: 'left',
                 padding: '12px 14px',
                 borderRadius: 'var(--btn-radius)',
-                border: selectedBorder2(appLocale === 'ko', 'info'),
-                background: appLocale === 'ko' ? choiceCardBg.selectedInfo : choiceCardBg.unselected,
+                border: strategyChoiceBorder(appLocale === 'ko', 'accent'),
+                background: appLocale === 'ko' ? choiceCardBg.selectedAccent : choiceCardBg.unselected,
                 color: 'var(--text-primary)',
                 cursor: 'pointer',
               }}
@@ -442,8 +441,8 @@ const SettingsPage: React.FC = () => {
                 textAlign: 'left',
                 padding: '12px 14px',
                 borderRadius: 'var(--btn-radius)',
-                border: selectedBorder2(colorTheme === 'dark', 'info'),
-                background: colorTheme === 'dark' ? choiceCardBg.selectedInfo : choiceCardBg.unselected,
+                border: strategyChoiceBorder(colorTheme === 'dark', 'accent'),
+                background: colorTheme === 'dark' ? choiceCardBg.selectedAccent : choiceCardBg.unselected,
                 color: 'var(--text-primary)',
                 cursor: 'pointer',
               }}
@@ -468,8 +467,8 @@ const SettingsPage: React.FC = () => {
                 textAlign: 'left',
                 padding: '12px 14px',
                 borderRadius: 'var(--btn-radius)',
-                border: selectedBorder2(colorTheme === 'light', 'info'),
-                background: colorTheme === 'light' ? choiceCardBg.selectedInfo : choiceCardBg.unselected,
+                border: strategyChoiceBorder(colorTheme === 'light', 'accent'),
+                background: colorTheme === 'light' ? choiceCardBg.selectedAccent : choiceCardBg.unselected,
                 color: 'var(--text-primary)',
                 cursor: 'pointer',
               }}
@@ -574,8 +573,8 @@ const SettingsPage: React.FC = () => {
                 textAlign: 'left',
                 padding: '12px 14px',
                 borderRadius: 'var(--btn-radius)',
-                border: selectedBorder2(authAlpacaPaperTrading, 'info'),
-                background: authAlpacaPaperTrading ? choiceCardBg.selectedInfo : choiceCardBg.unselected,
+                border: strategyChoiceBorder(authAlpacaPaperTrading, 'accent'),
+                background: authAlpacaPaperTrading ? choiceCardBg.selectedAccent : choiceCardBg.unselected,
                 color: 'var(--text-primary)',
                 cursor: modeLoading || !authAlpacaConfigured ? 'not-allowed' : 'pointer',
               }}
@@ -601,7 +600,7 @@ const SettingsPage: React.FC = () => {
                 textAlign: 'left',
                 padding: '12px 14px',
                 borderRadius: 'var(--btn-radius)',
-                border: selectedBorder2(!authAlpacaPaperTrading, 'loss'),
+                border: strategyChoiceBorder(!authAlpacaPaperTrading, 'loss'),
                 background: !authAlpacaPaperTrading ? choiceCardBg.selectedLoss : choiceCardBg.unselected,
                 color: 'var(--text-primary)',
                 cursor: modeLoading || !authAlpacaConfigured ? 'not-allowed' : 'pointer',
@@ -756,8 +755,8 @@ const SettingsPage: React.FC = () => {
                       textAlign: 'left',
                       padding: '10px 12px',
                       borderRadius: 'var(--btn-radius)',
-                      border: selectedBorder2(selected, 'info'),
-                      background: selected ? choiceCardBg.selectedInfoDim : choiceCardBg.unselected,
+                      border: strategyChoiceBorder(selected, 'accent'),
+                      background: selected ? choiceCardBg.selectedAccent : choiceCardBg.unselected,
                       color: 'inherit',
                       cursor: scaleLoading ? 'not-allowed' : 'pointer',
                       transition: 'border-color 120ms, background 120ms',
