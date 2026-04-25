@@ -122,6 +122,9 @@
 
   /* Settings: unselected choice radio ring — visible on dark cards */
   --settings-choice-radio-off: rgba(203, 213, 225, 0.42);
+
+  /* Primary solid buttons (start bot, risk tier, send): darker in dark mode for white label contrast */
+  --btn-primary-bg: #047857;
 }
 
 /* Korean UI — use Noto Sans (KR) for Hangul; English and numerals use Inter / JetBrains Mono first in the stack */
@@ -198,6 +201,8 @@ html[data-locale='ko'] body {
 
   /* Settings: softer ring on light cards (was too heavy vs text-tertiary) */
   --settings-choice-radio-off: rgba(15, 23, 42, 0.12);
+
+  --btn-primary-bg: var(--accent-primary);
 }
 
 [data-theme="light"] ::selection {
@@ -306,7 +311,7 @@ body {
 
 .btn-start {
   padding: 10px 16px;
-  background: var(--accent-primary);
+  background: var(--btn-primary-bg);
   color: white;
   border: none;
   border-radius: var(--btn-radius);
@@ -1026,7 +1031,7 @@ body {
   height: 40px;
   border-radius: var(--btn-radius);
   border: none;
-  background: var(--accent-primary);
+  background: var(--btn-primary-bg);
   color: white;
   cursor: pointer;
   display: flex;
@@ -1285,7 +1290,7 @@ body {
 }
 
 .btn-primary {
-  background: var(--accent-primary);
+  background: var(--btn-primary-bg);
   color: white;
   box-shadow: var(--shadow-sm);
 }
@@ -1743,7 +1748,7 @@ button {
   height: 44px;
   border: none;
   border-radius: var(--btn-radius);
-  background: var(--accent-primary);
+  background: var(--btn-primary-bg);
   color: #fff;
   font-size: 16px;
   font-weight: 700;
