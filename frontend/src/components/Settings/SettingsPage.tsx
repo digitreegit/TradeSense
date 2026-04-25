@@ -838,10 +838,10 @@ const SettingsPage: React.FC = () => {
               color: 'inherit',
             }}
           />
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '4px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '4px' }}>
             <button
               type="button"
-              className="btn-start"
+              className="btn btn-primary btn-sm"
               onClick={() => void saveNotificationPrefs()}
               disabled={notifSaving}
             >
@@ -849,7 +849,7 @@ const SettingsPage: React.FC = () => {
             </button>
             <button
               type="button"
-              className="btn btn-secondary"
+              className="btn btn-secondary btn-sm"
               onClick={() => void sendTestNotification()}
               disabled={notifLoading || !notifyTg}
             >
