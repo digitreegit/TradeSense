@@ -268,27 +268,70 @@ const TradingBot: React.FC = () => {
               <span className="card-title">
                 <CheckBadgeIcon className="card-icon" /> Trading Strategies
               </span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{
-                  fontSize: '11px',
-                  color: 'var(--text-tertiary)',
-                  fontFamily: 'var(--font-mono)',
-                }}>
-                  {playbookAuto ? 'ENGINE DECIDES' : 'MANUAL'}
+              <div
+                style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}
+                title={
+                  playbookAuto
+                    ? 'Auto: the engine picks active playbooks from time-of-day and regime. Tick strategies below to allow them when conditions match.'
+                    : 'Manual: only the ticked playbooks below will run.'
+                }
+              >
+                <span
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    color: playbookAuto ? 'var(--text-tertiary)' : 'var(--text-primary)',
+                  }}
+                >
+                  Manual
                 </span>
                 <button
-                  className={playbookAuto ? 'btn-start' : 'btn btn-secondary btn-sm'}
+                  type="button"
+                  role="switch"
+                  aria-checked={playbookAuto}
+                  aria-label={playbookAuto ? 'Playbook mode: Auto' : 'Playbook mode: Manual'}
                   onClick={handleToggleAuto}
                   disabled={savingPlaybooks}
-                  style={{ minWidth: '82px', justifyContent: 'center' }}
-                  title={
-                    playbookAuto
-                      ? 'AUTO: engine picks active playbooks by time-of-day and regime'
-                      : 'MANUAL: only the ticked playbooks will run'
-                  }
+                  style={{
+                    position: 'relative',
+                    width: 44,
+                    height: 24,
+                    flexShrink: 0,
+                    borderRadius: 12,
+                    border: '1px solid var(--text-muted)',
+                    padding: 0,
+                    cursor: savingPlaybooks ? 'not-allowed' : 'pointer',
+                    opacity: savingPlaybooks ? 0.5 : 1,
+                    background: playbookAuto
+                      ? 'rgba(59, 130, 246, 0.22)'
+                      : 'var(--bg-tertiary)',
+                    transition: 'background 0.2s ease',
+                  }}
                 >
-                  {playbookAuto ? 'AUTO ✓' : 'AUTO'}
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: 2,
+                      left: playbookAuto ? 24 : 2,
+                      width: 18,
+                      height: 18,
+                      borderRadius: '50%',
+                      background: 'var(--bg-secondary)',
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
+                      transition: 'left 0.2s ease',
+                    }}
+                  />
                 </button>
+                <span
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    color: playbookAuto ? 'var(--text-primary)' : 'var(--text-tertiary)',
+                    minWidth: '36px',
+                  }}
+                >
+                  Auto
+                </span>
               </div>
             </div>
             <div style={{ padding: 'var(--space-lg)' }}>
