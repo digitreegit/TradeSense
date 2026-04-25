@@ -239,8 +239,8 @@ const Dashboard: React.FC = () => {
                 display: 'grid', 
                 gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', 
                 gap: '8px', 
-                marginTop: '12px',
-                paddingTop: '12px',
+                marginTop: '4px',
+                paddingTop: '6px',
                 borderTop: regimeDivider,
               }}>
                 {Object.entries((regimeData as any).market_scores).map(([key, val]) => {
@@ -271,10 +271,10 @@ const Dashboard: React.FC = () => {
             {(regimeData as any).focus_symbols && (
               <div
                 style={{
-                  marginTop: '12px',
+                  marginTop: (regimeData as any).market_scores ? '4px' : '6px',
                 }}
               >
-                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '6px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '4px' }}>
                   {d.focusSectors} <strong style={{ color: 'var(--text-secondary)' }}>{((regimeData as any).focus_sectors || []).join(', ')}</strong>
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
