@@ -48,7 +48,26 @@ export type UiStrings = {
   };
   history: { title: string; orders: (n: string) => string; emptyTitle: string; emptyText: string; thDate: string; thSymbol: string; thSide: string; thType: string; thQty: string; thPrice: string; thStatus: string; };
   chart: { loading: string; noData: string; };
-  agent: { title: string; analyzeSym: (s: string) => string; marketOverview: string; tradingSignal: string; portfolioReview: string; riskReport: string; analyzing: string; placeholder: string; send: string; };
+  agent: {
+    title: string;
+    analyzeSym: (s: string) => string;
+    marketOverview: string;
+    tradingSignal: string;
+    portfolioReview: string;
+    riskReport: string;
+    analyzing: string;
+    placeholder: string;
+    send: string;
+    welcomeMessage: string;
+    quickMsgAnalyze: (s: string) => string;
+    quickMsgMarket: string;
+    quickMsgSignal: string;
+    quickMsgPortfolio: string;
+    quickMsgRisk: string;
+    noResponse: string;
+    quotaError: string;
+    serverError: (backendHint: string) => string;
+  };
   settings: {
     settingsTitle: string; languageLabel: string; languageDescription: string; english: string; korean: string; languageEnglishSub: string; languageKoreanSub: string;
     appearanceLabel: string; appearanceDescription: string; dark: string; darkSub: string; light: string; lightSub: string; brokerSectionTitle: string;
@@ -117,7 +136,33 @@ const en: UiStrings = {
   },
   history: { title: 'Trade history', orders: (n) => (n === '1' ? '1 order' : `${n} orders`), emptyTitle: 'No trade history', emptyText: 'Executions will appear after the bot trades in paper mode.', thDate: 'Date', thSymbol: 'Symbol', thSide: 'Side', thType: 'Type', thQty: 'Qty', thPrice: 'Price', thStatus: 'Status' },
   chart: { loading: 'Loading chart data from Alpaca…', noData: 'No chart data for this symbol' },
-  agent: { title: 'TradeSense AI agent', analyzeSym: (s) => `Analyze ${s}`, marketOverview: 'Market overview', tradingSignal: 'Trading signal', portfolioReview: 'Portfolio review', riskReport: 'Risk report', analyzing: 'Analyzing…', placeholder: 'Ask about stocks, strategies, or the market…', send: 'Send' },
+  agent: {
+    title: 'TradeSense AI agent',
+    analyzeSym: (s) => `Analyze ${s}`,
+    marketOverview: 'Market overview',
+    tradingSignal: 'Trading signal',
+    portfolioReview: 'Portfolio review',
+    riskReport: 'Risk report',
+    analyzing: 'Analyzing…',
+    placeholder: 'Ask about stocks, strategies, or the market…',
+    send: 'Send',
+    welcomeMessage:
+      "Hi — I'm the TradeSense v3 micro-scalping agent. ⚡️\n\n**$3,000 cash account** — targeting **+1% per day** compounded.\n\nActive playbook ideas:\n• RSI oversold bounce scalps (5-min)\n• VWAP support / resistance breaks\n• AI-driven sector rotation (paid tier)",
+    quickMsgAnalyze: (s) => `Give a full analysis of ${s} in clear sections.`,
+    quickMsgMarket: 'Summarize current U.S. market conditions in brief bullet points.',
+    quickMsgSignal: 'What trading signals (if any) are worth attention right now? Be concise.',
+    quickMsgPortfolio: 'Review my portfolio allocation and key risks in plain language.',
+    quickMsgRisk: 'Give a short risk report: exposure, drawdown, and what to watch.',
+    noResponse: '⚠️ Could not generate a response.',
+    quotaError:
+      '⚠️ AI is temporarily rate-limited.\n\n' +
+      'The API quota or rate limit was hit. Try again in about a minute.\n\n' +
+      'Tip: if the trading bot is running, it also uses AI — pausing the bot can free capacity for chat.',
+    serverError: (h) =>
+      '⚠️ Cannot reach the server.\n\n' +
+      'Make sure the backend is running. Example:\n' +
+      h,
+  },
   settings: {
     settingsTitle: 'Settings', languageLabel: 'Language', languageDescription: 'Applies to the whole app in this browser.', english: 'English', korean: 'Korean', languageEnglishSub: 'English interface', languageKoreanSub: 'Korean interface',
     appearanceLabel: 'Appearance', appearanceDescription: 'Theme applies app-wide and is saved in this browser.', dark: 'Dark', darkSub: 'Default dashboard', light: 'Light', lightSub: 'Bright UI for daytime', brokerSectionTitle: 'Broker & API keys',
@@ -181,7 +226,38 @@ const ko: UiStrings = {
   },
   history: { title: '거래 내역', orders: (n) => `주문 ${n}건`, emptyTitle: '거래 없음', emptyText: '모의 매매로 봇이 체결하면 여기에 표시됩니다.', thDate: '일시', thSymbol: '심볼', thSide: '매매', thType: '유형', thQty: '수량', thPrice: '가격', thStatus: '상태' },
   chart: { loading: 'Alpaca에서 차트 불러오는 중…', noData: '이 심볼에 대한 데이터가 없습니다' },
-  agent: { title: 'TradeSense AI 에이전트', analyzeSym: (s) => `${s} 분석`, marketOverview: '시장 개요', tradingSignal: '매매 시그널', portfolioReview: '포트폴리오 점검', riskReport: '리스크 보고', analyzing: '분석 중…', placeholder: '종목, 전략, 시장에 대해 질문하세요…', send: '전송' },
+  agent: {
+    title: 'TradeSense AI 에이전트',
+    analyzeSym: (s) => `${s} 분석`,
+    marketOverview: '시장 개요',
+    tradingSignal: '매매 시그널',
+    portfolioReview: '포트폴리오 점검',
+    riskReport: '리스크 보고',
+    analyzing: '분석 중…',
+    placeholder: '종목, 전략, 시장에 대해 질문하세요…',
+    send: '전송',
+    welcomeMessage:
+      '안녕하세요. TradeSense v3 마이크로 스캘핑 에이전트입니다. ⚡️\n\n' +
+      '**$3,000 현금 계좌** — 목표는 복리 기준 **하루 +1%**에 가깝게 운용하는 것입니다.\n\n' +
+      '활용 가능한 전략 아이디어:\n' +
+      '• RSI 과매도 반등 스캘프 (5분봉)\n' +
+      '• VWAP 지지/저항 돌파\n' +
+      '• AI 기반 섹터 로테이션 (유료 티어)',
+    quickMsgAnalyze: (s) => `${s}에 대해 섹션별로 요약·분석해 주세요. (가격, 추세, 리스크)`,
+    quickMsgMarket: '미국 시장의 현재 흐름을 bullet로 짧게 요약해 주세요.',
+    quickMsgSignal: '지금 시점에 주목할 만한 매매 시그널이 있으면 짧게, 없으면 그 이유를 알려 주세요.',
+    quickMsgPortfolio: '제 포트폴리오 비중과 핵심 리스크를 쉬운 말로 점검해 주세요.',
+    quickMsgRisk: '짧은 리스크 보고: 노출, 낙폭, 주의할 점을 bullet로.',
+    noResponse: '⚠️ 응답을 생성하지 못했습니다.',
+    quotaError:
+      '⚠️ AI 요청이 일시적으로 제한됩니다.\n\n' +
+      'API 할당량이나 요청 제한에 걸렸을 수 있습니다. 약 1분 후에 다시 시도해 주세요.\n\n' +
+      '팁: 트레이딩 봇이 켜져 있으면 AI를 함께 씁니다. 봇을 잠시 멈추면 채팅이 더 원활할 수 있습니다.',
+    serverError: (h) =>
+      '⚠️ 서버에 연결할 수 없습니다.\n\n' +
+      '백엔드가 실행 중인지 확인하세요. 예:\n' +
+      h,
+  },
   settings: {
     settingsTitle: '설정', languageLabel: '언어', languageDescription: '이 브라우저에서 앱 전체에 적용됩니다.', english: 'English', korean: '한국어', languageEnglishSub: '영어', languageKoreanSub: '한국어', appearanceLabel: '화면', appearanceDescription: '테마는 앱 전체에 저장됩니다.', dark: '다크', darkSub: '기본 대시보드', light: '라이트', lightSub: '밝은 UI', brokerSectionTitle: '브로커 · API',
     connectIntro: 'Alpaca(모의·실) 계정을 연결하세요. 키는 암호화되어 저장됩니다. 모의 키:', paperLink: 'Alpaca 모의', liveLink: 'Alpaca 실거래', signedIn: '로그인', keysOnFile: ' · 키 저장됨', keysNotConfig: ' · 키 미설정', deleteKeys: '키 삭제', deleting: '삭제 중…',

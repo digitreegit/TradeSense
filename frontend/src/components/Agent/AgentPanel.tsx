@@ -13,6 +13,7 @@ const AgentPanel: React.FC = () => {
     agentLoading,
     setAgentLoading,
     selectedSymbol,
+    appLocale,
   } = useAppStore();
 
   const [input, setInput] = useState('');
@@ -25,11 +26,13 @@ const AgentPanel: React.FC = () => {
   const handleSend = async () => {
     if (!input.trim() || agentLoading) return;
 
-    const query = input.trim();
+    const raw = input.trim();
+    const queryForApi =
+      appLocale === 'ko' ? `다음에 한국어로 답하세요. 전문용어는 필요하면 괄호로 영어를 병기해도 됩니다.\n\n${raw}` : raw;
     const userMsg = {
       id: generateId(),
       role: 'user' as const,
-      content: query,
+      content: raw,
       timestamp: new Date().toISOString(),
     };
 
@@ -38,15 +41,12 @@ const AgentPanel: React.FC = () => {
     setAgentLoading(true);
 
     try {
-      const result = await api.chat(query) as { response: string };
-      let content = result.response || "⚠️ Could not generate a response.";
+      const result = await api.chat(queryForApi) as { response: string };
+      let content = result.response || a.noResponse;
       
       // Filter out raw API error dumps from Gemini quota issues
       if (content.includes('RESOURCE_EXHAUSTED') || content.includes('429') || content.includes('quota')) {
-        content = "⚠️ AI requests are temporarily limited.\n\n" +
-          "The Gemini API rate or quota limit was hit.\n" +
-          "Try again in about a minute.\n\n" +
-          "💡 TIP: If the Trading Bot is running it also uses AI — pause the bot for smoother chat.";
+        content = a.quotaError;
       }
       
       addAgentMessage({
@@ -60,7 +60,7 @@ const AgentPanel: React.FC = () => {
       addAgentMessage({
         id: generateId(),
         role: 'ai',
-        content: "⚠️ Cannot reach the server.\n\nMake sure the backend is running:\n`cd backend && python -m uvicorn app.main:app --reload`",
+        content: a.serverError('`cd backend && python -m uvicorn app.main:app --reload`'),
         timestamp: new Date().toISOString(),
       });
     } finally {
@@ -70,11 +70,11 @@ const AgentPanel: React.FC = () => {
 
   const quickActions = useMemo(
     () => [
-      { label: a.analyzeSym(selectedSymbol), msg: `Give a full analysis of ${selectedSymbol}` },
-      { label: a.marketOverview, msg: 'Summarize current market conditions' },
-      { label: a.tradingSignal, msg: 'Any trading signals right now?' },
-      { label: a.portfolioReview, msg: 'Review my portfolio' },
-      { label: a.riskReport, msg: 'Show a risk report' },
+      { label: a.analyzeSym(selectedSymbol), msg: a.quickMsgAnalyze(selectedSymbol) },
+      { label: a.marketOverview, msg: a.quickMsgMarket },
+      { label: a.tradingSignal, msg: a.quickMsgSignal },
+      { label: a.portfolioReview, msg: a.quickMsgPortfolio },
+      { label: a.riskReport, msg: a.quickMsgRisk },
     ],
     [a, selectedSymbol],
   );

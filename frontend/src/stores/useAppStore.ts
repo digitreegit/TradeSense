@@ -15,6 +15,7 @@ import type {
   ColorTheme,
 } from './types';
 import { applyLocaleToDocument, persistLocale, readStoredLocale } from '../locale/locale';
+import { getUiStrings } from '../locale/uiStrings';
 import { applyThemeToDocument, persistTheme, readStoredTheme } from '../theme/theme';
 
 interface AppState {
@@ -51,6 +52,7 @@ interface AppState {
 
   // AI Agent
   agentMessages: AgentMessage[];
+  setAgentMessages: (messages: AgentMessage[]) => void;
   addAgentMessage: (msg: AgentMessage) => void;
   agentLoading: boolean;
   setAgentLoading: (loading: boolean) => void;
@@ -155,7 +157,20 @@ export const useAppStore = create<AppState>((set) => ({
   setAppLocale: (locale) => {
     persistLocale(locale);
     applyLocaleToDocument(locale);
-    set({ appLocale: locale });
+    set((state) => {
+      const welcome = {
+        id: '1',
+        role: 'ai' as const,
+        content: getUiStrings(locale).agent.welcomeMessage,
+        timestamp: new Date().toISOString(),
+      };
+      const msgs = state.agentMessages;
+      const onlyDefaultWelcome = msgs.length === 1 && msgs[0].id === '1' && msgs[0].role === 'ai';
+      return {
+        appLocale: locale,
+        agentMessages: onlyDefaultWelcome ? [welcome] : msgs,
+      };
+    });
   },
 
   // Account - $3000 paper trading
@@ -211,15 +226,16 @@ export const useAppStore = create<AppState>((set) => ({
   })),
   setTradeLogs: (logs) => set({ tradeLogs: logs }),
 
-  // AI Agent
+  // AI Agent (welcome string follows readStoredLocale() at first load)
   agentMessages: [
     {
       id: '1',
       role: 'ai',
-      content: 'Hi — I\'m the TradeSense v3 micro-scalping agent. ⚡️\n\n**$3,000 cash account** — targeting **+1% per day** compounded.\n\nActive playbook ideas:\n• RSI oversold bounce scalps (5-min)\n• VWAP support / resistance breaks\n• AI-driven sector rotation (paid tier)',
+      content: getUiStrings(readStoredLocale()).agent.welcomeMessage,
       timestamp: new Date().toISOString(),
     },
   ],
+  setAgentMessages: (messages) => set({ agentMessages: messages }),
   addAgentMessage: (msg) => set((state) => ({
     agentMessages: [...state.agentMessages, msg],
   })),
