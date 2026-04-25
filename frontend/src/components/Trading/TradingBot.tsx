@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import { formatCurrency, formatPercent } from '../../utils/helpers';
 import api from '../../services/api';
@@ -108,7 +108,28 @@ const TradingBot: React.FC = () => {
     setManualPlaybooks,
     activePlaybooks,
     setActivePlaybooks,
+    colorTheme,
   } = useAppStore();
+
+  const isLight = colorTheme === 'light';
+  const playbookSwitchStyle = useMemo(() => {
+    if (isLight) {
+      return {
+        trackOff: 'rgba(0,0,0,0.1)',
+        trackOn: 'rgba(0,0,0,0.28)',
+        thumb: '#111827',
+        border: '1px solid rgba(0,0,0,0.35)',
+        thumbShadow: '0 1px 3px rgba(0,0,0,0.25)',
+      };
+    }
+    return {
+      trackOff: 'rgba(255,255,255,0.14)',
+      trackOn: 'rgba(255,255,255,0.32)',
+      thumb: '#f8fafc',
+      border: '1px solid rgba(255,255,255,0.4)',
+      thumbShadow: '0 1px 3px rgba(0,0,0,0.35)',
+    };
+  }, [isLight]);
 
   /** Logged in + saved keys + live API — do not let the user tune risk in the browser. */
   const riskControlLocked = Boolean(
@@ -358,13 +379,11 @@ const TradingBot: React.FC = () => {
                     height: 24,
                     flexShrink: 0,
                     borderRadius: 12,
-                    border: '1px solid var(--text-muted)',
+                    border: playbookSwitchStyle.border,
                     padding: 0,
                     cursor: savingPlaybooks ? 'not-allowed' : 'pointer',
                     opacity: savingPlaybooks ? 0.5 : 1,
-                    background: playbookAuto
-                      ? 'rgba(59, 130, 246, 0.22)'
-                      : 'var(--bg-tertiary)',
+                    background: playbookAuto ? playbookSwitchStyle.trackOn : playbookSwitchStyle.trackOff,
                     transition: 'background 0.2s ease',
                   }}
                 >
@@ -376,8 +395,8 @@ const TradingBot: React.FC = () => {
                       width: 18,
                       height: 18,
                       borderRadius: '50%',
-                      background: 'var(--bg-secondary)',
-                      boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
+                      background: playbookSwitchStyle.thumb,
+                      boxShadow: playbookSwitchStyle.thumbShadow,
                       transition: 'left 0.2s ease',
                     }}
                   />
