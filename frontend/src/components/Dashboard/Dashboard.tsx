@@ -274,7 +274,7 @@ const Dashboard: React.FC = () => {
                   marginTop: (regimeData as any).market_scores ? '4px' : '6px',
                 }}
               >
-                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '4px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '10px' }}>
                   {d.focusSectors} <strong style={{ color: 'var(--text-secondary)' }}>{((regimeData as any).focus_sectors || []).join(', ')}</strong>
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
