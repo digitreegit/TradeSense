@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import type { AlpacaApiUsage, PageId } from '../../stores/types';
+import { useUiStrings } from '../../hooks/useUiStrings';
 
 // Heroicons v2 Outline SVGs directly as components
 const SquaresIcon = (props: React.ComponentProps<'svg'>) => (
@@ -55,15 +56,6 @@ interface NavItem {
   section?: string;
 }
 
-const navItems: NavItem[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: SquaresIcon, section: 'OVERVIEW' },
-  { id: 'chart', label: 'Live Chart', icon: ChartIcon, section: 'MARKET' },
-  { id: 'agent', label: 'AI Agent', icon: ChipIcon, section: 'INTELLIGENCE' },
-  { id: 'trading', label: 'Trading Bot', icon: BoltIcon },
-  { id: 'portfolio', label: 'Portfolio', icon: BriefcaseIcon, section: 'ACCOUNT' },
-  { id: 'history', label: 'History', icon: HistoryIcon },
-  { id: 'settings', label: 'Settings', icon: CogIcon },
-];
 
 function formatUsageLine(u: AlpacaApiUsage | null): string | null {
   if (!u || !u.ok) return null;
@@ -84,6 +76,7 @@ function formatUsageLine(u: AlpacaApiUsage | null): string | null {
 }
 
 const Sidebar: React.FC = () => {
+  const t = useUiStrings();
   const {
     currentPage,
     setCurrentPage,
@@ -93,14 +86,26 @@ const Sidebar: React.FC = () => {
     authEmail,
     authAlpacaConfigured,
   } = useAppStore();
+  const navItems: NavItem[] = useMemo(
+    () => [
+      { id: 'dashboard', label: t.nav.dashboard, icon: SquaresIcon, section: t.sidebar.sectionOverview },
+      { id: 'chart', label: t.nav.chart, icon: ChartIcon, section: t.sidebar.sectionMarket },
+      { id: 'agent', label: t.nav.agent, icon: ChipIcon, section: t.sidebar.sectionIntel },
+      { id: 'trading', label: t.nav.trading, icon: BoltIcon },
+      { id: 'portfolio', label: t.nav.portfolio, icon: BriefcaseIcon, section: t.sidebar.sectionAccount },
+      { id: 'history', label: t.nav.history, icon: HistoryIcon },
+      { id: 'settings', label: t.nav.settings, icon: CogIcon },
+    ],
+    [t],
+  );
   const showConnected = Boolean(authEmail && authAlpacaConfigured && connected);
   const statusLabel = !authEmail
-    ? 'Sign in required'
+    ? t.sidebar.signInRequired
     : !authAlpacaConfigured
-      ? 'Alpaca keys required'
+      ? t.sidebar.keysRequired
       : showConnected
-        ? 'Connected to Alpaca'
-        : 'Disconnected';
+        ? t.sidebar.connected
+        : t.sidebar.disconnected;
   const usageLine = formatUsageLine(alpacaUsage);
 
   let currentSection = '';
@@ -113,7 +118,7 @@ const Sidebar: React.FC = () => {
         </div>
         <div className="sidebar-logo-text">
           <h1>TradeSense</h1>
-          <span>AI Quant Trading</span>
+          <span>{t.sidebar.tagline}</span>
         </div>
       </div>
 
@@ -188,7 +193,7 @@ const Sidebar: React.FC = () => {
                   alpacaUsage.reset_in_seconds > 0 &&
                   alpacaUsage.remaining != null &&
                   alpacaUsage.limit != null
-                  ? ` · reset ~${alpacaUsage.reset_in_seconds}s`
+                  ? t.sidebar.resetIn(alpacaUsage.reset_in_seconds)
                   : ''}
               </span>
             )}
@@ -197,7 +202,7 @@ const Sidebar: React.FC = () => {
                 style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}
                 title={alpacaUsage.error}
               >
-                API quota: error (hover)
+                {t.sidebar.apiQuotaError}
               </span>
             )}
           </div>

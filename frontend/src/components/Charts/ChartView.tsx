@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
+import { useUiStrings } from '../../hooks/useUiStrings';
 import { formatCurrency, formatPercent } from '../../utils/helpers';
 import type { BarData } from '../../stores/types';
 import api from '../../services/api';
@@ -10,6 +11,7 @@ const TF_MAP: Record<string, string> = {
 };
 
 const ChartView: React.FC = () => {
+  const t = useUiStrings();
   const { selectedSymbol, setSelectedSymbol, watchlist, colorTheme } = useAppStore();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [timeframe, setTimeframe] = useState('1D');
@@ -347,7 +349,7 @@ const ChartView: React.FC = () => {
               fontSize: '13px', color: 'var(--text-tertiary)',
             }}>
               <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span>
-              Loading chart data from Alpaca...
+              {t.chart.loading}
             </div>
           )}
           {!loading && candleData.length === 0 && (
@@ -358,7 +360,7 @@ const ChartView: React.FC = () => {
               fontSize: '13px', color: 'var(--text-tertiary)',
             }}>
               <span style={{ fontSize: '32px' }}>📭</span>
-              <span>No chart data for this symbol</span>
+              <span>{t.chart.noData}</span>
             </div>
           )}
           <canvas

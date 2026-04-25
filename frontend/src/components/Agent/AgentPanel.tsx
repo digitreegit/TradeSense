@@ -1,9 +1,12 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
+import { useUiStrings } from '../../hooks/useUiStrings';
 import { generateId } from '../../utils/helpers';
 import api from '../../services/api';
 
 const AgentPanel: React.FC = () => {
+  const t = useUiStrings();
+  const a = t.agent;
   const {
     agentMessages,
     addAgentMessage,
@@ -65,13 +68,16 @@ const AgentPanel: React.FC = () => {
     }
   };
 
-  const quickActions = [
-    { label: `Analyze ${selectedSymbol}`, msg: `Give a full analysis of ${selectedSymbol}` },
-    { label: 'Market Overview', msg: 'Summarize current market conditions' },
-    { label: 'Trading Signal', msg: 'Any trading signals right now?' },
-    { label: 'Portfolio Review', msg: 'Review my portfolio' },
-    { label: 'Risk Report', msg: 'Show a risk report' },
-  ];
+  const quickActions = useMemo(
+    () => [
+      { label: a.analyzeSym(selectedSymbol), msg: `Give a full analysis of ${selectedSymbol}` },
+      { label: a.marketOverview, msg: 'Summarize current market conditions' },
+      { label: a.tradingSignal, msg: 'Any trading signals right now?' },
+      { label: a.portfolioReview, msg: 'Review my portfolio' },
+      { label: a.riskReport, msg: 'Show a risk report' },
+    ],
+    [a, selectedSymbol],
+  );
 
   return (
     <div className="page-enter" style={{
@@ -82,7 +88,7 @@ const AgentPanel: React.FC = () => {
       <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
         <div className="card-header">
           <span className="card-title">
-            🤖 TradeSense AI Agent
+            🤖 {a.title}
             <span style={{
               fontSize: '10px',
               padding: '2px 8px',
@@ -138,7 +144,7 @@ const AgentPanel: React.FC = () => {
               }}>
                 <span className="spinner" style={{ width: 14, height: 14 }} />
                 <span style={{ color: 'var(--text-tertiary)', fontSize: '12px', marginLeft: '8px' }}>
-                  Analyzing...
+                  {a.analyzing}
                 </span>
               </div>
             </div>
@@ -192,7 +198,7 @@ const AgentPanel: React.FC = () => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder="Ask TradeSense AI anything about stocks, strategies, or market..."
+            placeholder={a.placeholder}
             disabled={agentLoading}
           />
           <button

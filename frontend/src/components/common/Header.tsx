@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import { isMarketOpen } from '../../utils/helpers';
+import { useUiStrings } from '../../hooks/useUiStrings';
 import UserMenu from './UserMenu';
 
 // Heroicons v2 Outline SVGs
@@ -11,7 +12,8 @@ const DocumentCheckIcon = (props: React.ComponentProps<'svg'>) => (
 );
 
 const Header: React.FC = () => {
-  const { currentPage, marketOpen } = useAppStore();
+  const t = useUiStrings();
+  const { currentPage, marketOpen, appLocale } = useAppStore();
   const [time, setTime] = React.useState(new Date());
 
   React.useEffect(() => {
@@ -22,17 +24,18 @@ const Header: React.FC = () => {
   }, []);
 
   const titles: Record<string, string> = {
-    dashboard: 'Dashboard',
-    chart: 'Live Chart',
-    agent: 'AI Analysis Agent',
-    trading: 'Trading Bot',
-    portfolio: 'Portfolio',
-    history: 'Trade History',
-    auth: 'Sign in',
-    settings: 'Settings',
+    dashboard: t.nav.dashboard,
+    chart: t.nav.chart,
+    agent: t.nav.agent,
+    trading: t.nav.trading,
+    portfolio: t.nav.portfolio,
+    history: t.nav.history,
+    auth: t.header.signIn,
+    settings: t.nav.settings,
   };
 
-  const currentTime = time.toLocaleTimeString('en-US', {
+  const timeLocale = appLocale === 'ko' ? 'ko-KR' : 'en-US';
+  const currentTime = time.toLocaleTimeString(timeLocale, {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
@@ -42,16 +45,16 @@ const Header: React.FC = () => {
   return (
     <header className="header">
       <div className="header-left">
-        <h2 className="header-title">{titles[currentPage] || 'Dashboard'}</h2>
+        <h2 className="header-title">{titles[currentPage] || t.nav.dashboard}</h2>
       </div>
       <div className="header-right">
         <div className="market-status">
           <span className={`dot ${isMarketOpen() || marketOpen ? 'open' : 'closed'}`} />
-          <span>{isMarketOpen() || marketOpen ? 'Market Open' : 'Market Closed'}</span>
+          <span>{isMarketOpen() || marketOpen ? t.header.marketOpen : t.header.marketClosed}</span>
         </div>
         <div className="header-badge paper" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <DocumentCheckIcon style={{ width: '14px', height: '14px' }} />
-          Paper Trading
+          {t.header.paperTrading}
         </div>
         <div style={{
           fontSize: '12px',

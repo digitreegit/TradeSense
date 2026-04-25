@@ -9,6 +9,7 @@ import {
   type StoredRiskLevel,
   type StoredRiskSettings,
 } from '../../trading/riskSettingsStorage';
+import { useUiStrings } from '../../hooks/useUiStrings';
 
 // Heroicons v2 Outline SVGs
 const BoltIcon = (props: React.ComponentProps<'svg'>) => (
@@ -84,6 +85,13 @@ const ErrorIcon = (props: React.ComponentProps<'svg'>) => (
 );
 
 const TradingBot: React.FC = () => {
+  const t = useUiStrings();
+  const u = t.trading;
+  const riskLevelLabel: Record<StoredRiskLevel, string> = {
+    conservative: u.conservative,
+    moderate: u.moderate,
+    aggressive: u.aggressive,
+  };
   const {
     botActive,
     setBotActive,
@@ -279,10 +287,10 @@ const TradingBot: React.FC = () => {
             </div>
             <div>
               <h2 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '4px' }}>
-                TradeSense Trading Bot
+                {u.title}
               </h2>
               <p style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
-                Automated quant trading • Paper Trading Mode • Capital: {formatCurrency(account.equity)}
+                {u.subtitle(formatCurrency(account.equity))}
               </p>
             </div>
           </div>
@@ -294,7 +302,7 @@ const TradingBot: React.FC = () => {
               color: botActive ? 'var(--profit)' : 'var(--text-tertiary)',
               letterSpacing: '0.5px',
             }}>
-              {botActive ? '● RUNNING' : '○ STOPPED'}
+              {botActive ? u.running : u.stopped}
             </span>
             <button
               className={botActive ? 'btn-stop' : 'btn-start'}
@@ -303,12 +311,12 @@ const TradingBot: React.FC = () => {
               {botActive ? (
                 <>
                   <StopIcon style={{ width: '18px', height: '18px' }} />
-                  Stop Bot
+                  {u.stopBot}
                 </>
               ) : (
                 <>
                   <RocketIcon style={{ width: '18px', height: '18px' }} />
-                  Start Bot
+                  {u.startBot}
                 </>
               )}
             </button>
@@ -322,15 +330,11 @@ const TradingBot: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <CheckBadgeIcon className="card-icon" /> Trading Strategies
+                <CheckBadgeIcon className="card-icon" /> {u.strategies}
               </span>
               <div
                 style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}
-                title={
-                  playbookAuto
-                    ? 'Auto: the engine picks active playbooks from time-of-day and regime. Tick strategies below to allow them when conditions match.'
-                    : 'Manual: only the ticked playbooks below will run.'
-                }
+                title={u.autoHelp}
               >
                 <span
                   style={{
@@ -339,7 +343,7 @@ const TradingBot: React.FC = () => {
                     color: playbookAuto ? 'var(--text-tertiary)' : 'var(--text-primary)',
                   }}
                 >
-                  Manual
+                  {u.manual}
                 </span>
                 <button
                   type="button"
@@ -386,7 +390,7 @@ const TradingBot: React.FC = () => {
                     minWidth: '36px',
                   }}
                 >
-                  Auto
+                  {u.auto}
                 </span>
               </div>
             </div>
@@ -398,8 +402,7 @@ const TradingBot: React.FC = () => {
                   marginBottom: '12px',
                   lineHeight: 1.5,
                 }}>
-                  Engine routes playbooks automatically (time-of-day + regime).
-                  Turn AUTO off to restrict to the ticked set below.
+                  {u.autoHelp}
                 </p>
               )}
               <div className="strategy-grid">
@@ -419,11 +422,11 @@ const TradingBot: React.FC = () => {
                       title={
                         playbookAuto
                           ? isActiveNow
-                            ? 'Currently active (AUTO)'
-                            : 'Not active right now (AUTO will enable when conditions match)'
+                            ? u.statusActive
+                            : u.statusIdle
                           : isManualOn
-                            ? 'Enabled for manual mode — click to disable'
-                            : 'Disabled — click to enable for manual mode'
+                            ? u.statusManual
+                            : u.statusDisabled
                       }
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -453,8 +456,8 @@ const TradingBot: React.FC = () => {
                         color: isActiveNow ? 'var(--profit)' : 'var(--text-muted)',
                         letterSpacing: '0.5px',
                       }}>
-                        {isActiveNow ? '● ACTIVE NOW' : '○ idle'}
-                        {!playbookAuto && isManualOn && !isActiveNow ? ' · manual-on' : ''}
+                        {isActiveNow ? u.activeNow : u.idleLine}
+                        {!playbookAuto && isManualOn && !isActiveNow ? u.manualPending : ''}
                       </div>
                     </div>
                   );
@@ -467,14 +470,14 @@ const TradingBot: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <ListIcon className="card-icon" /> Activity Log
+                <ListIcon className="card-icon" /> {u.activityLog}
               </span>
               <span style={{
                 fontSize: '12px',
                 color: 'var(--text-tertiary)',
                 fontFamily: 'var(--font-mono)',
               }}>
-                {tradeLogs.length} events
+                {u.events(String(tradeLogs.length))}
               </span>
             </div>
             <div className="bot-log" style={{ maxHeight: '400px' }}>
@@ -497,22 +500,17 @@ const TradingBot: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <ShieldIcon className="card-icon" /> Risk Settings
+                <ShieldIcon className="card-icon" /> {u.riskSettings}
               </span>
             </div>
             <div style={{ padding: 'var(--space-xl)', display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', lineHeight: 1.5, margin: 0 }}>
                 {riskControlLocked ? (
-                  <>
-                    <strong>Live (real money)</strong> mode: risk parameters are <strong>fixed to the moderate</strong> server
-                    preset. They cannot be changed from this app for safety.
-                  </>
+                  <>{u.riskLocked}</>
                 ) : (
                   <>
-                    Values are <strong>saved in this browser</strong> and applied when you <strong>Start Bot</strong>.
-                    {botActive
-                      ? ' The running session keeps its previous engine settings — stop the bot, adjust, then start again to apply new numbers.'
-                      : ''}
+                    {u.riskSaveHint}
+                    {botActive ? u.riskRunHint : ''}
                   </>
                 )}
               </p>
@@ -533,7 +531,7 @@ const TradingBot: React.FC = () => {
                   display: 'block',
                   marginBottom: '8px',
                 }}>
-                  Risk Level
+                  {u.riskLevel}
                 </label>
                 <div style={{ display: 'flex', gap: '4px' }}>
                   {(['conservative', 'moderate', 'aggressive'] as const).map((level) => (
@@ -545,7 +543,7 @@ const TradingBot: React.FC = () => {
                       onClick={() => applyRiskPreset(level)}
                       style={{ flex: 1, textTransform: 'capitalize' }}
                     >
-                      {level}
+                      {riskLevelLabel[level]}
                     </button>
                   ))}
                 </div>
@@ -562,7 +560,7 @@ const TradingBot: React.FC = () => {
                   display: 'block',
                   marginBottom: '8px',
                 }}>
-                  Max Position Size: {effectiveRisk.maxPositionSize}% ({formatCurrency(account.equity * effectiveRisk.maxPositionSize / 100)})
+                  {u.maxPos(String(effectiveRisk.maxPositionSize), formatCurrency(account.equity * effectiveRisk.maxPositionSize / 100))}
                 </label>
                 <input
                   type="range"
@@ -587,7 +585,7 @@ const TradingBot: React.FC = () => {
                   display: 'block',
                   marginBottom: '8px',
                 }}>
-                  Stop Loss: -{effectiveRisk.stopLossPercent}%
+                  {u.stopLossL(String(effectiveRisk.stopLossPercent))}
                 </label>
                 <input
                   type="range"
@@ -612,7 +610,7 @@ const TradingBot: React.FC = () => {
                   display: 'block',
                   marginBottom: '8px',
                 }}>
-                  Take Profit: +{effectiveRisk.takeProfitPercent}%
+                  {u.takeProfitL(String(effectiveRisk.takeProfitPercent))}
                 </label>
                 <input
                   type="range"
@@ -633,7 +631,7 @@ const TradingBot: React.FC = () => {
                   onClick={handleResetRisk}
                   disabled={riskControlLocked}
                 >
-                  Reset to defaults
+                  {u.resetDefaults}
                 </button>
               </div>
 
@@ -646,22 +644,23 @@ const TradingBot: React.FC = () => {
                 lineHeight: 1.8,
               }}>
                   <div style={{ fontWeight: 600, marginBottom: '8px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <ListIcon style={{ width: '16px', height: '16px' }} /> Configuration Summary
+                    <ListIcon style={{ width: '16px', height: '16px' }} /> {u.configSummary}
                   </div>
                 <div style={{ color: 'var(--text-secondary)' }}>
-                  • Capital: {formatCurrency(account.equity)}<br/>
-                  • Strategy: {playbookAuto
-                    ? `AUTO · ${activePlaybooks.join(', ') || 'idle'}`
-                    : `MANUAL · ${manualPlaybooks.join(', ') || 'none'}`}<br/>
-                  • Max per trade: {formatCurrency(account.equity * effectiveRisk.maxPositionSize / 100)}<br/>
-                  • Stop Loss: {formatPercent(-effectiveRisk.stopLossPercent)}<br/>
-                  • Take Profit: {formatPercent(effectiveRisk.takeProfitPercent)}<br/>
-                  • Risk/Reward: 1:{(effectiveRisk.takeProfitPercent / effectiveRisk.stopLossPercent).toFixed(1)}
+                  • {u.cap}: {formatCurrency(account.equity)}<br/>
+                  • {u.strategyLine(
+                    playbookAuto ? 'AUTO' : 'MANUAL',
+                    (playbookAuto ? activePlaybooks : manualPlaybooks).join(', ') || (playbookAuto ? 'idle' : 'none'),
+                  )}<br/>
+                  • {u.maxPer}: {formatCurrency(account.equity * effectiveRisk.maxPositionSize / 100)}<br/>
+                  • {u.sl}: {formatPercent(-effectiveRisk.stopLossPercent)}<br/>
+                  • {u.tp}: {formatPercent(effectiveRisk.takeProfitPercent)}<br/>
+                  • {u.rr}: 1:{(effectiveRisk.takeProfitPercent / effectiveRisk.stopLossPercent).toFixed(1)}
                   {riskControlLocked && (
                     <>
                       <br />
                       <span style={{ color: 'var(--text-tertiary)' }}>
-                        • Live: engine uses the moderate preset (client tuning ignored).
+                        • {u.liveLockNote}
                       </span>
                     </>
                   )}
@@ -674,16 +673,16 @@ const TradingBot: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <ChartBarIcon className="card-icon" /> Session Stats
+                <ChartBarIcon className="card-icon" /> {u.sessionStats}
               </span>
             </div>
             <div style={{ padding: 'var(--space-xl)' }}>
               {[
-                { label: 'Total Trades', value: sessionStats.total_trades.toString(), color: 'var(--text-primary)' },
-                { label: 'Win Rate', value: `${sessionStats.win_rate.toFixed(1)}%`, color: sessionStats.win_rate >= 50 ? 'var(--profit)' : 'var(--text-tertiary)' },
-                { label: 'Winning Trades', value: sessionStats.winning_trades.toString(), color: 'var(--profit)' },
-                { label: 'Losing Trades', value: sessionStats.losing_trades.toString(), color: 'var(--loss)' },
-                { label: 'Total P&L', value: formatCurrency(sessionStats.total_pnl), color: sessionStats.total_pnl >= 0 ? 'var(--profit)' : 'var(--loss)' },
+                { label: u.totalTrades, value: sessionStats.total_trades.toString(), color: 'var(--text-primary)' },
+                { label: u.winRate, value: `${sessionStats.win_rate.toFixed(1)}%`, color: sessionStats.win_rate >= 50 ? 'var(--profit)' : 'var(--text-tertiary)' },
+                { label: u.winTrades, value: sessionStats.winning_trades.toString(), color: 'var(--profit)' },
+                { label: u.loseTrades, value: sessionStats.losing_trades.toString(), color: 'var(--loss)' },
+                { label: u.totalPnl, value: formatCurrency(sessionStats.total_pnl), color: sessionStats.total_pnl >= 0 ? 'var(--profit)' : 'var(--loss)' },
               ].map((stat, i) => (
                 <div key={i} style={{
                   display: 'flex',

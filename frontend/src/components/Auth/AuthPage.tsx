@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
+import { useUiStrings } from '../../hooks/useUiStrings';
 import {
   setLastAuthMethod,
 } from '../../auth/token';
@@ -15,6 +16,7 @@ const GoogleIcon = () => (
 );
 
 const AuthPage: React.FC = () => {
+  const t = useUiStrings();
   const { setAuthMethod } = useAppStore();
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -33,9 +35,9 @@ const AuthPage: React.FC = () => {
       if (oauthErr) throw oauthErr;
       setLastAuthMethod('google');
       setAuthMethod('google');
-      setInfo('Redirecting to Google…');
+      setInfo(t.auth.redirectingProgress);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Google sign-in failed');
+      setError(err instanceof Error ? err.message : t.auth.signInFailedGeneric);
     } finally {
       setLoading(false);
     }
@@ -44,8 +46,8 @@ const AuthPage: React.FC = () => {
   return (
     <div className="auth-shell">
       <div className="auth-card">
-        <h1 className="auth-title">Welcome to TradeSense</h1>
-        <p className="auth-subtitle">Sign in with Google to continue</p>
+        <h1 className="auth-title">{t.auth.title}</h1>
+        <p className="auth-subtitle">{t.auth.subtitle}</p>
 
         {error && <p className="auth-error">{error}</p>}
         {info && <p className="auth-info">{info}</p>}
@@ -57,7 +59,7 @@ const AuthPage: React.FC = () => {
           disabled={loading}
         >
           <GoogleIcon />
-          {loading ? 'Redirecting…' : 'Continue with Google'}
+          {loading ? t.auth.redirecting : t.auth.continueGoogle}
         </button>
       </div>
     </div>

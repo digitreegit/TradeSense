@@ -14,6 +14,8 @@ import { useMarketData } from './hooks/useMarketData';
 import api from './services/api';
 import { getLastAuthMethod, setToken } from './auth/token';
 import { supabase } from './auth/supabase';
+import { readStoredLocale } from './locale/locale';
+import { getUiStrings } from './locale/uiStrings';
 
 const App: React.FC = () => {
   const { currentPage, setCurrentPage, setAuthProfile, setAuthMethod, authEmail } = useAppStore();
@@ -84,7 +86,7 @@ const App: React.FC = () => {
   if (!bootstrapped) {
     return (
       <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)' }}>
-        Loading…
+        {getUiStrings(readStoredLocale()).common.loading}
       </div>
     );
   }

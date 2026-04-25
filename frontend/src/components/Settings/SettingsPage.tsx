@@ -1,34 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import api from '../../services/api';
 import { useAppStore } from '../../stores/useAppStore';
 import type { AppLocale, ColorTheme } from '../../stores/types';
-import { settingsPageCopy } from '../../locale/settingsPageCopy';
+import { useUiStrings } from '../../hooks/useUiStrings';
 import { clearToken } from '../../auth/token';
 import { supabase } from '../../auth/supabase';
 
 type CapitalScale = '3k' | '10k' | '30k';
-
-const SCALE_OPTIONS: Array<{
-  id: CapitalScale;
-  title: string;
-  caption: string;
-}> = [
-  {
-    id: '3k',
-    title: '$3,000',
-    caption: 'Starter cash-scalp · IEX feed',
-  },
-  {
-    id: '10k',
-    title: '$10,000',
-    caption: 'Cash-only bridge · no PDT impact',
-  },
-  {
-    id: '30k',
-    title: '$30,000',
-    caption: 'HFT paper · SIP feed + us-east-1',
-  },
-];
 
 type LiveSummary = {
   equity: number;
@@ -41,6 +19,7 @@ const fmtUsd = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(n);
 
 const SettingsPage: React.FC = () => {
+  const t = useUiStrings();
   const {
     authEmail,
     authAlpacaConfigured,
@@ -54,7 +33,15 @@ const SettingsPage: React.FC = () => {
     setAppLocale,
   } = useAppStore();
 
-  const t = settingsPageCopy[appLocale];
+  const scaleOptions = useMemo(
+    () =>
+      [
+        { id: '3k' as const, title: t.scale3k.title, caption: t.scale3k.cap },
+        { id: '10k' as const, title: t.scale10k.title, caption: t.scale10k.cap },
+        { id: '30k' as const, title: t.scale30k.title, caption: t.scale30k.cap },
+      ] as const,
+    [t],
+  );
 
   const chooseTheme = (next: ColorTheme) => {
     if (next === colorTheme) return;
@@ -154,7 +141,7 @@ const SettingsPage: React.FC = () => {
 
   const choosePaperOrLive = async (paper: boolean) => {
     if (!authAlpacaConfigured) {
-      setErr('Save Alpaca keys first, then choose paper or live.');
+      setErr(t.settings.errSaveFirst);
       return;
     }
     if (paper === authAlpacaPaperTrading || modeLoading) return;
@@ -168,11 +155,11 @@ const SettingsPage: React.FC = () => {
       }
       setScaleMsg(
         info.paper_trading
-          ? 'Switched to paper trading API. Capital scale presets apply.'
-          : 'Switched to live trading API. Balances shown are from your live Alpaca account.',
+          ? t.settings.msgSwitchedPaper
+          : t.settings.msgSwitchedLive,
       );
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed to change trading mode');
+      setErr(e instanceof Error ? e.message : t.settings.modeChangeFail);
     } finally {
       setModeLoading(false);
     }
@@ -188,9 +175,9 @@ const SettingsPage: React.FC = () => {
         telegram_chat_id: tgChatId.trim(),
       });
       setTgBotOk(Boolean(p.telegram_bot_configured));
-      setNotifMsg('Notification preferences saved.');
+      setNotifMsg(t.settings.notifSaved);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed to save notifications');
+      setErr(e instanceof Error ? e.message : t.settings.notifSaveFail);
     } finally {
       setNotifSaving(false);
     }
@@ -202,9 +189,9 @@ const SettingsPage: React.FC = () => {
     setErr(null);
     try {
       const res = await api.testNotification();
-      setNotifMsg(res.message || 'Test message sent.');
+      setNotifMsg(t.settings.testSent(res.message || ''));
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Test send failed');
+      setErr(e instanceof Error ? e.message : t.settings.testFail);
     } finally {
       setNotifLoading(false);
     }
@@ -212,7 +199,7 @@ const SettingsPage: React.FC = () => {
 
   const chooseScale = async (next: CapitalScale) => {
     if (!authAlpacaPaperTrading) {
-      setErr('Capital scale presets apply to paper mode only. Switch to paper money to change them.');
+      setErr(t.settings.errPaperOnly);
       return;
     }
     if (next === scale || scaleLoading) return;
@@ -222,9 +209,9 @@ const SettingsPage: React.FC = () => {
     try {
       const info = await api.setCapitalScale(next);
       setScale(info.scale);
-      setScaleMsg(`Switched to ${info.scale.toUpperCase()} preset (${info.level}).`);
+      setScaleMsg(t.settings.scaleSwitched(String(info.scale), String(info.level)));
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed to switch capital scale');
+      setErr(e instanceof Error ? e.message : t.settings.scaleFail);
     } finally {
       setScaleLoading(false);
     }
@@ -235,11 +222,11 @@ const SettingsPage: React.FC = () => {
     setErr(null);
     setMsg(null);
     if (keysLocked) {
-      setErr('Delete existing keys first to enter new keys.');
+      setErr(t.settings.errDeleteFirst);
       return;
     }
     if (!key.trim() || !secret.trim()) {
-      setErr('Enter both the API Key ID and Secret Key.');
+      setErr(t.settings.errBothKeys);
       return;
     }
     setLoading(true);
@@ -248,9 +235,9 @@ const SettingsPage: React.FC = () => {
       setAuthProfile(authEmail, true, true);
       setKey('');
       setSecret('');
-      setMsg('Alpaca keys saved (encrypted on the server).');
+      setMsg(t.settings.keysSaved);
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : 'Failed to save');
+      setErr(e2 instanceof Error ? e2.message : t.settings.saveFail);
     } finally {
       setLoading(false);
     }
@@ -265,9 +252,9 @@ const SettingsPage: React.FC = () => {
       setAuthProfile(authEmail, false);
       setKey('');
       setSecret('');
-      setMsg('Stored Alpaca keys were deleted. You can add a new key pair now.');
+      setMsg(t.settings.keysDeleted);
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : 'Failed to delete keys');
+      setErr(e2 instanceof Error ? e2.message : t.settings.deleteFail);
     } finally {
       setDeleting(false);
     }
@@ -293,7 +280,7 @@ const SettingsPage: React.FC = () => {
       }}
     >
       <div className="card" style={{ padding: 'var(--space-xl)' }}>
-        <h2 style={{ fontSize: '18px', marginBottom: '8px' }}>{t.settingsTitle}</h2>
+        <h2 style={{ fontSize: '18px', marginBottom: '8px' }}>{t.settings.settingsTitle}</h2>
 
         <div style={{ marginBottom: '28px', paddingBottom: '24px', borderBottom: '1px solid var(--border-secondary)' }}>
           <label
@@ -306,14 +293,14 @@ const SettingsPage: React.FC = () => {
               marginBottom: '10px',
             }}
           >
-            {t.languageLabel}
+            {t.settings.languageLabel}
           </label>
           <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '12px', lineHeight: 1.5 }}>
-            {t.languageDescription}
+            {t.settings.languageDescription}
           </p>
           <div
             role="radiogroup"
-            aria-label={t.languageLabel}
+            aria-label={t.settings.languageLabel}
             style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', maxWidth: 560 }}
           >
             <button
@@ -334,9 +321,9 @@ const SettingsPage: React.FC = () => {
                 cursor: 'pointer',
               }}
             >
-              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.english}</div>
+              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.settings.english}</div>
               <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
-                {t.languageEnglishSub}
+                {t.settings.languageEnglishSub}
               </div>
             </button>
             <button
@@ -357,9 +344,9 @@ const SettingsPage: React.FC = () => {
                 cursor: 'pointer',
               }}
             >
-              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.korean}</div>
+              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.settings.korean}</div>
               <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
-                {t.languageKoreanSub}
+                {t.settings.languageKoreanSub}
               </div>
             </button>
           </div>
@@ -376,14 +363,14 @@ const SettingsPage: React.FC = () => {
               marginBottom: '10px',
             }}
           >
-            {t.appearanceLabel}
+            {t.settings.appearanceLabel}
           </label>
           <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '12px', lineHeight: 1.5 }}>
-            {t.appearanceDescription}
+            {t.settings.appearanceDescription}
           </p>
           <div
             role="radiogroup"
-            aria-label={t.appearanceLabel}
+            aria-label={t.settings.appearanceLabel}
             style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', maxWidth: 560 }}
           >
             <button
@@ -404,9 +391,9 @@ const SettingsPage: React.FC = () => {
                 cursor: 'pointer',
               }}
             >
-              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.dark}</div>
+              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.settings.dark}</div>
               <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
-                {t.darkSub}
+                {t.settings.darkSub}
               </div>
             </button>
             <button
@@ -427,9 +414,9 @@ const SettingsPage: React.FC = () => {
                 cursor: 'pointer',
               }}
             >
-              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.light}</div>
+              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.settings.light}</div>
               <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
-                {t.lightSub}
+                {t.settings.lightSub}
               </div>
             </button>
           </div>
@@ -443,30 +430,27 @@ const SettingsPage: React.FC = () => {
             color: 'var(--text-primary)',
           }}
         >
-          {t.brokerSectionTitle}
+          {t.settings.brokerSectionTitle}
         </h3>
         <p style={{ fontSize: '13px', color: 'var(--text-tertiary)', marginBottom: '20px', lineHeight: 1.5 }}>
-          Connect your <strong>Alpaca</strong> account (paper or live). Keys are encrypted and only your user can trade with them.
-          Paper keys:{' '}
+          {t.settings.connectIntro}{' '}
           <a
             href="https://app.alpaca.markets/paper/dashboard/overview"
             target="_blank"
             rel="noreferrer"
             style={{ color: 'var(--info)', textDecoration: 'none' }}
           >
-            Alpaca Paper
+            {t.settings.paperLink}
           </a>
           {' · '}
-          Live keys:{' '}
           <a
             href="https://app.alpaca.markets/dashboard/overview"
             target="_blank"
             rel="noreferrer"
             style={{ color: 'var(--info)', textDecoration: 'none' }}
           >
-            Alpaca Live
+            {t.settings.liveLink}
           </a>
-          .
         </p>
         <p
           style={{
@@ -479,8 +463,8 @@ const SettingsPage: React.FC = () => {
             flexWrap: 'wrap',
           }}
         >
-          Signed in as <strong>{authEmail}</strong>
-          {authAlpacaConfigured ? ' · keys on file' : ' · keys not configured yet'}
+          {t.settings.signedIn} <strong>{authEmail}</strong>
+          {authAlpacaConfigured ? t.settings.keysOnFile : t.settings.keysNotConfig}
           {authAlpacaConfigured && (
             <button
               type="button"
@@ -488,7 +472,7 @@ const SettingsPage: React.FC = () => {
               onClick={() => setConfirmDeleteOpen(true)}
               disabled={deleting || loading}
             >
-              {deleting ? 'Deleting…' : 'Delete Keys'}
+              {deleting ? t.settings.deleting : t.settings.deleteKeys}
             </button>
           )}
         </p>
@@ -504,7 +488,7 @@ const SettingsPage: React.FC = () => {
               color: 'var(--text-tertiary)',
             }}
           >
-            Trading mode
+            {t.settings.tradingMode}
           </label>
           <p
             style={{
@@ -514,12 +498,11 @@ const SettingsPage: React.FC = () => {
               lineHeight: 1.5,
             }}
           >
-            <strong>Paper money</strong> (Alpaca paper API) vs <strong>real money</strong> (live API). Save Alpaca keys
-            below first, then tap the mode you want.
+            {t.settings.tradingModeDesc}
           </p>
           <div
             role="radiogroup"
-            aria-label="Paper or live trading"
+            aria-label={t.settings.tradingMode}
             style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}
           >
             <button
@@ -542,9 +525,9 @@ const SettingsPage: React.FC = () => {
                 cursor: modeLoading || !authAlpacaConfigured ? 'not-allowed' : 'pointer',
               }}
             >
-              <div style={{ fontSize: '14px', fontWeight: 700 }}>Paper money</div>
+              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.settings.paperMoney}</div>
               <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px', lineHeight: 1.35 }}>
-                Virtual balances + 3k / 10k / 30k presets
+                {t.settings.paperSub}
               </div>
             </button>
             <button
@@ -567,22 +550,22 @@ const SettingsPage: React.FC = () => {
                 cursor: modeLoading || !authAlpacaConfigured ? 'not-allowed' : 'pointer',
               }}
             >
-              <div style={{ fontSize: '14px', fontWeight: 700 }}>Real money</div>
+              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t.settings.realMoney}</div>
               <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px', lineHeight: 1.35 }}>
-                Live Alpaca account (real orders)
+                {t.settings.realSub}
               </div>
             </button>
           </div>
           {!authAlpacaConfigured && (
             <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '10px', lineHeight: 1.45 }}>
-              Keys not saved yet — both buttons stay inactive until you add your API key pair below.
+              {t.settings.keysHintInactive}
             </p>
           )}
         </div>
 
         {!keysLocked && (
           <form onSubmit={saveKeys}>
-            <label style={{ fontSize: '12px' }}>Alpaca API Key ID</label>
+            <label style={{ fontSize: '12px' }}>{t.settings.keyId}</label>
             <input
               type="password"
               autoComplete="off"
@@ -601,7 +584,7 @@ const SettingsPage: React.FC = () => {
                 color: 'inherit',
               }}
             />
-            <label style={{ fontSize: '12px' }}>Alpaca Secret Key</label>
+            <label style={{ fontSize: '12px' }}>{t.settings.secret}</label>
             <input
               type="password"
               autoComplete="off"
@@ -620,15 +603,14 @@ const SettingsPage: React.FC = () => {
               }}
             />
             <button type="submit" className="btn-start" disabled={loading || deleting}>
-              {loading ? 'Saving…' : 'Save keys'}
+              {loading ? t.settings.saving : t.settings.saveKeys}
             </button>
           </form>
         )}
 
         {keysLocked && (
           <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '12px', lineHeight: 1.5 }}>
-            Keys are on file. Use <strong>Trading mode</strong> above to switch paper vs live, or delete keys to replace
-            them.
+            {t.settings.keysOnFileNote}
           </p>
         )}
 
@@ -642,10 +624,10 @@ const SettingsPage: React.FC = () => {
                 color: 'var(--text-tertiary)',
               }}
             >
-              Live account (Alpaca)
+              {t.settings.liveAccount}
             </label>
             {liveLoading && !liveSummary ? (
-              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '8px' }}>Loading balances…</p>
+              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '8px' }}>{t.settings.loadingBalances}</p>
             ) : liveSummary ? (
               <ul
                 style={{
@@ -658,23 +640,23 @@ const SettingsPage: React.FC = () => {
                 }}
               >
                 <li>
-                  <strong style={{ color: 'var(--text-primary)' }}>Equity</strong> {fmtUsd(liveSummary.equity)}
+                  <strong style={{ color: 'var(--text-primary)' }}>{t.settings.equity}</strong> {fmtUsd(liveSummary.equity)}
                 </li>
                 <li>
-                  <strong style={{ color: 'var(--text-primary)' }}>Cash</strong> {fmtUsd(liveSummary.cash)}
+                  <strong style={{ color: 'var(--text-primary)' }}>{t.settings.cash}</strong> {fmtUsd(liveSummary.cash)}
                 </li>
                 <li>
-                  <strong style={{ color: 'var(--text-primary)' }}>Buying power</strong>{' '}
+                  <strong style={{ color: 'var(--text-primary)' }}>{t.settings.buyPower}</strong>{' '}
                   {fmtUsd(liveSummary.buying_power)}
                 </li>
                 <li>
-                  <strong style={{ color: 'var(--text-primary)' }}>Portfolio value</strong>{' '}
+                  <strong style={{ color: 'var(--text-primary)' }}>{t.settings.portValue}</strong>{' '}
                   {fmtUsd(liveSummary.portfolio_value)}
                 </li>
               </ul>
             ) : (
               <p style={{ fontSize: '12px', color: 'var(--loss)', marginTop: '8px' }}>
-                Could not load live balances. Confirm your keys are for a live Alpaca account.
+                {t.settings.liveLoadErr}
               </p>
             )}
           </div>
@@ -689,7 +671,7 @@ const SettingsPage: React.FC = () => {
               color: 'var(--text-tertiary)',
             }}
           >
-            Capital scale (paper only)
+            {t.settings.capitalScale}
           </label>
           <p
             style={{
@@ -699,19 +681,18 @@ const SettingsPage: React.FC = () => {
               lineHeight: 1.5,
             }}
           >
-            Swaps the active risk preset table when you are in paper mode. PDT rule does not apply to cash accounts —
-            all three options are cash-only.
+            {t.settings.capitalScaleDesc}
           </p>
           <div
             role="radiogroup"
-            aria-label="Capital scale"
+            aria-label={t.settings.capitalScale}
             style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(3, 1fr)',
               gap: '8px',
             }}
           >
-            {SCALE_OPTIONS.map((opt) => {
+            {scaleOptions.map((opt) => {
               const selected = scale === opt.id;
               return (
                 <button
@@ -757,19 +738,21 @@ const SettingsPage: React.FC = () => {
               color: 'var(--text-tertiary)',
             }}
           >
-            Telegram alerts
+            {t.settings.telegram}
           </label>
           <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', margin: '6px 0 14px', lineHeight: 1.55 }}>
-            Trading alerts (bot start/stop, daily summary, loss limit, target hit, regime changes) can be sent to
-            Telegram. Add <strong>TELEGRAM_BOT_TOKEN</strong> to server <code style={{ fontSize: '11px' }}>.env</code>{' '}
-            (<a href="https://core.telegram.org/bots/tutorial" target="_blank" rel="noreferrer" style={{ color: 'var(--info)' }}>
-              bot setup
+            {t.settings.telegramPStart}{' '}
+            <strong>TELEGRAM_BOT_TOKEN</strong> {t.settings.telegramPMid}{' '}
+            <code style={{ fontSize: '11px' }}>.env</code>{' '}
+            (
+            <a href="https://core.telegram.org/bots/tutorial" target="_blank" rel="noreferrer" style={{ color: 'var(--info)' }}>
+              {t.settings.telegramSetup}
             </a>
-            ), then paste your <strong>chat ID</strong> here.
+            ), {t.settings.telegramPEnd}
           </p>
           {!tgBotOk && (
             <p style={{ fontSize: '12px', color: 'var(--loss)', marginBottom: '10px' }}>
-              Telegram is not configured on the server (<code>TELEGRAM_BOT_TOKEN</code> missing).
+              {t.settings.tgNotConfig}
             </p>
           )}
           <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', marginBottom: '8px' }}>
@@ -779,14 +762,14 @@ const SettingsPage: React.FC = () => {
               onChange={(e) => setNotifyTg(e.target.checked)}
               disabled={!tgBotOk}
             />
-            Send alerts to Telegram
+            {t.settings.sendTg}
           </label>
-          <label style={{ fontSize: '12px' }}>Telegram chat ID</label>
+          <label style={{ fontSize: '12px' }}>{t.settings.telegramChatId}</label>
           <input
             type="text"
             value={tgChatId}
             onChange={(e) => setTgChatId(e.target.value)}
-            placeholder="e.g. 123456789 (from @userinfobot or getUpdates)"
+            placeholder={t.settings.telegramChatPlaceholder}
             disabled={!tgBotOk}
             style={{
               display: 'block',
@@ -806,7 +789,7 @@ const SettingsPage: React.FC = () => {
               onClick={() => void saveNotificationPrefs()}
               disabled={notifSaving}
             >
-              {notifSaving ? 'Saving…' : 'Save alert preferences'}
+              {notifSaving ? t.settings.saving : t.settings.saveAlerts}
             </button>
             <button
               type="button"
@@ -814,7 +797,7 @@ const SettingsPage: React.FC = () => {
               onClick={() => void sendTestNotification()}
               disabled={notifLoading || !notifyTg}
             >
-              {notifLoading ? 'Sending…' : 'Send test'}
+              {notifLoading ? t.settings.sending : t.settings.sendTest}
             </button>
           </div>
           {notifMsg && (
@@ -828,7 +811,7 @@ const SettingsPage: React.FC = () => {
           onClick={signOut}
           style={{ marginTop: '40px', width: '100%' }}
         >
-          Sign Out
+          {t.settings.signOut}
         </button>
       </div>
 
@@ -856,10 +839,9 @@ const SettingsPage: React.FC = () => {
               borderColor: 'var(--border-accent)',
             }}
           >
-            <h3 style={{ fontSize: '18px', marginBottom: '8px' }}>Delete stored Alpaca keys?</h3>
+            <h3 style={{ fontSize: '18px', marginBottom: '8px' }}>{t.settings.deleteModalTitle}</h3>
             <p style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-              This will remove your currently saved key pair. Trading will stay disabled until you add
-              a new key pair.
+              {t.settings.deleteModalBody}
             </p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '18px' }}>
               <button
@@ -868,7 +850,7 @@ const SettingsPage: React.FC = () => {
                 onClick={() => setConfirmDeleteOpen(false)}
                 disabled={deleting}
               >
-                Cancel
+                {t.common.cancel}
               </button>
               <button
                 type="button"
@@ -879,7 +861,7 @@ const SettingsPage: React.FC = () => {
                 }}
                 disabled={deleting}
               >
-                {deleting ? 'Deleting…' : 'Delete Keys'}
+                {deleting ? t.settings.deleting : t.settings.deleteKeys}
               </button>
             </div>
           </div>

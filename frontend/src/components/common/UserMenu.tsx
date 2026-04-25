@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
+import { useUiStrings } from '../../hooks/useUiStrings';
 import { clearToken } from '../../auth/token';
 import { supabase } from '../../auth/supabase';
 
@@ -10,6 +11,7 @@ const UserIcon = (props: React.ComponentProps<'svg'>) => (
 );
 
 const UserMenu: React.FC = () => {
+  const t = useUiStrings();
   const { authEmail, setAuthProfile, setCurrentPage, setAuthMethod } = useAppStore();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -37,7 +39,7 @@ const UserMenu: React.FC = () => {
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-haspopup="menu"
-        title="Account"
+        title={t.userMenu.account}
         style={{
           width: 40,
           height: 40,
@@ -90,10 +92,10 @@ const UserMenu: React.FC = () => {
               setOpen(false);
             }}
           >
-            Settings
+            {t.userMenu.settings}
           </button>
           <button type="button" role="menuitem" className="user-menu-item user-menu-item-danger" onClick={logout}>
-            Sign Out
+            {t.userMenu.signOut}
           </button>
         </div>
       )}

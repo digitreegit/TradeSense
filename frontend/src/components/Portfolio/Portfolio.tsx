@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAppStore } from '../../stores/useAppStore';
+import { useUiStrings } from '../../hooks/useUiStrings';
 import { formatCurrency, formatPercent, getChangeClass } from '../../utils/helpers';
 
 // Heroicons v2 Outline SVGs
@@ -29,6 +30,8 @@ const ArchiveBoxIcon = (props: React.ComponentProps<'svg'>) => (
 );
 
 const Portfolio: React.FC = () => {
+  const t = useUiStrings();
+  const p = t.portfolio;
   const { account, positions } = useAppStore();
 
   const totalPL = account.equity - account.initial_capital;
@@ -39,7 +42,7 @@ const Portfolio: React.FC = () => {
       {/* Portfolio Stats */}
       <div className="stats-grid">
         <div className={`stat-card ${totalPL >= 0 ? 'profit' : 'loss'}`}>
-          <div className="stat-label">Total Equity</div>
+          <div className="stat-label">{p.totalEquity}</div>
           <div className={`stat-value ${getChangeClass(totalPL)}`}>
             {formatCurrency(account.equity)}
           </div>
@@ -49,21 +52,21 @@ const Portfolio: React.FC = () => {
         </div>
 
         <div className="stat-card accent">
-          <div className="stat-label">Cash</div>
+          <div className="stat-label">{p.cash}</div>
           <div className="stat-value" style={{ color: 'var(--text-primary)' }}>
             {formatCurrency(account.cash)}
           </div>
         </div>
 
         <div className="stat-card accent">
-          <div className="stat-label">Buying Power</div>
+          <div className="stat-label">{p.buyingPower}</div>
           <div className="stat-value" style={{ color: 'var(--accent-secondary)' }}>
             {formatCurrency(account.buying_power)}
           </div>
         </div>
 
         <div className={`stat-card ${account.daily_profit_loss >= 0 ? 'profit' : 'loss'}`}>
-          <div className="stat-label">Daily P&L</div>
+          <div className="stat-label">{p.dailyPL}</div>
           <div className={`stat-value ${getChangeClass(account.daily_profit_loss)}`}>
             {account.daily_profit_loss >= 0 ? '+' : ''}{formatCurrency(account.daily_profit_loss)}
           </div>
@@ -77,10 +80,10 @@ const Portfolio: React.FC = () => {
       <div className="card" style={{ marginBottom: 'var(--space-xl)' }}>
         <div className="card-header">
           <span className="card-title">
-            <BriefcaseIcon className="card-icon" /> Holdings
+            <BriefcaseIcon className="card-icon" /> {p.holdings}
           </span>
           <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
-            {positions.length} position{positions.length !== 1 ? 's' : ''}
+            {p.positions(String(positions.length))}
           </span>
         </div>
         <div>
@@ -89,23 +92,23 @@ const Portfolio: React.FC = () => {
               <div className="empty-state-icon">
                 <ArchiveBoxIcon style={{ width: '48px', height: '48px', color: 'var(--text-tertiary)' }} />
               </div>
-              <div className="empty-state-title">No Holdings</div>
+              <div className="empty-state-title">{p.noHoldings.title}</div>
               <div className="empty-state-text">
-                Your portfolio is all cash. Start the trading bot to begin automated trading with $1,000 paper money.
+                {p.noHoldings.text('$1,000')}
               </div>
             </div>
           ) : (
             <table className="positions-table">
               <thead>
                 <tr>
-                  <th>Symbol</th>
-                  <th>Side</th>
-                  <th>Qty</th>
-                  <th>Avg Entry</th>
-                  <th>Current Price</th>
-                  <th>Market Value</th>
-                  <th>Unrealized P&L</th>
-                  <th>% Change</th>
+                  <th>{p.thSymbol}</th>
+                  <th>{p.thSide}</th>
+                  <th>{p.thQty}</th>
+                  <th>{p.thAvg}</th>
+                  <th>{p.thCurrent}</th>
+                  <th>{p.thMkt}</th>
+                  <th>{p.thUnr}</th>
+                  <th>{p.thPct}</th>
                 </tr>
               </thead>
               <tbody>
@@ -154,7 +157,7 @@ const Portfolio: React.FC = () => {
         <div className="card">
           <div className="card-header">
             <span className="card-title">
-              <ChartPieIcon className="card-icon" /> Asset Allocation
+              <ChartPieIcon className="card-icon" /> {p.allocation}
             </span>
           </div>
           <div className="card-body">
@@ -205,7 +208,7 @@ const Portfolio: React.FC = () => {
                         fontWeight: 600,
                         color: 'var(--text-tertiary)',
                       }}>
-                        CASH
+                        {p.cashLabel}
                       </div>
                     </>
                   ) : (
@@ -219,7 +222,7 @@ const Portfolio: React.FC = () => {
                       fontWeight: 600,
                       color: 'var(--accent-primary)',
                     }}>
-                      100% CASH — {formatCurrency(account.cash)}
+                      {p.pctCash(formatCurrency(account.cash))}
                     </div>
                   )}
                 </div>
@@ -265,7 +268,7 @@ const Portfolio: React.FC = () => {
                       background: 'var(--bg-tertiary)',
                       border: '1px solid var(--border-primary)',
                     }} />
-                    <span style={{ fontWeight: 600 }}>Cash</span>
+                    <span style={{ fontWeight: 600 }}>{p.cashLabel}</span>
                     <span style={{ color: 'var(--text-tertiary)' }}>
                       {((account.cash / account.equity) * 100).toFixed(1)}%
                     </span>
@@ -279,19 +282,19 @@ const Portfolio: React.FC = () => {
         <div className="card">
           <div className="card-header">
             <span className="card-title">
-              <CheckBadgeIcon className="card-icon" /> Performance Metrics
+              <CheckBadgeIcon className="card-icon" /> {p.performance}
             </span>
           </div>
           <div style={{ padding: 'var(--space-xl)' }}>
             {[
-              { label: 'Total Return', value: formatPercent(totalPLPct), color: getChangeClass(totalPL) },
-              { label: 'Total P&L', value: `${totalPL >= 0 ? '+' : ''}${formatCurrency(totalPL)}`, color: getChangeClass(totalPL) },
-              { label: 'Initial Capital', value: formatCurrency(account.initial_capital), color: '' },
-              { label: 'Win Rate', value: account.win_rate !== undefined ? `${account.win_rate}%` : '0%', color: '' },
-              { label: 'Avg Win', value: formatCurrency(account.avg_win || 0), color: '' },
-              { label: 'Avg Loss', value: formatCurrency(account.avg_loss || 0), color: '' },
-              { label: 'Profit Factor', value: (account.profit_factor || 0).toFixed(2), color: '' },
-              { label: 'Sharpe Ratio', value: (account.sharpe_ratio || 0).toFixed(2), color: '' },
+              { label: p.totReturn, value: formatPercent(totalPLPct), color: getChangeClass(totalPL) },
+              { label: p.totPL, value: `${totalPL >= 0 ? '+' : ''}${formatCurrency(totalPL)}`, color: getChangeClass(totalPL) },
+              { label: p.initCap, value: formatCurrency(account.initial_capital), color: '' },
+              { label: p.winR, value: account.win_rate !== undefined ? `${account.win_rate}%` : '0%', color: '' },
+              { label: p.avgWin, value: formatCurrency(account.avg_win || 0), color: '' },
+              { label: p.avgLoss, value: formatCurrency(account.avg_loss || 0), color: '' },
+              { label: p.profitFactor, value: (account.profit_factor || 0).toFixed(2), color: '' },
+              { label: p.sharpe, value: (account.sharpe_ratio || 0).toFixed(2), color: '' },
             ].map((item, i) => (
               <div key={i} style={{
                 display: 'flex',
