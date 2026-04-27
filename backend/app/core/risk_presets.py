@@ -294,6 +294,16 @@ def RISK_PRESETS_FOR(scale: str) -> Dict[RiskLevel, RiskPreset]:
     return _PRESETS_3K
 
 
+def display_capital_for_scale(scale: str) -> float:
+    """Virtual starting equity for UI / P&L anchor (not broker cash)."""
+    s = (scale or "3k").strip().lower()
+    if s == "30k":
+        return 30_000.0
+    if s == "10k":
+        return 10_000.0
+    return 3_000.0
+
+
 def _active_scale() -> str:
     try:
         from app.core.config import resolved_capital_scale

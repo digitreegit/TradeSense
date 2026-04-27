@@ -41,8 +41,9 @@ class AlpacaService:
         self.trading_client: Optional[TradingClient] = None
         self.data_client: Optional[StockHistoricalDataClient] = None
         self._initialized = False
-        self.virtual_base_equity: float = 0.0  # Used for virtual re-base to $30k
+        self.virtual_base_equity: float = 0.0  # Anchor real equity at last rebase
         self.is_virtual_reset = False
+        self._virtual_display_capital: float = float(settings.initial_capital)
 
     def initialize(self):
         """Initialize Alpaca API clients from global settings (.env)."""
@@ -82,6 +83,21 @@ class AlpacaService:
             self.initialize()
         return self._initialized
 
+    def set_virtual_display_capital(self, amount: float) -> None:
+        """Re-anchor virtual P&L so the next ``get_account`` shows ~``amount``."""
+        self._virtual_display_capital = max(0.0, float(amount))
+        self.virtual_base_equity = 0.0
+        if hasattr(self, "virtual_daily_open"):
+            delattr(self, "virtual_daily_open")
+        logger.info(
+            "Virtual display capital set to $%.2f — next account read re-anchors to Alpaca equity",
+            self._virtual_display_capital,
+        )
+
+    @property
+    def virtual_display_capital(self) -> float:
+        return self._virtual_display_capital
+
     # ─── Account ───────────────────────────────────────────────
     def get_account(self) -> dict:
         """Get account information with performance metrics."""
@@ -95,18 +111,20 @@ class AlpacaService:
             real_equity = float(account.equity)
             real_cash = float(account.cash)
 
+            anchor = self._virtual_display_capital
+
             if self.virtual_base_equity == 0:
                 self.virtual_base_equity = real_equity
                 logger.info(
                     "🔄 Virtual Portfolio Reset: Real Equity $%s -> Displayed Start at $%s",
-                    real_equity, settings.initial_capital,
+                    real_equity, anchor,
                 )
 
             pl_since_reset = real_equity - self.virtual_base_equity
-            equity = settings.initial_capital + pl_since_reset
+            equity = anchor + pl_since_reset
 
             if not hasattr(self, 'virtual_daily_open') or self.virtual_daily_open == 0:
-                self.virtual_daily_open = settings.initial_capital
+                self.virtual_daily_open = anchor
 
             daily_profit_loss = equity - self.virtual_daily_open
             daily_profit_loss_pct = (
@@ -120,7 +138,7 @@ class AlpacaService:
             displayed_bp = displayed_cash
 
             pv = equity
-            initial = settings.initial_capital
+            initial = anchor
 
             total_profit_loss = equity - initial
             total_profit_loss_pct = (total_profit_loss / initial) * 100 if initial > 0 else 0
@@ -603,15 +621,16 @@ class AlpacaService:
 
     # ─── Demo Data ─────────────────────────────────────────────
     def _demo_account(self) -> dict:
+        ic = self._virtual_display_capital
         return {
-            "equity": settings.initial_capital,
-            "cash": settings.initial_capital,
-            "buying_power": settings.initial_capital,
-            "portfolio_value": settings.initial_capital,
+            "equity": ic,
+            "cash": ic,
+            "buying_power": ic,
+            "portfolio_value": ic,
             "profit_loss": 0,
             "profit_loss_pct": 0,
             "day_trade_count": 0,
-            "initial_capital": settings.initial_capital,
+            "initial_capital": ic,
         }
 
     def _demo_bars(self, symbol: str, limit: int, start_price: float = None) -> list:

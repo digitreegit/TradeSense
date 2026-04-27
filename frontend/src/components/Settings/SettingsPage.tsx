@@ -28,6 +28,25 @@ const SCALE_OPTIONS: Array<{
   },
 ];
 
+const radioOuter: React.CSSProperties = {
+  width: 18,
+  height: 18,
+  borderRadius: '50%',
+  border: '2px solid var(--border-secondary)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flexShrink: 0,
+  marginTop: 2,
+};
+
+const radioInner: React.CSSProperties = {
+  width: 8,
+  height: 8,
+  borderRadius: '50%',
+  background: 'var(--info, #3b82f6)',
+};
+
 const SettingsPage: React.FC = () => {
   const {
     authEmail,
@@ -44,6 +63,7 @@ const SettingsPage: React.FC = () => {
   const [deleting, setDeleting] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [scale, setScale] = useState<CapitalScale | null>(null);
+  const [displayCapital, setDisplayCapital] = useState<number | null>(null);
   const [scaleLoading, setScaleLoading] = useState(false);
   const [scaleMsg, setScaleMsg] = useState<string | null>(null);
 
@@ -54,7 +74,12 @@ const SettingsPage: React.FC = () => {
     api
       .getCapitalScale()
       .then((info) => {
-        if (!cancelled) setScale(info.scale);
+        if (!cancelled) {
+          setScale(info.scale);
+          if (typeof info.display_capital === 'number') {
+            setDisplayCapital(info.display_capital);
+          }
+        }
       })
       .catch(() => {
         /* non-fatal */
@@ -65,14 +90,19 @@ const SettingsPage: React.FC = () => {
   }, []);
 
   const chooseScale = async (next: CapitalScale) => {
-    if (next === scale || scaleLoading) return;
+    if (scaleLoading) return;
     setScaleLoading(true);
     setScaleMsg(null);
     setErr(null);
     try {
       const info = await api.setCapitalScale(next);
       setScale(info.scale);
-      setScaleMsg(`Switched to ${info.scale.toUpperCase()} preset (${info.level}).`);
+      if (typeof info.display_capital === 'number') {
+        setDisplayCapital(info.display_capital);
+      }
+      setScaleMsg(
+        `Switched to ${info.scale.toUpperCase()} — virtual portfolio $${info.display_capital?.toLocaleString() ?? '—'} (${info.level} preset). Dashboard updates on next refresh.`,
+      );
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to switch capital scale');
     } finally {
@@ -239,9 +269,15 @@ const SettingsPage: React.FC = () => {
               lineHeight: 1.5,
             }}
           >
-            Swaps the active risk preset table. PDT rule does not apply to cash
-            accounts — all three options are cash-only.
+            Picks the risk preset table and <strong>virtual starting equity</strong> shown on the dashboard
+            ($3k / $10k / $30k). Your Alpaca balance is unchanged; P&amp;L is rebased from now. PDT does not
+            apply to cash accounts.
           </p>
+          {displayCapital != null && (
+            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '10px' }}>
+              Current virtual anchor: <strong>${displayCapital.toLocaleString()}</strong>
+            </p>
+          )}
           <div
             role="radiogroup"
             aria-label="Capital scale"
@@ -253,32 +289,51 @@ const SettingsPage: React.FC = () => {
           >
             {SCALE_OPTIONS.map((opt) => {
               const selected = scale === opt.id;
+              const inputId = `capital-scale-${opt.id}`;
               return (
-                <button
+                <label
                   key={opt.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  onClick={() => chooseScale(opt.id)}
-                  disabled={scaleLoading}
+                  htmlFor={inputId}
                   style={{
-                    textAlign: 'left',
+                    display: 'flex',
+                    gap: '10px',
+                    alignItems: 'flex-start',
                     padding: '10px 12px',
                     borderRadius: '8px',
                     border: selected
                       ? '1px solid var(--border-accent, var(--info))'
                       : '1px solid var(--border-secondary)',
                     background: selected ? 'var(--bg-tertiary, rgba(56,132,255,0.10))' : 'var(--bg-secondary)',
-                    color: 'inherit',
-                    cursor: scaleLoading ? 'progress' : 'pointer',
+                    cursor: scaleLoading ? 'wait' : 'pointer',
                     transition: 'border-color 120ms, background 120ms',
                   }}
                 >
-                  <div style={{ fontSize: '13px', fontWeight: 600 }}>{opt.title}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px', lineHeight: 1.3 }}>
-                    {opt.caption}
-                  </div>
-                </button>
+                  <input
+                    id={inputId}
+                    type="radio"
+                    name="capital-scale"
+                    value={opt.id}
+                    checked={selected}
+                    onChange={() => chooseScale(opt.id)}
+                    disabled={scaleLoading}
+                    style={{
+                      position: 'absolute',
+                      opacity: 0,
+                      width: 0,
+                      height: 0,
+                      pointerEvents: 'none',
+                    }}
+                  />
+                  <span aria-hidden style={selected ? { ...radioOuter, borderColor: 'var(--info, #3b82f6)' } : radioOuter}>
+                    {selected ? <span style={radioInner} /> : null}
+                  </span>
+                  <span style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 600 }}>{opt.title}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px', lineHeight: 1.3 }}>
+                      {opt.caption}
+                    </div>
+                  </span>
+                </label>
               );
             })}
           </div>
