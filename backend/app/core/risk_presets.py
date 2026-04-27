@@ -76,19 +76,22 @@ RISK_PRESETS: Dict[RiskLevel, RiskPreset] = {
     ),
     "aggressive": RiskPreset(
         level="aggressive",
-        max_position_percent=20.0,
-        max_concurrent_positions=4,
-        stop_loss_percent=0.40,
-        take_profit_percent=1.20,
-        trailing_trigger_percent=0.30,
-        daily_loss_limit_percent=0.80,
-        daily_target_percent=1.50,
-        max_trades_per_day=80,
-        entry_score_threshold=40,
-        spread_filter_percent=0.08,
-        universe_size=15,
+        # Cash-safe aggressive:
+        # - more opportunities (lower threshold / wider universe / more slots)
+        # - smaller per-position size to avoid exhausting settled cash too fast
+        max_position_percent=12.0,
+        max_concurrent_positions=8,
+        stop_loss_percent=0.35,
+        take_profit_percent=0.70,
+        trailing_trigger_percent=0.18,
+        daily_loss_limit_percent=0.90,
+        daily_target_percent=1.20,
+        max_trades_per_day=160,
+        entry_score_threshold=28,
+        spread_filter_percent=0.12,
+        universe_size=20,
         vix_halt_level=28.0,
-        blackout_window_minutes=15,
+        blackout_window_minutes=5,
     ),
 }
 

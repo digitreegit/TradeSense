@@ -1,6 +1,7 @@
 """FastAPI dependencies: Supabase bearer token + per-user trading engine."""
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from fastapi import Depends, HTTPException
@@ -9,6 +10,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.db import users_db
 from app.services.supabase_auth import verify_supabase_bearer
 from app.services.user_runtime import default_engine, get_or_create_engine
+
+logger = logging.getLogger(__name__)
 
 security = HTTPBearer(auto_error=False)
 
@@ -28,14 +31,20 @@ def get_current_user_id_optional(
         return None
     try:
         payload = verify_supabase_bearer(token)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Supabase token verification failed: %s", exc)
+        return None
+    try:
         email = str(payload.get("email") or "").strip().lower()
         sub = str(payload.get("sub") or "").strip()
         if not email or not sub:
+            logger.warning("Supabase token missing email/sub claim")
             return None
         users_db.init_db()
         row = users_db.ensure_user_for_supabase(email=email, supabase_user_id=sub)
         return int(row["id"])
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to resolve local user from Supabase payload: %s", exc)
         return None
 
 

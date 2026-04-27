@@ -160,6 +160,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ api_key, secret_key }),
     }),
+
+  deleteAlpacaKeys: () =>
+    request<{ ok: boolean; message: string }>('/auth/alpaca-keys', {
+      method: 'DELETE',
+    }),
 } as const;
 
 export default api;

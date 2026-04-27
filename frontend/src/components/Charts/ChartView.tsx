@@ -39,8 +39,8 @@ const ChartView: React.FC = () => {
       }
     };
     fetchBars();
-    // Refresh every 30s
-    const interval = setInterval(fetchBars, 30000);
+    // Refresh every 60s (reduces API pressure / UI jank)
+    const interval = setInterval(fetchBars, 60000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [selectedSymbol, timeframe]);
 
