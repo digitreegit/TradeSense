@@ -28,6 +28,9 @@ ta==0.11.0
 # Task Scheduling
 apscheduler==3.11.0
 
+# Email via Resend
+resend==2.5.1
+
 # WSGI adapter for Passenger
 a2wsgi==1.10.8
 

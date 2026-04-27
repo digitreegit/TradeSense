@@ -64,10 +64,15 @@ def get_or_create_alpaca(user_id: int) -> AlpacaService:
 
 def get_or_create_engine(user_id: int) -> TradingEngine:
     if user_id in _engines:
+        row = users_db.get_user_by_id(user_id)
+        if row and row.get("email"):
+            _engines[user_id].owner_email = str(row["email"]).strip().lower()
         return _engines[user_id]
     alpaca = get_or_create_alpaca(user_id)
     comp = ComplianceService(log_dir=_log_dir_for_user(user_id))
-    eng = TradingEngine(alpaca, comp)
+    row = users_db.get_user_by_id(user_id)
+    owner_email = str(row["email"]).strip().lower() if row and row.get("email") else None
+    eng = TradingEngine(alpaca, comp, owner_email=owner_email)
     _engines[user_id] = eng
     return eng
 
@@ -78,7 +83,10 @@ def refresh_user_alpaca(user_id: int) -> None:
     if user_id in _engines:
         alpaca = get_or_create_alpaca(user_id)
         comp = ComplianceService(log_dir=_log_dir_for_user(user_id))
-        _engines[user_id] = TradingEngine(alpaca, comp)
+        row = users_db.get_user_by_id(user_id)
+        owner_email = str(row["email"]).strip().lower() if row and row.get("email") else None
+        eng = TradingEngine(alpaca, comp, owner_email=owner_email)
+        _engines[user_id] = eng
 
 
 # Legacy default (env Alpaca) — same process-wide singleton as before

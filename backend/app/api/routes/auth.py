@@ -46,3 +46,11 @@ async def save_alpaca_keys(body: AlpacaKeysBody, user_id: int = Depends(get_curr
     users_db.set_user_alpaca_encrypted(user_id, k_enc, s_enc)
     refresh_user_alpaca(user_id)
     return {"ok": True, "message": "Alpaca keys saved. Reconnect to verify."}
+
+
+@router.delete("/alpaca-keys")
+async def delete_alpaca_keys(user_id: int = Depends(get_current_user_id)):
+    """Delete stored Alpaca keys so the user can register a new pair."""
+    users_db.clear_user_alpaca_encrypted(user_id)
+    refresh_user_alpaca(user_id)
+    return {"ok": True, "message": "Alpaca keys deleted."}

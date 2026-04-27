@@ -422,35 +422,35 @@ class AlpacaService:
         }
         tf = tf_map.get(timeframe, TimeFrame(1, TimeFrameUnit.Day))
         is_intraday = timeframe in ("1Min", "5Min", "15Min", "1H", "4H")
-        lookback_days = 7 if is_intraday else 365
+        lookback_days = 3 if is_intraday else 365
 
-        # Try IEX first (free with paper trading), then SIP
-        for feed in [DataFeed.IEX, DataFeed.SIP]:
-            try:
-                request = StockBarsRequest(
-                    symbol_or_symbols=symbol,
-                    timeframe=tf,
-                    start=datetime.now() - timedelta(days=lookback_days),
-                    limit=limit,
-                    feed=feed,
-                )
-                bars = self.data_client.get_stock_bars(request)
-                if symbol in bars and len(bars[symbol]) > 0:
-                    result = [
-                        {
-                            "time":   int(bar.timestamp.timestamp()),
-                            "open":   float(bar.open),
-                            "high":   float(bar.high),
-                            "low":    float(bar.low),
-                            "close":  float(bar.close),
-                            "volume": int(bar.volume),
-                        }
-                        for bar in bars[symbol]
-                    ]
-                    logger.info(f"Got {len(result)} real bars for {symbol} (feed={feed.value})")
-                    return result
-            except Exception as e:
-                logger.warning(f"Bars attempt failed (feed={feed}): {e}")
+        # Use IEX only for paper/free stability.
+        # SIP attempts can add significant latency or fail on non-entitled accounts.
+        try:
+            request = StockBarsRequest(
+                symbol_or_symbols=symbol,
+                timeframe=tf,
+                start=datetime.now() - timedelta(days=lookback_days),
+                limit=limit,
+                feed=DataFeed.IEX,
+            )
+            bars = self.data_client.get_stock_bars(request)
+            if symbol in bars and len(bars[symbol]) > 0:
+                result = [
+                    {
+                        "time":   int(bar.timestamp.timestamp()),
+                        "open":   float(bar.open),
+                        "high":   float(bar.high),
+                        "low":    float(bar.low),
+                        "close":  float(bar.close),
+                        "volume": int(bar.volume),
+                    }
+                    for bar in bars[symbol]
+                ]
+                logger.info("Got %s real bars for %s (feed=iex)", len(result), symbol)
+                return result
+        except Exception as e:
+            logger.warning("Bars attempt failed (feed=iex): %s", e)
 
         # Last resort: generate demo bars anchored to real current price
         current_price = self._get_current_price(symbol)

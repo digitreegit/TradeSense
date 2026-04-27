@@ -61,6 +61,7 @@ const Dashboard: React.FC = () => {
     playbookAuto,
     activePlaybooks,
     manualPlaybooks,
+    botDailyTrades,
   } = useAppStore();
 
   const strategyBanner = useMemo(() => {
@@ -146,7 +147,16 @@ const Dashboard: React.FC = () => {
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--accent-primary)' }}>
               <BoltIcon style={{ width: 20, height: 20 }} />
               <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>AI Market Adaptive System</h3>
-              <span style={{ fontSize: '12px', opacity: 0.6, marginLeft: 'auto', marginRight: '32px' }}>Last Updated: {regimeData.timestamp}</span>
+              <span
+                style={{
+                  fontSize: '12px',
+                  marginLeft: 'auto',
+                  marginRight: '32px',
+                  color: 'var(--text-tertiary)',
+                }}
+              >
+                Last Updated: {regimeData.timestamp}
+              </span>
             </div>
 
             <p style={{ margin: 0, fontSize: '14px', lineHeight: 1.5, color: 'var(--text-secondary)' }}>
@@ -329,7 +339,7 @@ const Dashboard: React.FC = () => {
       {/* Stats Grid */}
       <div className="stats-grid">
         <div className={`stat-card ${totalPL >= 0 ? 'profit' : 'loss'}`}>
-          <div className="stat-label">Portfolio Value (Total Return)</div>
+          <div className="stat-label">Portfolio Value</div>
           <div className={`stat-value ${getChangeClass(totalPL)}`}>
             {formatCurrency(account.equity)}
           </div>
@@ -371,7 +381,10 @@ const Dashboard: React.FC = () => {
             <span>{botActive ? 'ACTIVE' : 'IDLE'}</span>
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '6px' }}>
-            {tradeLogs.length} events logged
+            {tradeLogs.length} events logged · Daily Scalping:{' '}
+            <strong style={{ color: 'var(--accent-primary)', fontFamily: 'var(--font-mono)' }}>
+              {Number.isFinite(botDailyTrades) ? botDailyTrades : 0}
+            </strong>
           </div>
         </div>
       </div>
