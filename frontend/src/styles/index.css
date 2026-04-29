@@ -1800,11 +1800,17 @@ body {
 }
 
 .auth-invitation-field {
+  margin-top: 20px;
   margin-bottom: 14px;
 }
 
 .auth-invitation-input {
   margin-bottom: 0;
+}
+
+.auth-invitation-field .auth-error,
+.auth-invitation-field .auth-info {
+  margin: 8px 0 0;
 }
 
 .auth-link-btn {

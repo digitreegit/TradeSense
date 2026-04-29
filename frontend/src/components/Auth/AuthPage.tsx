@@ -100,9 +100,6 @@ const AuthPage: React.FC = () => {
           <h2 className="auth-panel-title">{t('openTradeSense')}</h2>
           <p className="auth-subtitle">{t('signInWithGoogle')}</p>
 
-          {error && <p className="auth-error">{error}</p>}
-          {info && <p className="auth-info">{info}</p>}
-
           <div className="auth-invitation-field">
             <label className="auth-field-label" htmlFor="invitation-code">
               {t('invitationCode')}
@@ -120,6 +117,12 @@ const AuthPage: React.FC = () => {
                 disabled={loading}
               />
             </div>
+            {error && (
+              <p className="auth-error auth-invitation-error" role="alert">
+                {error}
+              </p>
+            )}
+            {info && <p className="auth-info auth-invitation-info">{info}</p>}
           </div>
 
           <button
