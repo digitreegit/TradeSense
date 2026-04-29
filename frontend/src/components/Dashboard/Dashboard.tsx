@@ -198,7 +198,9 @@ const Dashboard: React.FC = () => {
                 paddingTop: '12px',
                 borderTop: '1px solid rgba(255,255,255,0.08)'
               }}>
-                {Object.entries((regimeData as any).market_scores).map(([key, val]) => (
+                {Object.entries((regimeData as any).market_scores).map(([key, val]) => {
+                  const score = Number(val);
+                  return (
                   <div key={key} style={{ 
                     fontSize: '11px', 
                     display: 'flex', 
@@ -212,10 +214,11 @@ const Dashboard: React.FC = () => {
                       {key === 'fed' ? 'Fed Policy' : key === 'war' ? 'Geopolitical' : key}
                     </span>
                     <strong style={{ 
-                      color: (val as number) >= 70 ? 'var(--profit)' : (val as number) >= 40 ? '#f59e0b' : 'var(--loss)'
-                    }}>{val}</strong>
+                      color: score >= 70 ? 'var(--profit)' : score >= 40 ? 'var(--warning)' : 'var(--loss)'
+                    }}>{score}</strong>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 

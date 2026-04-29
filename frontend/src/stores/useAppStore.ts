@@ -1,10 +1,16 @@
 import { create } from 'zustand';
-import type { AccountInfo, Position, WatchlistItem, TradeLog, AgentMessage, Strategy, Order, PageId } from './types';
+import type { AccountInfo, Position, WatchlistItem, TradeLog, AgentMessage, Strategy, Order, PageId, RegimeData } from './types';
+import type { ColorMode } from '../theme';
+import { applyColorMode } from '../theme';
 
 interface AppState {
   // Navigation
   currentPage: PageId;
   setCurrentPage: (page: PageId) => void;
+
+  colorMode: ColorMode;
+  setColorMode: (mode: ColorMode) => void;
+  toggleColorMode: () => void;
 
   // Account
   account: AccountInfo;
@@ -56,10 +62,21 @@ interface AppState {
   setDismissedRegimeTimestamp: (ts: string | null) => void;
 }
 
-export const useAppStore = create<AppState>((set) => ({
+export const useAppStore = create<AppState>((set, get) => ({
   // Navigation
   currentPage: 'dashboard',
   setCurrentPage: (page) => set({ currentPage: page }),
+
+  colorMode: 'dark',
+  setColorMode: (mode) => {
+    applyColorMode(mode);
+    set({ colorMode: mode });
+  },
+  toggleColorMode: () => {
+    const next = get().colorMode === 'dark' ? 'light' : 'dark';
+    applyColorMode(next);
+    set({ colorMode: next });
+  },
 
   // Regime
   regimeData: null,

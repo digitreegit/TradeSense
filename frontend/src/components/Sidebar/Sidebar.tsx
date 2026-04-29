@@ -42,7 +42,7 @@ const HistoryIcon = (props: React.ComponentProps<'svg'>) => (
 interface NavItem {
   id: PageId;
   label: string;
-  icon: React.ComponentType;
+  icon: React.ComponentType<React.ComponentProps<'svg'>>;
   section?: string;
 }
 

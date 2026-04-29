@@ -10,7 +10,7 @@ const TF_MAP: Record<string, string> = {
 };
 
 const ChartView: React.FC = () => {
-  const { selectedSymbol, setSelectedSymbol, watchlist } = useAppStore();
+  const { selectedSymbol, setSelectedSymbol, watchlist, colorMode } = useAppStore();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [timeframe, setTimeframe] = useState('1D');
   const [searchInput, setSearchInput] = useState(selectedSymbol);
@@ -64,8 +64,8 @@ const ChartView: React.FC = () => {
     const volumeHeight = height * 0.2;
     const volumeTop = chartHeight + 10;
 
-    // Clear
-    ctx.fillStyle = '#060a13';
+    // Clear — match Cursor editor background (dark / light modern)
+    ctx.fillStyle = colorMode === 'dark' ? '#1f1f1f' : '#ffffff';
     ctx.fillRect(0, 0, width, height);
 
     // Calculate price range
@@ -83,7 +83,7 @@ const ChartView: React.FC = () => {
     const bodyWidth = Math.max(candleWidth * 0.6, 2);
 
     // Grid lines
-    ctx.strokeStyle = 'rgba(148, 163, 184, 0.06)';
+    ctx.strokeStyle = colorMode === 'dark' ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.06)';
     ctx.lineWidth = 1;
     const gridLines = 6;
     for (let i = 0; i <= gridLines; i++) {
@@ -95,7 +95,7 @@ const ChartView: React.FC = () => {
 
       // Price labels
       const price = adjustedMax - (i / gridLines) * adjustedRange;
-      ctx.fillStyle = '#64748b';
+      ctx.fillStyle = colorMode === 'dark' ? '#6e7681' : '#6e7681';
       ctx.font = '11px Inter, sans-serif';
       ctx.textAlign = 'right';
       ctx.fillText(price.toFixed(2), width - 4, y + 3);
@@ -140,8 +140,12 @@ const ChartView: React.FC = () => {
       ctx.stroke();
     };
 
-    if (indicators.ma20) drawMA(ma20, 'rgba(0, 212, 170, 0.6)');
-    if (indicators.ma50) drawMA(ma50, 'rgba(99, 102, 241, 0.6)');
+    if (indicators.ma20) {
+      drawMA(ma20, colorMode === 'dark' ? 'rgba(0, 120, 212, 0.65)' : 'rgba(0, 95, 184, 0.65)');
+    }
+    if (indicators.ma50) {
+      drawMA(ma50, colorMode === 'dark' ? 'rgba(133, 182, 255, 0.65)' : 'rgba(38, 86, 158, 0.58)');
+    }
 
     // Draw candles
     visibleData.forEach((candle, i) => {
@@ -154,7 +158,7 @@ const ChartView: React.FC = () => {
       const lowY = ((adjustedMax - candle.low) / adjustedRange) * chartHeight;
 
       // Wick
-      ctx.strokeStyle = isUp ? '#10b981' : '#ef4444';
+      ctx.strokeStyle = isUp ? '#2ea043' : '#f85149';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(x, highY);
@@ -162,7 +166,7 @@ const ChartView: React.FC = () => {
       ctx.stroke();
 
       // Body
-      ctx.fillStyle = isUp ? '#10b981' : '#ef4444';
+      ctx.fillStyle = isUp ? '#2ea043' : '#f85149';
       const top = Math.min(openY, closeY);
       const bodyHeight = Math.max(Math.abs(closeY - openY), 1);
       ctx.fillRect(x - bodyWidth / 2, top, bodyWidth, bodyHeight);
@@ -177,7 +181,7 @@ const ChartView: React.FC = () => {
         const volHeight = (vol / maxVol) * volumeHeight;
         const isUp = candle.close >= candle.open;
 
-        ctx.fillStyle = isUp ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)';
+        ctx.fillStyle = isUp ? 'rgba(46, 160, 67, 0.22)' : 'rgba(248, 81, 73, 0.22)';
         ctx.fillRect(x + 1, volumeTop + volumeHeight - volHeight, candleWidth - 2, volHeight);
       });
     }
@@ -188,7 +192,7 @@ const ChartView: React.FC = () => {
       const lastY = ((adjustedMax - lastCandle.close) / adjustedRange) * chartHeight;
       const isUp = lastCandle.close >= lastCandle.open;
 
-      ctx.strokeStyle = isUp ? 'rgba(16, 185, 129, 0.5)' : 'rgba(239, 68, 68, 0.5)';
+      ctx.strokeStyle = isUp ? 'rgba(46, 160, 67, 0.45)' : 'rgba(248, 81, 73, 0.45)';
       ctx.setLineDash([4, 4]);
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -198,14 +202,14 @@ const ChartView: React.FC = () => {
       ctx.setLineDash([]);
 
       // Price label
-      ctx.fillStyle = isUp ? '#10b981' : '#ef4444';
+      ctx.fillStyle = isUp ? '#2ea043' : '#f85149';
       ctx.fillRect(width - 52, lastY - 10, 52, 20);
-      ctx.fillStyle = 'white';
+      ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 11px Inter, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(lastCandle.close.toFixed(2), width - 26, lastY + 4);
     }
-  }, [candleData, indicators]);
+  }, [candleData, indicators, colorMode]);
 
   useEffect(() => {
     drawChart();
@@ -338,7 +342,7 @@ const ChartView: React.FC = () => {
             <div style={{
               position: 'absolute', inset: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'rgba(6,10,19,0.8)', zIndex: 10, gap: '12px',
+              background: 'var(--bg-overlay)', zIndex: 10, gap: '12px',
               fontSize: '13px', color: 'var(--text-tertiary)',
             }}>
               <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span>

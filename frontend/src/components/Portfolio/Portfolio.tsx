@@ -176,7 +176,7 @@ const Portfolio: React.FC = () => {
                     <>
                       {positions.map((pos, i) => {
                         const pct = (pos.market_value / account.equity) * 100;
-                        const colors = ['#10b981', '#6366f1', '#f59e0b', '#ef4444', '#8b5cf6'];
+                        const colors = ['#2ea043', '#0078d4', '#bb8009', '#f85149', '#4daafc'];
                         return (
                           <div
                             key={pos.symbol}
@@ -232,7 +232,7 @@ const Portfolio: React.FC = () => {
                   flexWrap: 'wrap',
                 }}>
                   {positions.map((pos, i) => {
-                    const colors = ['#10b981', '#6366f1', '#f59e0b', '#ef4444', '#8b5cf6'];
+                    const colors = ['#2ea043', '#0078d4', '#bb8009', '#f85149', '#4daafc'];
                     const pct = (pos.market_value / account.equity) * 100;
                     return (
                       <div key={pos.symbol} style={{

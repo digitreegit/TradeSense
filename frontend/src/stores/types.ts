@@ -93,6 +93,12 @@ export interface RegimeData {
   prev_strategy?: string;
   prev_risk_level?: string;
   timestamp?: string;
+  /** From backend regime payload (optional) */
+  market_level?: string;
+  market_score?: number;
+  focus_sectors?: string[];
+  focus_symbols?: string[];
+  market_scores?: Record<string, number>;
 }
 
 export type PageId = 'dashboard' | 'chart' | 'agent' | 'trading' | 'portfolio' | 'history';
