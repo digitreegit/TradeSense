@@ -5,6 +5,7 @@ import {
 } from '../../auth/token';
 import { supabase } from '../../auth/supabase';
 import { useI18n } from '../../i18n';
+import api from '../../services/api';
 
 /** Official multicolor “G” mark (Google Sign-In branding pattern, 48×48 artboard) */
 const GoogleIcon = () => (
@@ -33,6 +34,7 @@ const GoogleIcon = () => (
 const AuthPage: React.FC = () => {
   const { setAuthMethod } = useAppStore();
   const { t } = useI18n();
+  const [invitationCode, setInvitationCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -41,6 +43,14 @@ const AuthPage: React.FC = () => {
     setError(null);
     setInfo(null);
     setLoading(true);
+    try {
+      await api.validateInvitation(invitationCode.trim());
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      setError(/invalid invitation/i.test(msg) ? t('invitationInvalid') : t('invitationVerifyFailed'));
+      setLoading(false);
+      return;
+    }
     try {
       const redirectTo = `${window.location.origin}/`;
       const { error: oauthErr } = await supabase.auth.signInWithOAuth({
@@ -92,6 +102,25 @@ const AuthPage: React.FC = () => {
 
           {error && <p className="auth-error">{error}</p>}
           {info && <p className="auth-info">{info}</p>}
+
+          <div className="auth-invitation-field">
+            <label className="auth-field-label" htmlFor="invitation-code">
+              {t('invitationCode')}
+            </label>
+            <div className="auth-input-wrap">
+              <input
+                id="invitation-code"
+                type="text"
+                className="auth-input auth-invitation-input"
+                autoComplete="off"
+                spellCheck={false}
+                value={invitationCode}
+                onChange={(e) => setInvitationCode(e.target.value)}
+                placeholder={t('invitationCodePlaceholder')}
+                disabled={loading}
+              />
+            </div>
+          </div>
 
           <button
             type="button"

@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     host: str = os.getenv("HOST", "0.0.0.0")
     port: int = int(os.getenv("PORT", "8000"))
 
+    # Comma-separated invitation codes (trimmed). Empty = no gate (open sign-in).
+    invitation_codes: str = os.getenv("INVITATION_CODES", "")
+
     # Auth / multi-user (Supabase OAuth + encrypted Alpaca keys)
     supabase_url: str = os.getenv("SUPABASE_URL", "")
     supabase_anon_key: str = os.getenv("SUPABASE_ANON_KEY", "")

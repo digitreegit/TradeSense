@@ -1,6 +1,7 @@
 """Supabase-backed auth + Alpaca key storage (encrypted)."""
 from __future__ import annotations
 
+import secrets
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,6 +15,44 @@ from app.services.notification_service import notification_service
 from app.services.user_runtime import refresh_user_alpaca
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _invitation_codes_allowlist() -> list[str]:
+    raw = (settings.invitation_codes or "").strip()
+    if not raw:
+        return []
+    return [c.strip() for c in raw.split(",") if c.strip()]
+
+
+def _invitation_code_valid(submitted: str) -> bool:
+    """Constant-time compare against configured codes."""
+    allowed = _invitation_codes_allowlist()
+    if not allowed:
+        return True
+    code = (submitted or "").strip()
+    if not code:
+        return False
+    for a in allowed:
+        if len(code) != len(a):
+            continue
+        if secrets.compare_digest(code, a):
+            return True
+    return False
+
+
+class InvitationBody(BaseModel):
+    code: str = Field(default="", max_length=512)
+
+
+@router.post("/validate-invitation")
+async def validate_invitation(body: InvitationBody):
+    """Require a matching code when INVITATION_CODES is non-empty; otherwise allow."""
+    allowed = _invitation_codes_allowlist()
+    if not allowed:
+        return {"valid": True}
+    if not _invitation_code_valid(body.code):
+        raise HTTPException(status_code=403, detail="Invalid invitation code")
+    return {"valid": True}
 
 
 class AlpacaKeysBody(BaseModel):

@@ -182,6 +182,12 @@ export const api = {
       body: JSON.stringify({ strategy, params }),
     }),
 
+  validateInvitation: (code: string) =>
+    request<{ valid: boolean }>('/auth/validate-invitation', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+
   getMe: () =>
     request<{
       authenticated: boolean;
