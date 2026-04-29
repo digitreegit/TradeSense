@@ -113,7 +113,7 @@ const Sidebar: React.FC = () => {
         </div>
         <div className="sidebar-logo-text">
           <h1>TradeSense</h1>
-          <span>AI trading workspace</span>
+          <span>Markets & charts</span>
         </div>
       </div>
 

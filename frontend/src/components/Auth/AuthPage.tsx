@@ -46,10 +46,10 @@ const AuthPage: React.FC = () => {
       <div className="auth-card">
         <section className="auth-hero" aria-label="TradeSense overview">
           <div>
-            <span className="auth-eyebrow">TradeSense Agent</span>
-            <h1 className="auth-title">The best way to trade with AI.</h1>
+            <span className="auth-eyebrow">US stocks</span>
+            <h1 className="auth-title">Market summary, live quotes, and AI trade ideas.</h1>
             <p className="auth-subtitle">
-              Built to make market research, execution, and risk checks feel as focused as coding in Cursor.
+              Track your portfolio, scan active symbols, and launch automated strategies from a TradingView-style workspace.
             </p>
             <button
               type="button"
@@ -64,22 +64,22 @@ const AuthPage: React.FC = () => {
 
           <div className="auth-agent-card" aria-hidden="true">
             <div className="auth-agent-row">
-              <span>This Week</span>
-              <strong>Market Regime Scan</strong>
+              <span>Market summary</span>
+              <strong>Sector performance</strong>
             </div>
             <div className="auth-agent-row">
-              <span>Agent</span>
-              <strong>Risk-aware scalping</strong>
+              <span>Most active</span>
+              <strong>NVDA · TSLA · AMD</strong>
             </div>
             <div className="auth-agent-row">
-              <span>Done</span>
-              <strong>Daily summary ready</strong>
+              <span>Ideas</span>
+              <strong>Long / Short setups</strong>
             </div>
           </div>
         </section>
 
         <section className="auth-panel" aria-label="Sign in">
-          <h2 className="auth-panel-title">Start with TradeSense</h2>
+          <h2 className="auth-panel-title">Open TradeSense</h2>
           <p className="auth-subtitle">Sign in with Google to continue.</p>
 
           {error && <p className="auth-error">{error}</p>}

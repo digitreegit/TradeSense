@@ -44,7 +44,7 @@ const Header: React.FC = () => {
     <header className="header">
       <div className="header-left">
         <h2 className="header-title">{titles[currentPage] || 'Dashboard'}</h2>
-        <span className="header-badge">Ask TradeSense to plan, scan, or trade</span>
+        <span className="header-badge">US stocks · Overview · Market summary</span>
       </div>
       <div className="header-right">
         <div className="market-status">
