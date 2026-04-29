@@ -10,6 +10,9 @@ This module is intentionally small:
 
 - ``LATEST_TRADE[sym]`` → most recent (price, ts)
 - ``LATEST_QUOTE[sym]`` → most recent (bid, ask, bid_size, ask_size, ts)
+- ``MINUTE_BARS[sym]`` → deque of recent **1-minute** OHLCV bars from
+  ``subscribe_bars`` (Alpaca streams minute bars only).  Callers that need
+  ``5Min`` bars aggregate these in memory; see :func:`intraday_bars_from_buffer`.
 - ``start(...)`` / ``stop()`` lifecycle helpers called from FastAPI lifespan.
 
 ``feed`` should be:
@@ -21,7 +24,9 @@ This module is intentionally small:
 
 Callers should treat the cache as *best-effort*: if the connection
 drops, :func:`latest_trade` / :func:`latest_quote` return ``None`` and
-callers should fall back to the REST snapshot path.
+callers should fall back to the REST snapshot path.  Minute bars use the
+same rule: :func:`intraday_bars_from_buffer` returns ``None`` until the
+buffer is warm, then :class:`AlpacaService` falls back to REST history.
 """
 from __future__ import annotations
 
@@ -29,8 +34,9 @@ import asyncio
 import logging
 import os
 import time
+from collections import deque
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +62,9 @@ class Quote:
 # Module-level caches — tiny, O(1) reads, safe across coroutines.
 LATEST_TRADE: Dict[str, Trade] = {}
 LATEST_QUOTE: Dict[str, Quote] = {}
+# Completed 1-minute bars from WebSocket (newest at the right).
+MINUTE_BARS: Dict[str, deque] = {}
+BAR_BUFFER_MAX: int = max(60, int(os.getenv("STREAMING_BAR_BUFFER", "360")))
 
 _task: Optional[asyncio.Task] = None
 _stop_evt: Optional[asyncio.Event] = None
@@ -65,6 +74,7 @@ _state: Dict[str, object] = {
     "last_error": None,
     "feed": None,
     "started_at": None,
+    "minute_bars_channel": None,  # True / False once subscribe_bars attempted
 }
 
 
@@ -76,16 +86,115 @@ def latest_quote(symbol: str) -> Optional[Quote]:
     return LATEST_QUOTE.get(symbol.upper())
 
 
-def state() -> Dict[str, object]:
+def _bar_buffer_quick_stats() -> Dict[str, Any]:
+    """Cheap stats for /health (no per-symbol aggregation)."""
+    depths = [len(MINUTE_BARS[s]) for s in _subscribed if s in MINUTE_BARS]
+    if not depths:
+        return {
+            "symbols_with_1m": 0,
+            "max_1m_depth": 0,
+            "likely_warm_5m": 0,
+        }
     return {
-        **_state,
-        "subscribed": sorted(_subscribed),
-        "cached_symbols": len(LATEST_TRADE),
+        "symbols_with_1m": len(depths),
+        "max_1m_depth": max(depths),
+        # Heuristic: ~20 full 5m bars need ~100 consecutive 1m bars
+        "likely_warm_5m": sum(1 for d in depths if d >= 100),
     }
 
 
+def state() -> Dict[str, object]:
+    out: Dict[str, Any] = {
+        **_state,
+        "subscribed": sorted(_subscribed),
+        "cached_symbols": len(LATEST_TRADE),
+        "minute_bar_symbols": len(MINUTE_BARS),
+        "bar_buffer_max": BAR_BUFFER_MAX,
+        "bars": _bar_buffer_quick_stats(),
+    }
+    started = _state.get("started_at")
+    if isinstance(started, (int, float)) and _state.get("connected"):
+        out["connected_seconds"] = round(time.time() - float(started), 1)
+    return out
+
+
+def _aggregate_minutes_to_period(minutes: List[Dict[str, Any]], period_minutes: int) -> List[Dict[str, Any]]:
+    """Roll 1-minute bars into *period_minutes* OHLCV (bucket start timestamps)."""
+    if not minutes or period_minutes < 1:
+        return []
+    period_sec = period_minutes * 60
+    out: List[Dict[str, Any]] = []
+    cur_bucket: Optional[int] = None
+    cur: Optional[Dict[str, Any]] = None
+    for b in minutes:
+        ts = int(b["time"])
+        bs = ts - (ts % period_sec)
+        if cur_bucket != bs:
+            if cur is not None:
+                out.append(cur)
+            cur_bucket = bs
+            cur = {
+                "time": bs,
+                "open": float(b["open"]),
+                "high": float(b["high"]),
+                "low": float(b["low"]),
+                "close": float(b["close"]),
+                "volume": int(b["volume"]),
+            }
+        else:
+            if cur is None:
+                cur_bucket = bs
+                cur = {
+                    "time": bs,
+                    "open": float(b["open"]),
+                    "high": float(b["high"]),
+                    "low": float(b["low"]),
+                    "close": float(b["close"]),
+                    "volume": int(b["volume"]),
+                }
+                continue
+            cur["high"] = max(cur["high"], float(b["high"]))
+            cur["low"] = min(cur["low"], float(b["low"]))
+            cur["close"] = float(b["close"])
+            cur["volume"] = int(cur["volume"]) + int(b["volume"])
+    if cur is not None:
+        out.append(cur)
+    return out
+
+
+def intraday_bars_from_buffer(
+    symbol: str,
+    timeframe: str,
+    limit: int,
+    *,
+    min_rows: int = 20,
+) -> Optional[List[Dict[str, Any]]]:
+    """
+    Build ``1Min`` / ``5Min`` bar lists from the WebSocket minute buffer.
+
+    Returns ``None`` if the buffer is too thin so callers can REST backfill.
+    """
+    sym = symbol.upper()
+    buf = MINUTE_BARS.get(sym)
+    if not buf or len(buf) < 1:
+        return None
+    minutes = list(buf)
+    tf = (timeframe or "").strip()
+    required = min(limit, min_rows) if limit < min_rows else min_rows
+    if tf == "1Min":
+        if len(minutes) < required:
+            return None
+        return minutes[-limit:] if limit > 0 else minutes
+    if tf == "5Min":
+        agg = _aggregate_minutes_to_period(minutes, 5)
+        if len(agg) < required:
+            return None
+        return agg[-limit:] if limit > 0 else agg
+    return None
+
+
 async def _run_stream(symbols: Iterable[str], api_key: str, secret: str, feed: str) -> None:
-    """Subscribe to Alpaca WebSocket trades + quotes for ``symbols``."""
+    """Subscribe to Alpaca WebSocket trades, quotes, and minute bars for ``symbols``."""
     try:
         from alpaca.data.live import StockDataStream  # type: ignore
     except Exception as exc:  # noqa: BLE001
@@ -94,6 +203,7 @@ async def _run_stream(symbols: Iterable[str], api_key: str, secret: str, feed: s
         return
 
     stream = StockDataStream(api_key, secret, feed=feed)
+    _state["minute_bars_channel"] = None
 
     async def on_trade(trade):
         sym = str(getattr(trade, "symbol", "")).upper()
@@ -123,6 +233,30 @@ async def _run_stream(symbols: Iterable[str], api_key: str, secret: str, feed: s
             ts=float(ts),
         )
 
+    async def on_bar(bar):
+        sym = str(getattr(bar, "symbol", "")).upper()
+        if not sym:
+            return
+        ts_obj = getattr(bar, "timestamp", None)
+        if ts_obj:
+            ts = int(ts_obj.timestamp())
+        else:
+            ts = int(time.time())
+        ts = ts - (ts % 60)
+        row = {
+            "time": ts,
+            "open": float(getattr(bar, "open", 0.0) or 0.0),
+            "high": float(getattr(bar, "high", 0.0) or 0.0),
+            "low": float(getattr(bar, "low", 0.0) or 0.0),
+            "close": float(getattr(bar, "close", 0.0) or 0.0),
+            "volume": int(getattr(bar, "volume", 0) or 0),
+        }
+        dq = MINUTE_BARS.setdefault(sym, deque(maxlen=BAR_BUFFER_MAX))
+        if dq and dq[-1]["time"] == ts:
+            dq[-1] = row
+        else:
+            dq.append(row)
+
     syms = sorted({s.upper() for s in symbols if s})
     _subscribed.update(syms)
 
@@ -134,9 +268,19 @@ async def _run_stream(symbols: Iterable[str], api_key: str, secret: str, feed: s
         _state["last_error"] = f"subscribe: {exc}"
         return
 
+    try:
+        stream.subscribe_bars(on_bar, *syms)
+        _state["minute_bars_channel"] = True
+    except Exception as exc:  # noqa: BLE001
+        _state["minute_bars_channel"] = False
+        logger.warning("streaming: subscribe_bars failed (minute bars via REST only): %s", exc)
+
+    ch = _state.get("minute_bars_channel")
     logger.info(
-        "streaming: subscribed trades+quotes on %d symbols (feed=%s)",
-        len(syms), feed,
+        "streaming: subscribed trades+quotes%s on %d symbols (feed=%s)",
+        "+bars" if ch else " (no bar channel)",
+        len(syms),
+        feed,
     )
     _state["connected"] = True
     _state["feed"] = feed
@@ -189,6 +333,13 @@ def start(symbols: Iterable[str], api_key: str, secret: str, feed: Optional[str]
     syms = sorted({s.upper() for s in symbols if s})
     if not syms:
         return
+    global BAR_BUFFER_MAX
+    try:
+        from app.core.config import settings as _settings
+
+        BAR_BUFFER_MAX = max(60, int(getattr(_settings, "streaming_bar_buffer_max", 360)))
+    except Exception:
+        BAR_BUFFER_MAX = max(60, int(os.getenv("STREAMING_BAR_BUFFER", "360")))
     feed = (feed or os.getenv("ALPACA_DATA_FEED", "iex")).lower()
     _stop_evt = asyncio.Event()
     _task = asyncio.create_task(_supervisor(syms, api_key, secret, feed))
@@ -211,6 +362,9 @@ async def stop() -> None:
             pass
     _task = None
     _state["connected"] = False
+    _state["minute_bars_channel"] = None
+    _state["started_at"] = None
+    MINUTE_BARS.clear()
 
 
 stop_streaming = stop

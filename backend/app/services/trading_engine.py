@@ -58,6 +58,32 @@ def is_market_open() -> bool:
     return market_open <= now_et.time() <= market_close
 
 
+def is_extended_equity_session(now_et: datetime) -> bool:
+    """Pre 04:00–09:30 ET or post 16:00–20:00 ET (weekdays)."""
+    if now_et.weekday() >= 5:
+        return False
+    t = now_et.time()
+    pre = time(4, 0) <= t < time(9, 30)
+    post = time(16, 0) < t <= time(20, 0)
+    return pre or post
+
+
+def is_tradable_equity_session(now_et: datetime, *, allow_extended: bool) -> bool:
+    """RTH or (optional) Alpaca stock extended hours."""
+    if is_market_open():
+        return True
+    return bool(allow_extended and is_extended_equity_session(now_et))
+
+
+def _norm_broker_status(raw: Optional[str]) -> str:
+    if not raw:
+        return ""
+    s = str(raw).lower()
+    if "." in s:
+        s = s.split(".")[-1]
+    return s.strip()
+
+
 class TradingEngine:
     """Cash-account scalp engine with GFV prevention."""
 
@@ -148,9 +174,7 @@ class TradingEngine:
         table = RISK_PRESETS_FOR(self._scale)
         self._preset = table["moderate"]
 
-        # Track open orders we've submitted so we can reconcile fills for
-        # execution-quality analysis.
-        # broker_id → client_id
+        # broker_id → metadata for compliance + stats after terminal status
         self._pending_reconcile: dict = {}
 
         self.regime_data: dict = {
@@ -174,6 +198,8 @@ class TradingEngine:
             "capital_scale": self._scale,
             "blackout": False,
             "blackout_reason": "",
+            "equity_session": "closed",
+            "allow_extended_hours": getattr(settings, "allow_extended_hours", False),
             "timestamp": datetime.now().strftime("%b %d, %Y, %-I:%M%p"),
         }
 
@@ -198,6 +224,38 @@ class TradingEngine:
         self.manual_playbooks: list = ["scalp", "vwap", "orb", "eod"]
         self._last_active_playbooks: list = list(self.manual_playbooks)
         self._sync_regime_playbook_display()
+
+    def _entry_order_tif(self) -> str:
+        raw = (getattr(settings, "default_order_tif", "") or "").strip().lower()
+        if raw in ("day", "ioc", "fok", "gtc"):
+            return raw
+        return (self._preset.default_tif or "ioc").strip().lower()
+
+    def _exit_order_tif(self) -> str:
+        raw = (getattr(settings, "exit_order_tif", "") or "").strip().lower()
+        if raw in ("day", "ioc", "fok", "gtc"):
+            return raw
+        return "day"
+
+    def _exit_tif_for_reason(self, exit_reason: str) -> str:
+        """Stop / loss → IOC (cut rest); TP / trail → DAY (better partials)."""
+        er = (exit_reason or "").upper()
+        if "STOP" in er or "🔴" in (exit_reason or ""):
+            raw = (getattr(settings, "exit_stop_loss_tif", "ioc") or "ioc").strip().lower()
+        else:
+            tp = (getattr(settings, "exit_take_profit_tif", "") or "").strip().lower()
+            raw = tp if tp in ("day", "ioc", "fok", "gtc") else self._exit_order_tif()
+        if raw in ("day", "ioc", "fok", "gtc"):
+            return raw
+        return "ioc"
+
+    def _use_extended_limit_orders(self, now_et: datetime) -> bool:
+        """Alpaca extended session requires limit + DAY + extended_hours flag."""
+        return bool(
+            getattr(settings, "allow_extended_hours", False)
+            and is_extended_equity_session(now_et)
+            and not is_market_open()
+        )
 
     def set_owner_email(self, email: Optional[str]) -> None:
         """Attach/update recipient email for per-user notifications."""
@@ -451,13 +509,18 @@ class TradingEngine:
             self._reset_daily(today)
             self._compliance.sweep_settlements()
 
+        ext_schedule = getattr(settings, "allow_extended_hours", False)
+        sess_start = time(3, 55) if ext_schedule else time(9, 20)
+        sess_end = time(20, 5) if ext_schedule else time(16, 10)
+
         if not is_weekend:
-            if market_time >= time(9, 20) and market_time < time(16, 10):
+            if market_time >= sess_start and market_time < sess_end:
                 if not self.active:
                     from app.services.notification_service import notification_service
                     self.active = True
                     self.active_strategy = "scalp"
-                    self._log("info", "[Auto-Start] Market opening — Scalp bot ACTIVE")
+                    label = "Extended + RTH" if ext_schedule else "RTH"
+                    self._log("info", f"[Auto-Start] {label} window — Scalp bot ACTIVE")
                     notification_service.send_alert(
                         "🚀 Scalp bot started",
                         f"Today's target: +{self._preset.daily_target_percent}% "
@@ -467,7 +530,7 @@ class TradingEngine:
                         user_id=self._notify_user_id,
                     )
 
-            if market_time >= time(16, 10) and self.active:
+            if market_time >= sess_end and self.active:
                 from app.services.notification_service import notification_service
                 self.active = False
                 self._log(
@@ -496,14 +559,29 @@ class TradingEngine:
 
         self._sync_regime_playbook_display(now_et)
 
+        if is_market_open():
+            self.regime_data["equity_session"] = "rth"
+        elif is_extended_equity_session(now_et):
+            self.regime_data["equity_session"] = "extended"
+        else:
+            self.regime_data["equity_session"] = "closed"
+        self.regime_data["allow_extended_hours"] = getattr(settings, "allow_extended_hours", False)
+
         if not self.active:
             return
 
         self._scan_count += 1
 
-        if not is_market_open():
+        allow_ext = getattr(settings, "allow_extended_hours", False)
+        if not is_tradable_equity_session(now_et, allow_extended=allow_ext):
             if self._scan_count % 5 == 1:
-                self._log("info", f"Standby — Market opens at 9:30 AM ET | Now: {now_et.strftime('%H:%M ET')}")
+                self._log(
+                    "info",
+                    "Standby — outside equity session "
+                    f"(RTH 9:30–4:00 ET"
+                    f"{'; extended 4:00–9:30 & 4–8p enabled' if allow_ext else ''}) "
+                    f"| Now: {now_et.strftime('%H:%M ET')}",
+                )
             return
 
         if self._daily_loss_limit_hit:
@@ -612,45 +690,110 @@ class TradingEngine:
     # ─── Fill reconciliation for execution quality logging ─────────
 
     def _reconcile_pending_fills(self) -> None:
-        """Poll broker for status on any order we previously submitted and
-        record slippage once it fills. Safe to call on every scan; bounded
-        by ``_pending_reconcile`` size.
-        """
+        """Poll broker for terminal order status; log fills + apply compliance on *filled* qty."""
         if not self._pending_reconcile:
             return
         to_drop: list = []
-        for broker_id, client_id in list(self._pending_reconcile.items()):
+        for broker_id, meta in list(self._pending_reconcile.items()):
             try:
                 info = self._alpaca.get_order(broker_id)
             except Exception:
                 continue
             if not info:
                 continue
-            status = info.get("status", "")
-            terminal = {"filled", "canceled", "expired", "rejected", "done_for_day"}
-            if status not in terminal and info.get("filled_avg_price") is None:
+            st = _norm_broker_status(info.get("status"))
+            if st == "partially_filled":
                 continue
-            filled_price = info.get("filled_avg_price") or 0.0
-            filled_qty = info.get("filled_qty") or 0.0
+            pending_live = {
+                "new", "pending_new", "accepted", "pending_replace",
+                "pending_cancel", "calculated", "held", "suspended",
+            }
+            if st in pending_live:
+                continue
+            terminal = {"filled", "canceled", "expired", "rejected", "done_for_day"}
+            if st not in terminal:
+                continue
+
+            client_id = meta["client_id"]
+            filled_price = float(info.get("filled_avg_price") or 0.0)
+            filled_qty = float(info.get("filled_qty") or 0.0)
             slip = self._exec_logger.log_fill(
                 client_id,
-                filled_avg_price=float(filled_price or 0.0),
-                filled_qty=float(filled_qty or 0.0),
-                status=str(status),
+                filled_avg_price=filled_price,
+                filled_qty=filled_qty,
+                status=st,
                 filled_at=info.get("filled_at"),
             )
             if slip is not None:
                 self.session_stats["slippage_bps_sum"] += slip
                 self.session_stats["slippage_bps_count"] += 1
+
+            sym = meta["symbol"]
+            if meta["kind"] == "buy" and filled_qty > 0:
+                px = filled_price or float(meta.get("signal_price") or 0.0)
+                self._compliance.record_buy(
+                    sym, int(filled_qty), px, float(meta.get("settled_before") or 0.0)
+                )
+                self._position_peaks[sym] = 0.0
+                self._daily_trades += 1
+                self.session_stats["total_trades"] += 1
+                self._log("buy", f"✅ Fill BUY {int(filled_qty)} × {sym} @ ${px:.2f}")
+            elif meta["kind"] == "sell" and filled_qty > 0:
+                px = filled_price or float(meta.get("signal_price") or 0.0)
+                avg_e = float(meta.get("avg_entry_price") or 0.0)
+                cost_basis = filled_qty * avg_e
+                self._compliance.record_sell(sym, int(filled_qty), px, cost_basis)
+                intended = max(1, int(meta.get("intended_qty") or 1))
+                pl_full = meta.get("exit_pl_usd")
+                if pl_full is not None:
+                    pl_part = float(pl_full) * (filled_qty / float(intended))
+                else:
+                    pl_part = 0.0
+                if filled_qty + 1e-9 >= intended:
+                    self._position_peaks.pop(sym, None)
+                else:
+                    self._log("info", f"Partial exit {sym}: filled {int(filled_qty)}/{intended}")
+                self._daily_trades += 1
+                self.session_stats["total_trades"] += 1
+                if pl_part > 0:
+                    self.session_stats["winning_trades"] += 1
+                    self.session_stats["win_sum"] += pl_part
+                elif pl_part < 0:
+                    self.session_stats["losing_trades"] += 1
+                    self.session_stats["loss_sum"] += abs(pl_part)
+                self.session_stats["total_pnl"] += pl_part
+                self._log("sell", f"✅ Fill SELL {int(filled_qty)} × {sym} @ ${px:.2f}")
+
             to_drop.append(broker_id)
         for bid in to_drop:
             self._pending_reconcile.pop(bid, None)
 
-    def _track_for_reconcile(self, order: dict) -> None:
+    def _track_for_reconcile(
+        self,
+        order: dict,
+        *,
+        kind: str,
+        symbol: str,
+        settled_before: float = 0.0,
+        signal_price: float = 0.0,
+        avg_entry_price: float = 0.0,
+        intended_qty: int = 0,
+        exit_pl_usd: Optional[float] = None,
+    ) -> None:
         bid = order.get("id")
         cid = order.get("client_id")
-        if bid and cid:
-            self._pending_reconcile[bid] = cid
+        if not bid or not cid:
+            return
+        self._pending_reconcile[str(bid)] = {
+            "client_id": cid,
+            "kind": kind,
+            "symbol": symbol,
+            "settled_before": float(settled_before),
+            "signal_price": float(signal_price),
+            "avg_entry_price": float(avg_entry_price),
+            "intended_qty": int(intended_qty or order.get("qty") or 0),
+            "exit_pl_usd": exit_pl_usd,
+        }
 
     # ── Legacy Position Cleanup ─────────────────────────────────
 
@@ -663,18 +806,65 @@ class TradingEngine:
 
             self._log("info", f"🧹 Cleaning up {len(positions)} legacy positions from old strategy...")
 
+            now_l = datetime.now(ET)
+            use_ext_l = self._use_extended_limit_orders(now_l)
+            acct_l = self._alpaca.get_account()
+            settled_l = self._compliance.settled_cash(float(acct_l.get("cash") or 0.0))
+
             for pos in positions:
                 symbol = pos["symbol"]
                 raw_qty = int(pos["qty"])
                 if raw_qty == 0:
                     continue
+                snapshot = self._alpaca.get_snapshot(symbol) or {}
+                ref = float(pos.get("current_price") or 0.0)
+                wide_spread = 5.0
+                xtif = "day" if use_ext_l else self._exit_order_tif()
+                etif = "day" if use_ext_l else self._entry_order_tif()
                 if raw_qty > 0:
                     self._log("info", f"  Selling {raw_qty}x {symbol} (legacy cleanup)")
-                    res = self._alpaca.submit_market_order(symbol, raw_qty, "sell")
+                    res = self._executor.sell(
+                        symbol,
+                        raw_qty,
+                        snapshot,
+                        wide_spread,
+                        tif=xtif,
+                        extended_hours=use_ext_l,
+                        reasons=["legacy_cleanup"],
+                        ref_price=ref,
+                    )
+                    if "error" not in res:
+                        self._track_for_reconcile(
+                            res,
+                            kind="sell",
+                            symbol=symbol,
+                            signal_price=ref,
+                            avg_entry_price=float(pos.get("avg_entry_price") or ref),
+                            intended_qty=raw_qty,
+                            exit_pl_usd=None,
+                        )
                 else:
                     cover_qty = abs(raw_qty)
                     self._log("info", f"  Covering {cover_qty}x {symbol} short position (legacy cleanup)")
-                    res = self._alpaca.submit_market_order(symbol, cover_qty, "buy")
+                    res = self._executor.buy(
+                        symbol,
+                        cover_qty,
+                        snapshot,
+                        wide_spread,
+                        tif=etif,
+                        extended_hours=use_ext_l,
+                        reasons=["legacy_short_cover"],
+                        ref_price=ref,
+                    )
+                    if "error" not in res:
+                        self._track_for_reconcile(
+                            res,
+                            kind="buy",
+                            symbol=symbol,
+                            settled_before=settled_l,
+                            signal_price=ref,
+                            intended_qty=cover_qty,
+                        )
 
                 if "error" in res:
                     self._log("error", f"  Failed to close {symbol}: {res['error']}")
@@ -836,6 +1026,7 @@ class TradingEngine:
 
         pending_symbols = [o["symbol"] for o in pending]
         current_symbols = [p["symbol"] for p in positions]
+        use_ext = self._use_extended_limit_orders(now_et)
 
         # ── 1. Manage open positions ────────────────────────────
         for pos in positions:
@@ -848,7 +1039,27 @@ class TradingEngine:
                 if symbol in pending_symbols:
                     continue
                 self._log("error", f"⚠️ EMERGENCY COVER {symbol}: qty={pos['qty']}")
-                self._alpaca.submit_market_order(symbol, abs(qty_to_sell), "buy")
+                snap = self._alpaca.get_snapshot(symbol) or {}
+                etif = "day" if use_ext else self._entry_order_tif()
+                er = self._executor.buy(
+                    symbol,
+                    abs(qty_to_sell),
+                    snap,
+                    99.0,
+                    tif=etif,
+                    extended_hours=use_ext,
+                    reasons=["emergency_short_cover"],
+                    ref_price=float(pos.get("current_price") or 0.0),
+                )
+                if "error" not in er:
+                    self._track_for_reconcile(
+                        er,
+                        kind="buy",
+                        symbol=symbol,
+                        settled_before=settled,
+                        signal_price=float(pos.get("current_price") or 0.0),
+                        intended_qty=abs(qty_to_sell),
+                    )
                 continue
             if qty_to_sell <= 0:
                 continue
@@ -874,12 +1085,14 @@ class TradingEngine:
                 continue
 
             self._log("sell", f"{exit_reason} {symbol} (${pl_usd:+,.2f})")
+            exit_tif = "day" if use_ext else self._exit_tif_for_reason(exit_reason)
             res = self._executor.sell(
                 symbol,
                 qty_to_sell,
                 snapshot,
                 preset.spread_filter_percent,
-                tif="day",  # exits are always DAY so partial fills keep working
+                tif=exit_tif,
+                extended_hours=use_ext,
                 reasons=[exit_reason],
                 playbook=active_playbook_tag,
                 ref_price=float(pos.get("current_price") or pos.get("avg_entry_price") or 0.0),
@@ -887,22 +1100,15 @@ class TradingEngine:
             if "error" in res:
                 self._log("error", f"Exit failed {symbol}: {res['error']}")
                 continue
-            self._track_for_reconcile(res)
-
-            exit_price = float(pos.get("current_price") or pos.get("avg_entry_price") or 0.0)
-            cost_basis = qty_to_sell * float(pos.get("avg_entry_price") or 0.0)
-            self._compliance.record_sell(symbol, qty_to_sell, exit_price, cost_basis)
-            self._position_peaks.pop(symbol, None)
-
-            self._daily_trades += 1
-            self.session_stats["total_trades"] += 1
-            if pl_usd > 0:
-                self.session_stats["winning_trades"] += 1
-                self.session_stats["win_sum"] += pl_usd
-            else:
-                self.session_stats["losing_trades"] += 1
-                self.session_stats["loss_sum"] += abs(pl_usd)
-            self.session_stats["total_pnl"] += pl_usd
+            self._track_for_reconcile(
+                res,
+                kind="sell",
+                symbol=symbol,
+                signal_price=float(pos.get("current_price") or pos.get("avg_entry_price") or 0.0),
+                avg_entry_price=float(pos.get("avg_entry_price") or 0.0),
+                intended_qty=qty_to_sell,
+                exit_pl_usd=float(pl_usd),
+            )
 
         # Loss-streak circuit breaker
         if self._compliance.loss_streak >= 3 and not self._compliance.is_cooling_down():
@@ -1022,12 +1228,14 @@ class TradingEngine:
             )
 
             settled_before = settled
+            entry_tif = "day" if use_ext else self._entry_order_tif()
             res = self._executor.buy(
                 symbol,
                 qty,
                 snapshot,
                 preset.spread_filter_percent,
-                tif=preset.default_tif,
+                tif=entry_tif,
+                extended_hours=use_ext,
                 score=float(score_val),
                 reasons=reasons,
                 playbook=active_playbook_tag,
@@ -1036,14 +1244,17 @@ class TradingEngine:
             if "error" in res:
                 self._log("error", f"Order failed {symbol}: {res['error']}")
                 continue
-            self._track_for_reconcile(res)
-
-            self._compliance.record_buy(symbol, qty, price, settled_before)
-            self._position_peaks[symbol] = 0.0
-            self._log("buy", f"✅ BOUGHT {qty} × {symbol} @ ~${price:.2f} (${cost:,.0f})")
-            self._daily_trades += 1
-            self.session_stats["total_trades"] += 1
-            settled -= cost
+            self._track_for_reconcile(
+                res,
+                kind="buy",
+                symbol=symbol,
+                settled_before=settled_before,
+                signal_price=float(ask or price),
+                intended_qty=qty,
+            )
+            self._log("buy", f"📨 BUY submitted {qty} × {symbol} @ ~${price:.2f} (${cost:,.0f}) — awaiting fill")
+            acct2 = self._alpaca.get_account()
+            settled = self._compliance.settled_cash(float(acct2.get("cash") or 0.0))
 
     # ─── Technical Indicators ──────────────────────────────────
 

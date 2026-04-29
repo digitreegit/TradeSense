@@ -379,7 +379,7 @@ class AlpacaService:
 
     # ─── Orders ────────────────────────────────────────────────
     def submit_market_order(self, symbol: str, qty: float, side: str) -> dict:
-        """Submit a market order with cash-account protection."""
+        """Submit a market order (escape hatch). Prefer :class:`Executor` marketable limits."""
         if not self.is_ready:
             return {"error": "Alpaca not initialized"}
 
@@ -423,12 +423,18 @@ class AlpacaService:
         side: str,
         limit_price: float,
         tif: str = "day",
+        *,
+        extended_hours: bool = False,
     ) -> dict:
         """Submit a limit order with cash-account protection.
 
-        ``tif`` may be ``"day"`` or ``"ioc"`` (Immediate-Or-Cancel). IOC is
-        preferred for marketable-limit scalp entries so unfilled remainders
-        don't linger and lock settled cash.
+        ``tif`` may be ``"day"``, ``"ioc"``, ``"fok"`` (Fill-Or-Kill), or ``"gtc"``.
+        IOC/FOK are preferred for marketable-limit scalps: no full unfilled
+        rests locking cash (FOK is all-or-nothing).
+
+        Alpaca only supports ``extended_hours`` with **limit** orders and
+        ``time_in_force=day`` — callers must pass ``tif="day"`` when
+        ``extended_hours`` is true.
         """
         if not self.is_ready:
             return {"error": "Alpaca not initialized"}
@@ -450,14 +456,20 @@ class AlpacaService:
                 "ioc": TimeInForce.IOC,
                 "gtc": TimeInForce.GTC,
             }
-            tif_enum = tif_map.get((tif or "day").lower(), TimeInForce.DAY)
-            request = LimitOrderRequest(
+            if hasattr(TimeInForce, "FOK"):
+                tif_map["fok"] = getattr(TimeInForce, "FOK")
+            tif_key = (tif or "day").lower()
+            tif_enum = tif_map.get(tif_key, TimeInForce.DAY)
+            req_kw = dict(
                 symbol=symbol,
                 qty=qty,
                 side=order_side,
                 time_in_force=tif_enum,
                 limit_price=limit_price,
             )
+            if extended_hours:
+                req_kw["extended_hours"] = True
+            request = LimitOrderRequest(**req_kw)
             order = self.trading_client.submit_order(request)
             return {
                 "id": str(order.id),
@@ -467,6 +479,7 @@ class AlpacaService:
                 "type": "limit",
                 "tif": (tif or "day").lower(),
                 "limit_price": limit_price,
+                "extended_hours": bool(extended_hours),
                 "status": str(order.status),
                 "submitted_at": str(order.submitted_at),
             }
@@ -566,7 +579,10 @@ class AlpacaService:
 
     # ─── Market Data ───────────────────────────────────────────
     def get_bars(self, symbol: str, timeframe: str = "1Day", limit: int = 100) -> list:
-        """Get historical bar data. Uses configured feed (IEX free / SIP paid)."""
+        """
+        Historical bar data. Intraday ``1Min`` / ``5Min`` prefer the WebSocket
+        minute buffer when warm; otherwise REST (IEX or SIP per config).
+        """
         if not self.is_ready or not self.data_client:
             return self._demo_bars(symbol, limit)
 
@@ -582,6 +598,24 @@ class AlpacaService:
         tf = tf_map.get(timeframe, TimeFrame(1, TimeFrameUnit.Day))
         is_intraday = timeframe in ("1Min", "5Min", "15Min", "1H", "4H")
         lookback_days = 3 if is_intraday else 365
+
+        if is_intraday and timeframe in ("1Min", "5Min"):
+            try:
+                from app.services import streaming_service as _stream
+                min_need = 14 if timeframe == "1Min" else 20
+                cached = _stream.intraday_bars_from_buffer(
+                    symbol, timeframe, limit, min_rows=min_need
+                )
+                if cached is not None:
+                    logger.debug(
+                        "bars %s %s limit=%d source=ws (minute buffer)",
+                        symbol,
+                        timeframe,
+                        limit,
+                    )
+                    return cached
+            except Exception:
+                pass
 
         feed = _resolve_feed()
         try:
@@ -605,6 +639,14 @@ class AlpacaService:
                     }
                     for bar in bars[symbol]
                 ]
+                if is_intraday and timeframe in ("1Min", "5Min"):
+                    logger.debug(
+                        "bars %s %s limit=%d source=rest n=%d",
+                        symbol,
+                        timeframe,
+                        limit,
+                        len(result),
+                    )
                 return result
         except Exception as e:
             logger.warning("Bars attempt failed (feed=%s): %s", feed, e)

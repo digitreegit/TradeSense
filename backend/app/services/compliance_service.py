@@ -1,19 +1,27 @@
 """
-Cash-account compliance tracking: GFV / free-riding + short-term tax logs.
+Cash-account compliance tracking: GFV / free-riding + T+1 proceeds + tax lots.
 
-The trading engine calls these hooks on every buy / sell. State is kept
-in-memory (fine for a single-process micro-scalper). Persist to disk /
-SQLite later if you need restart-resilience.
+- **T+1 settlement** (SEC 34-96930, 2024-05-28): sell proceeds are modelled as
+  unavailable until the settlement date; ``settled_cash()`` subtracts only
+  *still-unsettled* pending sale amounts (not a monotonic lump sum).
+
+- **Tax lots (FIFO)**: each buy opens a lot with a stable ``lot_id``. Sells
+  close lots first-in-first-out so realized P/L and wash-sale candidates are
+  logged per closed lot.
+
+State is in-memory; JSONL under ``TRADESENSE_LOG_DIR`` for realized trades
+and wash-sale analytics.
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
-from collections import defaultdict
+import uuid
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pytz
 
@@ -22,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 # Settlement for US equities is T+1 as of 2024-05-28 (SEC Release 34-96930).
 SETTLE_DAYS = 1
+WASH_SALE_LOOKBACK_DAYS = 30
 
 
 def _today_et() -> date:
@@ -33,41 +42,45 @@ def _next_business_day(d: date, days: int = 1) -> date:
     added = 0
     while added < days:
         out = out + timedelta(days=1)
-        if out.weekday() < 5:  # Mon..Fri
+        if out.weekday() < 5:
             added += 1
     return out
 
 
-class UnsettledLot:
-    __slots__ = ("symbol", "qty", "cost", "bought_on", "settles_on", "used_unsettled")
+@dataclass
+class TaxLot:
+    """Open long lot (cash account)."""
 
-    def __init__(self, symbol: str, qty: int, cost: float, used_unsettled: bool):
-        self.symbol = symbol
-        self.qty = qty
-        self.cost = cost
-        self.bought_on = _today_et()
-        self.settles_on = _next_business_day(self.bought_on, SETTLE_DAYS)
-        self.used_unsettled = used_unsettled
+    lot_id: str
+    symbol: str
+    qty: int
+    unit_cost: float
+    total_cost: float
+    bought_on: date
+    settles_on: date
+    used_unsettled: bool
+
+
+@dataclass
+class PendingSaleSettlement:
+    """Sell proceeds not yet settled (T+1)."""
+
+    proceeds: float
+    settles_on: date
 
 
 class ComplianceService:
     """
-    GFV (Good Faith Violation) & free-riding tracker for cash accounts.
+    GFV tracker + T+1 pending proceeds + FIFO tax lots + wash-sale logging.
 
-    Rules enforced:
-
-    1. ``record_buy`` tags the lot with whether it consumed *unsettled* cash.
-    2. ``can_sell`` returns False for lots still unsettled that were bought
-       with unsettled proceeds — selling them would be a GFV.
-    3. ``gfv_count`` exposes rolling 12-month GFV counter; 3 in 12 months ⇒
-       Alpaca restricts the account to settled funds for 90 days.
-    4. ``log_trade`` persists realized P&L for tax season (short-term,
-       wash-sale candidates flagged).
+    ``record_buy`` opens a tax lot. ``record_sell`` closes lots FIFO, books
+    pending settlement for proceeds, logs wash-sale *candidates* per closed
+    lot on losses, and enforces a conservative re-entry cooldown per symbol.
     """
 
     def __init__(self, log_dir: Optional[Path] = None):
-        self._unsettled_cash: float = 0.0
-        self._lots: List[UnsettledLot] = []
+        self._tax_lots: List[TaxLot] = []
+        self._pending_sales: List[PendingSaleSettlement] = []
         self._gfv_events: List[date] = []
         self._wash_sale_cooldown: Dict[str, date] = {}
         self._realized: List[dict] = []
@@ -77,93 +90,195 @@ class ComplianceService:
         self._log_dir = log_dir or Path(os.getenv("TRADESENSE_LOG_DIR", "./trade_logs"))
         self._log_dir.mkdir(parents=True, exist_ok=True)
 
-    # ─── Settlement ──────────────────────────────────────────────
-    def sweep_settlements(self) -> None:
-        """Move lots past their settles_on to 'settled' (removed from tracker)."""
+    # ─── T+1 pending proceeds ───────────────────────────────────
+    def _pending_sale_proceeds_unsettled(self) -> float:
         today = _today_et()
-        still_unsettled = []
-        for lot in self._lots:
-            if lot.settles_on <= today:
-                continue  # now settled, drop it
-            still_unsettled.append(lot)
-        self._lots = still_unsettled
+        return sum(p.proceeds for p in self._pending_sales if p.settles_on > today)
 
-        # Unsettled cash decays when the oldest sells settle.
-        # Caller records _unsettled_cash on sells; we just reset on new day here.
-        if self._unsettled_cash < 0:
-            self._unsettled_cash = 0.0
+    def settled_cash(self, total_cash: float) -> float:
+        """Broker cash minus sell proceeds still inside T+1 settlement."""
+        return max(total_cash - self._pending_sale_proceeds_unsettled(), 0.0)
+
+    def sweep_settlements(self) -> None:
+        """Release T+1 sale proceeds past settlement; clear GFV flags on settled buys."""
+        today = _today_et()
+        self._pending_sales = [p for p in self._pending_sales if p.settles_on > today]
+        for lot in self._tax_lots:
+            if lot.settles_on <= today:
+                lot.used_unsettled = False
 
     # ─── Buy / sell hooks ───────────────────────────────────────
-    def settled_cash(self, total_cash: float) -> float:
-        return max(total_cash - self._unsettled_cash, 0.0)
-
     def record_buy(self, symbol: str, qty: int, price: float, settled_before: float) -> None:
+        sym = symbol.upper()
         cost = qty * price
         used_unsettled = cost > settled_before + 1e-6
-        lot = UnsettledLot(symbol, qty, cost, used_unsettled)
-        self._lots.append(lot)
+        lot_id = uuid.uuid4().hex[:12]
+        lot = TaxLot(
+            lot_id=lot_id,
+            symbol=sym,
+            qty=int(qty),
+            unit_cost=float(price),
+            total_cost=float(cost),
+            bought_on=_today_et(),
+            settles_on=_next_business_day(_today_et(), SETTLE_DAYS),
+            used_unsettled=used_unsettled,
+        )
+        self._tax_lots.append(lot)
         if used_unsettled:
             logger.info(
-                "compliance: %s bought with unsettled cash (cost=$%.2f, settled=$%.2f)",
-                symbol, cost, settled_before,
+                "compliance: %s lot %s bought with unsettled cash (cost=$%.2f, settled=$%.2f)",
+                sym, lot_id, cost, settled_before,
             )
 
-    def record_sell(self, symbol: str, qty: int, price: float, cost_basis: float) -> None:
-        """Record a sell. Proceeds go into unsettled cash for T+1."""
-        proceeds = qty * price
-        self._unsettled_cash += proceeds
+    def _close_lots_fifo(
+        self,
+        symbol: str,
+        qty: int,
+        proceeds_total: float,
+    ) -> Tuple[float, List[Dict[str, Any]]]:
+        """FIFO close; return (aggregate cost basis, per-slice closes for wash log)."""
+        sym = symbol.upper()
+        remaining = int(qty)
+        cost_basis_total = 0.0
+        closed_slices: List[Dict[str, Any]] = []
+        new_lots: List[TaxLot] = []
 
-        pnl = proceeds - cost_basis
+        for lot in self._tax_lots:
+            if lot.symbol != sym:
+                new_lots.append(lot)
+                continue
+            if remaining <= 0:
+                new_lots.append(lot)
+                continue
+            take = min(lot.qty, remaining)
+            proceeds_slice = proceeds_total * (take / qty) if qty else 0.0
+            cost_slice = take * lot.unit_cost
+            cost_basis_total += cost_slice
+            closed_slices.append(
+                {
+                    "lot_id": lot.lot_id,
+                    "symbol": sym,
+                    "qty": take,
+                    "unit_cost": lot.unit_cost,
+                    "cost_basis": cost_slice,
+                    "proceeds": proceeds_slice,
+                    "realized_pnl": proceeds_slice - cost_slice,
+                    "bought_on": lot.bought_on.isoformat(),
+                    "used_unsettled": lot.used_unsettled,
+                    "settles_on": lot.settles_on.isoformat(),
+                }
+            )
+            remaining -= take
+            if lot.qty > take:
+                new_lots.append(
+                    TaxLot(
+                        lot_id=lot.lot_id,
+                        symbol=lot.symbol,
+                        qty=lot.qty - take,
+                        unit_cost=lot.unit_cost,
+                        total_cost=lot.total_cost - cost_slice,
+                        bought_on=lot.bought_on,
+                        settles_on=lot.settles_on,
+                        used_unsettled=lot.used_unsettled,
+                    )
+                )
+
+        self._tax_lots = new_lots
+        return cost_basis_total, closed_slices
+
+    def record_sell(self, symbol: str, qty: int, price: float, cost_basis: float) -> None:
+        """Sell: T+1 pending proceeds, FIFO tax lots, wash + GFV handling."""
+        sym = symbol.upper()
+        proceeds = qty * price
+        sale_settle = _next_business_day(_today_et(), SETTLE_DAYS)
+        self._pending_sales.append(PendingSaleSettlement(proceeds=proceeds, settles_on=sale_settle))
+
+        basis_fifo, closed_slices = self._close_lots_fifo(sym, int(qty), proceeds)
+        if abs(basis_fifo - cost_basis) > max(1.0, 0.01 * max(basis_fifo, cost_basis)) and basis_fifo > 0:
+            logger.debug(
+                "compliance: FIFO basis $%.2f vs engine cost_basis $%.2f for %s — using FIFO",
+                basis_fifo, cost_basis, sym,
+            )
+        basis_use = basis_fifo if basis_fifo > 0 else float(cost_basis)
+
+        disposal_date = _today_et()
+        today = disposal_date
+        agg_pnl = proceeds - basis_use
+
         self._realized.append(
             {
                 "time": datetime.now(ET).isoformat(),
-                "symbol": symbol,
-                "qty": qty,
+                "symbol": sym,
+                "qty": int(qty),
                 "proceeds": round(proceeds, 2),
-                "cost_basis": round(cost_basis, 2),
-                "pnl": round(pnl, 2),
+                "cost_basis": round(basis_use, 2),
+                "pnl": round(agg_pnl, 2),
                 "hold_term": "short",
+                "fifo_slices": len(closed_slices),
             }
         )
         self._persist_realized()
 
-        if pnl < 0:
-            # Wash-sale watch: block re-entry in same symbol for 30 days
-            self._wash_sale_cooldown[symbol] = _today_et() + timedelta(days=30)
+        for sl in closed_slices:
+            pnl = float(sl["realized_pnl"])
+            if pnl < 0:
+                self._log_wash_sale_candidate(sl, disposal_date)
+                until = disposal_date + timedelta(days=WASH_SALE_LOOKBACK_DAYS)
+                prev = self._wash_sale_cooldown.get(sym)
+                if prev is None or until > prev:
+                    self._wash_sale_cooldown[sym] = until
+
+            if sl["used_unsettled"] and date.fromisoformat(sl["settles_on"]) > today:
+                self._gfv_events.append(today)
+                logger.warning(
+                    "compliance: GFV risk %s lot %s — sold before buy settlement (%s)",
+                    sym, sl["lot_id"], sl["settles_on"],
+                )
+
+        if agg_pnl < 0:
             self._loss_streak += 1
         else:
             self._loss_streak = 0
 
-        # Detect GFV: selling a lot that was bought with unsettled cash
-        # before settlement.
-        today = _today_et()
-        for lot in self._lots:
-            if lot.symbol != symbol:
-                continue
-            if lot.used_unsettled and lot.settles_on > today:
-                self._gfv_events.append(today)
-                logger.warning(
-                    "compliance: GFV on %s — sold unsettled lot (settles %s)",
-                    symbol, lot.settles_on,
-                )
+    def _log_wash_sale_candidate(self, slice_: Dict[str, Any], disposal_date: date) -> None:
+        """Append tax-lot wash-sale analytics (not tax advice)."""
+        try:
+            path = self._log_dir / f"wash-sales-{disposal_date.isoformat()}.jsonl"
+            rec = {
+                "event": "wash_sale_candidate",
+                "lot_id": slice_["lot_id"],
+                "symbol": slice_["symbol"],
+                "qty": slice_["qty"],
+                "cost_basis": round(float(slice_["cost_basis"]), 4),
+                "proceeds": round(float(slice_["proceeds"]), 4),
+                "realized_loss": round(abs(float(slice_["realized_pnl"])), 4),
+                "disposal_date": disposal_date.isoformat(),
+                "wash_window_end": (disposal_date + timedelta(days=WASH_SALE_LOOKBACK_DAYS)).isoformat(),
+                "bought_on": slice_["bought_on"],
+                "note": "Disallowed loss may apply if substantially identical shares repurchased within 30 days.",
+            }
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(rec, default=str) + "\n")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("compliance: wash-sale log failed: %s", exc)
 
     def can_sell(self, symbol: str) -> bool:
+        sym = symbol.upper()
         today = _today_et()
-        for lot in self._lots:
-            if lot.symbol == symbol and lot.used_unsettled and lot.settles_on > today:
+        for lot in self._tax_lots:
+            if lot.symbol == sym and lot.used_unsettled and lot.settles_on > today:
                 return False
         return True
 
     def can_enter(self, symbol: str) -> Optional[str]:
-        """Return reason string to block a buy, or None if OK."""
-        until = self._wash_sale_cooldown.get(symbol)
+        sym = symbol.upper()
+        until = self._wash_sale_cooldown.get(sym)
         if until and until > _today_et():
-            return f"wash-sale cooldown until {until}"
+            return f"wash-sale cooldown until {until} (loss lot disposed — avoid re-entry or consult tax rules)"
         return None
 
     # ─── Cooldowns / circuit breaker ─────────────────────────────
     def register_loss_streak_cooldown(self, minutes: int = 15) -> None:
-        """Pause new entries after N consecutive losses."""
         self._cooldown_until = datetime.now(ET) + timedelta(minutes=minutes)
 
     @property
@@ -181,7 +296,6 @@ class ComplianceService:
         delta = (self._cooldown_until - datetime.now(ET)).total_seconds()
         return max(0, int(delta))
 
-    # ─── GFV reporting ──────────────────────────────────────────
     @property
     def gfv_count_12mo(self) -> int:
         cutoff = _today_et() - timedelta(days=365)
@@ -198,9 +312,14 @@ class ComplianceService:
         return "OK"
 
     def status(self) -> dict:
+        pend = self._pending_sale_proceeds_unsettled()
+        n_lots = len(self._tax_lots)
         return {
-            "unsettled_cash": round(self._unsettled_cash, 2),
-            "open_unsettled_lots": len(self._lots),
+            "unsettled_sale_proceeds": round(pend, 2),
+            "open_tax_lots": n_lots,
+            # Back-compat for UI / older clients
+            "unsettled_cash": round(pend, 2),
+            "open_unsettled_lots": n_lots,
             "gfv_count_12mo": self.gfv_count_12mo,
             "gfv_level": self.gfv_warning_level(),
             "loss_streak": self._loss_streak,
@@ -209,9 +328,9 @@ class ComplianceService:
             "wash_sale_cooldowns": {
                 s: d.isoformat() for s, d in self._wash_sale_cooldown.items()
             },
+            "t_plus_one_settlement_days": SETTLE_DAYS,
         }
 
-    # ─── Persistence ────────────────────────────────────────────
     def _persist_realized(self) -> None:
         try:
             today = _today_et()

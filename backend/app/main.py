@@ -18,7 +18,7 @@ from app.services.analysis_agent import analysis_agent
 from app.services import streaming_service
 from app.api.deps import get_current_engine
 from app.services.user_runtime import default_engine, engines_to_run, warm_registered_users
-from app.api.routes import agent, alpaca, auth, market, portfolio, regime, trading
+from app.api.routes import agent, alpaca, auth, market, portfolio, regime, tax, trading
 
 # Configure logging
 logging.basicConfig(
@@ -105,8 +105,10 @@ async def lifespan(app: FastAPI):
                     feed=settings.alpaca_data_feed,
                 )
                 logger.info(
-                    "📡 Streaming started (feed=%s, symbols=%d)",
-                    settings.alpaca_data_feed, len(syms),
+                    "📡 Streaming started (feed=%s, symbols=%d, bar_buffer=%d 1m bars/sym)",
+                    settings.alpaca_data_feed,
+                    len(syms),
+                    max(60, settings.streaming_bar_buffer_max),
                 )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Streaming failed to start (REST fallback active): %s", exc)
@@ -153,6 +155,7 @@ app.include_router(agent.router, prefix="/api")
 app.include_router(portfolio.router, prefix="/api")
 app.include_router(regime.router, prefix="/api")
 app.include_router(alpaca.router, prefix="/api")
+app.include_router(tax.router, prefix="/api")
 
 
 @app.get("/")
@@ -188,6 +191,8 @@ async def health():
         "mode": settings.trading_mode,
         "scale": resolved_capital_scale(),
         "feed": settings.alpaca_data_feed,
+        "scan_interval_seconds": settings.scan_interval_seconds,
+        "allow_extended_hours": settings.allow_extended_hours,
         "streaming": streaming_service.state(),
     }
 

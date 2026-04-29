@@ -154,6 +154,9 @@ export interface AlpacaApiUsage {
 }
 
 export interface ComplianceStatus {
+  /** T+1: sale proceeds not yet available in settled-cash model */
+  unsettled_sale_proceeds?: number;
+  open_tax_lots?: number;
   unsettled_cash: number;
   open_unsettled_lots: number;
   gfv_count_12mo: number;
@@ -162,6 +165,7 @@ export interface ComplianceStatus {
   cooling_down: boolean;
   cooldown_remaining_s: number;
   wash_sale_cooldowns: Record<string, string>;
+  t_plus_one_settlement_days?: number;
 }
 
 export interface BotStatusResponse {

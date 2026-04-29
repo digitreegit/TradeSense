@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 from app.api.deps import get_current_engine, get_current_user_id
+from app.core.config import settings
 from app.services.user_runtime import get_or_create_engine
 
 router = APIRouter(prefix="/trading", tags=["trading"])
@@ -13,8 +14,10 @@ class OrderRequest(BaseModel):
     symbol: str
     qty: float
     side: str  # 'buy' or 'sell'
-    type: str = "market"  # 'market' or 'limit'
+    type: str = "market"  # 'market' (marketable limit) or 'limit'
     limit_price: Optional[float] = None
+    tif: Optional[str] = None  # ioc | fok | day | gtc — default from DEFAULT_ORDER_TIF
+    extended_hours: Optional[bool] = None  # True → limit + DAY + Alpaca extended session
 
 
 class BotRequest(BaseModel):
@@ -34,14 +37,53 @@ async def get_orders(engine=Depends(get_current_engine)):
 
 @router.post("/order")
 async def submit_order(req: OrderRequest, engine=Depends(get_current_engine)):
-    """Submit a new order."""
+    """Submit a new order (no raw market orders — ``market`` uses marketable limit)."""
     ac = engine._alpaca
+    tif = (req.tif or settings.default_order_tif or "ioc").lower()
     if req.type == "limit" and req.limit_price:
+        ext = settings.allow_extended_hours if req.extended_hours is None else bool(req.extended_hours)
+        ltif = "day" if ext else tif
         result = ac.submit_limit_order(
-            req.symbol, req.qty, req.side, req.limit_price
+            req.symbol,
+            req.qty,
+            req.side,
+            req.limit_price,
+            tif=ltif,
+            extended_hours=ext,
         )
+    elif req.type == "market":
+        snapshot = ac.get_snapshot(req.symbol) or {}
+        qty_i = max(1, int(abs(req.qty)))
+        wide = 5.0
+        ext = settings.allow_extended_hours if req.extended_hours is None else bool(req.extended_hours)
+        if (req.side or "").lower() == "buy":
+            btif = "day" if ext else tif
+            result = engine._executor.buy(
+                req.symbol,
+                qty_i,
+                snapshot,
+                wide,
+                tif=btif,
+                extended_hours=ext,
+                reasons=["manual_api"],
+            )
+        else:
+            exit_tif = (req.tif or settings.exit_order_tif or "day").lower()
+            stif = "day" if ext else exit_tif
+            result = engine._executor.sell(
+                req.symbol,
+                qty_i,
+                snapshot,
+                wide,
+                tif=stif,
+                extended_hours=ext,
+                reasons=["manual_api"],
+            )
     else:
-        result = ac.submit_market_order(req.symbol, req.qty, req.side)
+        raise HTTPException(
+            status_code=400,
+            detail="type must be 'market' or 'limit' with limit_price",
+        )
 
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])

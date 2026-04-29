@@ -3,13 +3,12 @@ Risk preset table for cash-account scalping.
 
 Three scales are supported:
 
-- ``"3k"``  — legacy $3,000 cash-scalp (tight settled-cash turnover).
-- ``"10k"`` — $10,000 bridge: enough settled cash for real rotation but
-  still below the marginable PDT threshold, so cash-only scalping stays
-  simple. Tuned to split the difference between 3k and 30k.
-- ``"30k"`` — $30,000 paper HFT test (Algo Trader Plus + SIP + us-east-1
-  cloud latency budget). More slots, tighter stops, larger daily trade
-  cap, and looser per-trade notional minimums so fills are meaningful.
+- ``"3k"``  — **T+1 cash rotation** at small equity: low ``settled_cash_trade_cap``,
+  fewer concurrent slots, modest daily trade counts (realistic before 10k).
+- ``"10k"`` — bridge scale: slightly higher cap and throughput vs 3k without
+  starving settled headroom under T+1.
+- ``"30k"`` — larger book: higher cap and rotation budget; still bounded so
+  ``ComplianceService`` pending sale proceeds model stays realistic.
 
 All three assume a **cash account** (no margin, no shorting). The PDT
 (Pattern Day Trader) rule only applies to *margin* accounts — a cash
@@ -55,11 +54,13 @@ class RiskPreset:
     # Sizing floors (USD notional) — symbol-type aware; engine may multiply
     min_notional_slow: float = 180.0
     min_notional_fast: float = 300.0
-    # Cash-utilization cap (fraction of settled cash allowed per trade)
+    # Max fraction of *settled* cash (post T+1 haircut in compliance) per entry
     settled_cash_trade_cap: float = 0.60
-    # Preferred TIF for limit entries: "day" | "ioc"
-    default_tif: str = "day"
-    # Extended hours never allowed for cash-scalp
+    # Preferred TIF for marketable limit entries: "ioc" | "fok" | "day"
+    default_tif: str = "ioc"
+    # Pre/post stock session (Alpaca: limit + DAY + extended_hours). Enable
+    # globally with ALLOW_EXTENDED_HOURS=true — engine still requires extended
+    # clock window (4–9:30a / 4–8p ET).
     allow_extended_hours: bool = False
 
     def as_dict(self) -> Dict:
@@ -78,7 +79,7 @@ _PRESETS_3K: Dict[RiskLevel, RiskPreset] = {
         trailing_trigger_percent=0.15,
         daily_loss_limit_percent=0.30,
         daily_target_percent=0.60,
-        max_trades_per_day=20,
+        max_trades_per_day=18,
         entry_score_threshold=65,
         spread_filter_percent=0.03,
         universe_size=6,
@@ -86,50 +87,50 @@ _PRESETS_3K: Dict[RiskLevel, RiskPreset] = {
         blackout_window_minutes=9999,
         min_notional_slow=180.0,
         min_notional_fast=300.0,
-        settled_cash_trade_cap=0.50,
-        default_tif="day",
+        settled_cash_trade_cap=0.36,
+        default_tif="ioc",
     ),
     "moderate": RiskPreset(
         level="moderate",
         scale="3k",
         max_position_percent=15.0,
-        max_concurrent_positions=3,
+        max_concurrent_positions=2,
         stop_loss_percent=0.30,
         take_profit_percent=0.80,
         trailing_trigger_percent=0.20,
         daily_loss_limit_percent=0.50,
         daily_target_percent=1.00,
-        max_trades_per_day=40,
+        max_trades_per_day=26,
         entry_score_threshold=50,
         spread_filter_percent=0.05,
-        universe_size=10,
+        universe_size=8,
         vix_halt_level=22.0,
         blackout_window_minutes=30,
         min_notional_slow=180.0,
         min_notional_fast=300.0,
-        settled_cash_trade_cap=0.60,
-        default_tif="day",
+        settled_cash_trade_cap=0.40,
+        default_tif="ioc",
     ),
     "aggressive": RiskPreset(
         level="aggressive",
         scale="3k",
         max_position_percent=12.0,
-        max_concurrent_positions=8,
+        max_concurrent_positions=5,
         stop_loss_percent=0.35,
         take_profit_percent=0.70,
         trailing_trigger_percent=0.18,
         daily_loss_limit_percent=0.90,
         daily_target_percent=1.20,
-        max_trades_per_day=160,
+        max_trades_per_day=72,
         entry_score_threshold=28,
         spread_filter_percent=0.12,
-        universe_size=20,
+        universe_size=16,
         vix_halt_level=28.0,
         blackout_window_minutes=5,
         min_notional_slow=180.0,
         min_notional_fast=300.0,
-        settled_cash_trade_cap=0.60,
-        default_tif="day",
+        settled_cash_trade_cap=0.46,
+        default_tif="ioc",
     ),
 }
 
@@ -142,9 +143,8 @@ _PRESETS_3K: Dict[RiskLevel, RiskPreset] = {
 #   materially vs 3k.
 # - Per-trade min notional is raised modestly so SEC fee + TAF don't
 #   disproportionately eat profits at small-share scalps.
-# - Default TIF stays DAY on conservative/moderate (simpler, lets
-#   partial fills still work), switches to IOC on aggressive where
-#   rapid turnover matters more than hit-rate.
+# - Default entry TIF is IOC marketable-limit (global override via
+#   DEFAULT_ORDER_TIF); exits use EXIT_ORDER_TIF (default DAY).
 # - Settled-cash cap between the two neighbours (~0.50).
 _PRESETS_10K: Dict[RiskLevel, RiskPreset] = {
     "conservative": RiskPreset(
@@ -157,7 +157,7 @@ _PRESETS_10K: Dict[RiskLevel, RiskPreset] = {
         trailing_trigger_percent=0.14,
         daily_loss_limit_percent=0.60,       # $60
         daily_target_percent=0.70,           # $70
-        max_trades_per_day=40,
+        max_trades_per_day=38,
         entry_score_threshold=62,
         spread_filter_percent=0.03,
         universe_size=8,
@@ -165,8 +165,8 @@ _PRESETS_10K: Dict[RiskLevel, RiskPreset] = {
         blackout_window_minutes=60,
         min_notional_slow=350.0,
         min_notional_fast=600.0,
-        settled_cash_trade_cap=0.45,
-        default_tif="day",
+        settled_cash_trade_cap=0.44,
+        default_tif="ioc",
     ),
     "moderate": RiskPreset(
         level="moderate",
@@ -178,7 +178,7 @@ _PRESETS_10K: Dict[RiskLevel, RiskPreset] = {
         trailing_trigger_percent=0.18,
         daily_loss_limit_percent=1.00,       # $100
         daily_target_percent=1.00,           # $100
-        max_trades_per_day=100,
+        max_trades_per_day=88,
         entry_score_threshold=48,
         spread_filter_percent=0.05,
         universe_size=14,
@@ -186,8 +186,8 @@ _PRESETS_10K: Dict[RiskLevel, RiskPreset] = {
         blackout_window_minutes=25,
         min_notional_slow=450.0,
         min_notional_fast=800.0,
-        settled_cash_trade_cap=0.50,
-        default_tif="day",
+        settled_cash_trade_cap=0.52,
+        default_tif="ioc",
     ),
     "aggressive": RiskPreset(
         level="aggressive",
@@ -199,7 +199,7 @@ _PRESETS_10K: Dict[RiskLevel, RiskPreset] = {
         trailing_trigger_percent=0.16,
         daily_loss_limit_percent=1.50,       # $150
         daily_target_percent=1.30,           # $130
-        max_trades_per_day=280,
+        max_trades_per_day=240,
         entry_score_threshold=28,
         spread_filter_percent=0.10,
         universe_size=24,
@@ -207,7 +207,7 @@ _PRESETS_10K: Dict[RiskLevel, RiskPreset] = {
         blackout_window_minutes=5,
         min_notional_slow=500.0,
         min_notional_fast=1000.0,
-        settled_cash_trade_cap=0.55,
+        settled_cash_trade_cap=0.54,
         default_tif="ioc",
     ),
 }
@@ -233,7 +233,7 @@ _PRESETS_30K: Dict[RiskLevel, RiskPreset] = {
         blackout_window_minutes=45,
         min_notional_slow=600.0,
         min_notional_fast=1000.0,
-        settled_cash_trade_cap=0.35,
+        settled_cash_trade_cap=0.44,
         default_tif="ioc",
     ),
     "moderate": RiskPreset(
@@ -254,7 +254,7 @@ _PRESETS_30K: Dict[RiskLevel, RiskPreset] = {
         blackout_window_minutes=20,
         min_notional_slow=800.0,
         min_notional_fast=1500.0,
-        settled_cash_trade_cap=0.40,
+        settled_cash_trade_cap=0.52,
         default_tif="ioc",
     ),
     "aggressive": RiskPreset(
@@ -275,7 +275,7 @@ _PRESETS_30K: Dict[RiskLevel, RiskPreset] = {
         blackout_window_minutes=5,
         min_notional_slow=900.0,
         min_notional_fast=1800.0,
-        settled_cash_trade_cap=0.45,
+        settled_cash_trade_cap=0.56,
         default_tif="ioc",
     ),
 }

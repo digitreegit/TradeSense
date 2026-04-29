@@ -59,10 +59,24 @@ class Settings(BaseSettings):
     alpaca_data_feed: str = os.getenv("ALPACA_DATA_FEED", "iex")  # "iex" or "sip"
     streaming_enabled: bool = os.getenv("STREAMING_ENABLED", "true").lower() != "false"
     streaming_symbols: str = os.getenv("STREAMING_SYMBOLS", "")  # comma-separated override
+    # Max 1-minute bars kept per symbol in memory (WS); ~360 ≈ 6h regular session
+    streaming_bar_buffer_max: int = int(os.getenv("STREAMING_BAR_BUFFER", "360"))
 
     # Execution quality
     execution_log_enabled: bool = os.getenv("EXECUTION_LOG_ENABLED", "true").lower() != "false"
-    default_order_tif: str = os.getenv("DEFAULT_ORDER_TIF", "day")  # "day" | "ioc"
+    # Entry orders: prefer IOC marketable limits (no lingering rests on cash accounts).
+    # "ioc" | "fok" | "day" | "gtc"
+    default_order_tif: str = os.getenv("DEFAULT_ORDER_TIF", "ioc")
+    # Default exit TIF when not using split stop/TP (see below).
+    exit_order_tif: str = os.getenv("EXIT_ORDER_TIF", "day")
+    # Stop-loss exits: IOC cancels unfilled remainder (retry next scan) — contains gap risk.
+    exit_stop_loss_tif: str = os.getenv("EXIT_STOP_LOSS_TIF", "ioc")
+    # Take-profit / trailing exits: DAY often improves fill rate on partials.
+    exit_take_profit_tif: str = os.getenv("EXIT_TAKE_PROFIT_TIF", "day")
+    # Pre/post (4:00–9:30, 16:00–20:00 ET): Alpaca requires limit + DAY + extended_hours=True
+    allow_extended_hours: bool = os.getenv("ALLOW_EXTENDED_HOURS", "false").lower() == "true"
+    # Half-spread cushion for marketable limits (basis points on top of bid/ask or ref)
+    execution_slippage_bps: float = float(os.getenv("EXECUTION_SLIPPAGE_BPS", "8"))
 
     # AI
     ai_provider: str = os.getenv("AI_PROVIDER", "openai")

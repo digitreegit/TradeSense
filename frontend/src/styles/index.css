@@ -3499,3 +3499,12 @@ html[data-theme='light'] {
 .sidebar-logo {
   margin-top: 8px;
 }
+
+/* Light gray card outline (e.g. Settings tax CSV) — stays subtle on hover */
+.card.card-border-subtle {
+  border-color: var(--border-secondary);
+}
+
+.card.card-border-subtle:hover {
+  border-color: var(--border-secondary);
+}

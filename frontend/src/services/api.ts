@@ -54,6 +54,31 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function downloadBlob(path: string, fallbackFilename: string): Promise<void> {
+  const url = `${API_PREFIX}${path.startsWith('/') ? path : `/${path}`}`;
+  const response = await fetch(url, {
+    headers: {
+      ...authHeaders(),
+    },
+  });
+  if (!response.ok) {
+    throw new Error(await parseError(response));
+  }
+  const blob = await response.blob();
+  const cd = response.headers.get('Content-Disposition');
+  let filename = fallbackFilename;
+  if (cd) {
+    const m = /filename="([^"]+)"/i.exec(cd) ?? /filename=([^;\s]+)/i.exec(cd);
+    if (m) filename = m[1].trim();
+  }
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = objectUrl;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(objectUrl);
+}
+
 export const api = {
   getAccount: () => request<Record<string, unknown>>('/account'),
 
@@ -241,6 +266,10 @@ export const api = {
     request<{ ok: boolean; message: string }>('/auth/alpaca-keys', {
       method: 'DELETE',
     }),
+
+  /** Compliance logs → CSV (8949/Schedule D workbook helper; not a broker substitute). */
+  downloadTaxExportCsv: (year: number) =>
+    downloadBlob(`/tax/export/csv?year=${encodeURIComponent(String(year))}`, `tradesense-tax-${year}.csv`),
 } as const;
 
 export default api;

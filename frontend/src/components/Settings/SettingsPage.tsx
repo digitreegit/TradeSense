@@ -72,6 +72,9 @@ const SettingsPage: React.FC = () => {
   const [notifLoading, setNotifLoading] = useState(false);
   const [notifSaving, setNotifSaving] = useState(false);
   const [notifMsg, setNotifMsg] = useState<string | null>(null);
+  const [taxYear, setTaxYear] = useState(() => new Date().getFullYear());
+  const [taxExporting, setTaxExporting] = useState(false);
+  const [taxExportErr, setTaxExportErr] = useState<string | null>(null);
 
   const keysLocked = authAlpacaConfigured;
 
@@ -714,6 +717,60 @@ const SettingsPage: React.FC = () => {
           </div>
           {notifMsg && (
             <p style={{ color: 'var(--profit)', fontSize: '12px', marginTop: '10px' }}>{notifMsg}</p>
+          )}
+        </div>
+
+        <div
+          className="card card-border-subtle"
+          style={{
+            marginTop: '28px',
+            padding: '18px',
+          }}
+        >
+          <h3 style={{ fontSize: '15px', marginBottom: '8px', fontWeight: 600 }}>{t('taxExportTitle')}</h3>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.55, marginBottom: '14px' }}>
+            {t('taxExportHelp')}
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>{t('taxExportYear')}</span>
+              <input
+                type="number"
+                min={2000}
+                max={2100}
+                value={taxYear}
+                onChange={(e) => setTaxYear(Number(e.target.value) || taxYear)}
+                style={{
+                  width: '88px',
+                  padding: '8px 10px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-default)',
+                  background: 'var(--bg-elevated)',
+                  color: 'var(--text-primary)',
+                  fontSize: '13px',
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={taxExporting}
+              onClick={() => {
+                setTaxExportErr(null);
+                setTaxExporting(true);
+                void api
+                  .downloadTaxExportCsv(taxYear)
+                  .catch((e: unknown) => {
+                    setTaxExportErr(e instanceof Error ? e.message : String(e));
+                  })
+                  .finally(() => setTaxExporting(false));
+              }}
+            >
+              {taxExporting ? t('taxExporting') : t('taxExportDownload')}
+            </button>
+          </div>
+          {taxExportErr && (
+            <p style={{ color: 'var(--loss)', fontSize: '12px', marginTop: '10px' }}>{taxExportErr}</p>
           )}
         </div>
 
