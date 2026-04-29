@@ -866,6 +866,12 @@ body {
   color: var(--text-muted);
 }
 
+/* Trading config sliders */
+.trading-range {
+  width: 100%;
+  height: 6px;
+}
+
 /* ============================================
    Watchlist
    ============================================ */
@@ -1012,7 +1018,7 @@ body {
 }
 
 [data-theme="light"] .agent-message.ai .agent-bubble {
-  background: #f2f2f2;
+  background: #fcfcfc;
 }
 
 .agent-message.user .agent-bubble {

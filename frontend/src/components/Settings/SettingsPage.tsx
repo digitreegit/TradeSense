@@ -274,7 +274,7 @@ const SettingsPage: React.FC = () => {
   };
 
   return (
-    <div className="page-enter" style={{ width: 'min(66.667vw, 1120px)', maxWidth: 'calc(100vw - 32px)', margin: '0 auto', padding: 'var(--space-xl)' }}>
+    <div className="page-enter" style={{ width: 'min(66.667vw, 920px)', maxWidth: 'calc(100vw - 32px)', margin: '0 auto', padding: 'var(--space-xl)' }}>
       <div className="card" style={{ padding: 'var(--space-xl)' }}>
         <h2 style={{ fontSize: '18px', marginBottom: '8px' }}>{t('Settings')}</h2>
         <p style={{ fontSize: '13px', color: 'var(--text-tertiary)', marginBottom: '20px', lineHeight: 1.5 }}>
@@ -357,9 +357,9 @@ const SettingsPage: React.FC = () => {
                 borderRadius: '8px',
                 border:
                   language === 'ko'
-                    ? '3px solid var(--border-accent, var(--info))'
+                    ? '2px solid var(--border-accent, var(--info))'
                     : '2px solid var(--border-secondary)',
-                background: language === 'ko' ? 'var(--bg-tertiary)' : 'var(--bg-secondary)',
+                background: language === 'ko' ? 'var(--state-info-bg)' : 'var(--bg-secondary)',
                 color: 'var(--text-primary)',
                 cursor: 'pointer',
               }}
@@ -380,9 +380,9 @@ const SettingsPage: React.FC = () => {
                 borderRadius: '8px',
                 border:
                   language === 'en'
-                    ? '3px solid var(--border-accent, var(--info))'
+                    ? '2px solid var(--border-accent, var(--info))'
                     : '2px solid var(--border-secondary)',
-                background: language === 'en' ? 'var(--bg-tertiary)' : 'var(--bg-secondary)',
+                background: language === 'en' ? 'var(--state-info-bg)' : 'var(--bg-secondary)',
                 color: 'var(--text-primary)',
                 cursor: 'pointer',
               }}
@@ -432,7 +432,7 @@ const SettingsPage: React.FC = () => {
                 padding: '12px 14px',
                 borderRadius: '8px',
                 border: authAlpacaPaperTrading
-                  ? '3px solid var(--border-accent, var(--info))'
+                  ? '2px solid var(--border-accent, var(--info))'
                   : '2px solid var(--border-secondary)',
                 background: authAlpacaPaperTrading ? 'var(--state-info-bg)' : 'var(--bg-secondary)',
                 color: 'var(--text-primary)',
@@ -455,7 +455,7 @@ const SettingsPage: React.FC = () => {
                 padding: '12px 14px',
                 borderRadius: '8px',
                 border: !authAlpacaPaperTrading
-                  ? '3px solid var(--border-accent, var(--loss))'
+                  ? '2px solid var(--border-accent, var(--loss))'
                   : '2px solid var(--border-secondary)',
                 background: !authAlpacaPaperTrading ? 'var(--state-danger-bg)' : 'var(--bg-secondary)',
                 color: 'var(--text-primary)',
@@ -620,7 +620,7 @@ const SettingsPage: React.FC = () => {
                     padding: '10px 12px',
                     borderRadius: '8px',
                     border: selected
-                      ? '3px solid var(--border-accent, var(--info))'
+                      ? '2px solid var(--border-accent, var(--info))'
                       : '2px solid var(--border-secondary)',
                     background: selected ? 'var(--state-info-bg)' : 'var(--bg-secondary)',
                     color: 'inherit',
@@ -657,7 +657,7 @@ const SettingsPage: React.FC = () => {
           <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', margin: '6px 0 14px', lineHeight: 1.55 }}>
             Trading alerts (bot start/stop, daily summary, loss limit, target hit, regime changes) can be sent to
             Telegram. Add <strong>TELEGRAM_BOT_TOKEN</strong> to server <code style={{ fontSize: '11px' }}>.env</code>{' '}
-            (<a href="https://core.telegram.org/bots/tutorial" target="_blank" rel="noreferrer" style={{ color: 'var(--info)' }}>
+            (<a href="https://core.telegram.org/bots/tutorial" target="_blank" rel="noreferrer" style={{ color: 'var(--info)', textDecoration: 'none' }}>
               bot setup
             </a>
             ), then paste your <strong>chat ID</strong> here.

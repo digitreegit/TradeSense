@@ -498,17 +498,16 @@ const TradingBot: React.FC = () => {
                 <ShieldIcon className="card-icon" /> {t('riskLevel')}
               </span>
             </div>
-            <div style={{ padding: 'var(--space-xl)', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div style={{ padding: 'var(--space-xl)', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               {/* Risk Level */}
               <div>
                 <label style={{
                   fontSize: '12px',
                   textTransform: 'uppercase',
-                  letterSpacing: '1px',
                   color: 'var(--text-muted)',
                   fontWeight: 600,
                   display: 'block',
-                  marginBottom: '8px',
+                  marginBottom: '4px',
                 }}>
                   {t('riskLevel')}
                 </label>
@@ -544,19 +543,19 @@ const TradingBot: React.FC = () => {
               </div>
 
               {/* Max Position */}
-              <div>
+              <div style={{ marginTop: '16px' }}>
                 <label style={{
                   fontSize: '12px',
                   textTransform: 'uppercase',
-                  letterSpacing: '1px',
                   color: 'var(--text-muted)',
                   fontWeight: 600,
                   display: 'block',
-                  marginBottom: '8px',
+                  marginBottom: '4px',
                 }}>
                   {t('maxPositionSize')}: {maxPositionSize}% ({formatCurrency(account.equity * maxPositionSize / 100)})
                 </label>
                 <input
+                  className="trading-range"
                   type="range"
                   min={5}
                   max={25}
@@ -572,15 +571,15 @@ const TradingBot: React.FC = () => {
                 <label style={{
                   fontSize: '12px',
                   textTransform: 'uppercase',
-                  letterSpacing: '1px',
                   color: 'var(--text-muted)',
                   fontWeight: 600,
                   display: 'block',
-                  marginBottom: '8px',
+                  marginBottom: '4px',
                 }}>
                   {t('stopLoss')}: -{stopLossPercent}%
                 </label>
                 <input
+                  className="trading-range"
                   type="range"
                   min={0.1}
                   max={2.0}
@@ -596,15 +595,15 @@ const TradingBot: React.FC = () => {
                 <label style={{
                   fontSize: '12px',
                   textTransform: 'uppercase',
-                  letterSpacing: '1px',
                   color: 'var(--text-muted)',
                   fontWeight: 600,
                   display: 'block',
-                  marginBottom: '8px',
+                  marginBottom: '4px',
                 }}>
                   {t('takeProfit')}: +{takeProfitPercent}%
                 </label>
                 <input
+                  className="trading-range"
                   type="range"
                   min={0.2}
                   max={5.0}
