@@ -161,6 +161,11 @@ const TradingBot: React.FC = () => {
         name: 'ML 예측',
         description: '기술적 지표를 입력값으로 사용하는 그래디언트 부스팅 모델로 가격 방향성을 예측합니다.',
       },
+      micro: {
+        name: '마이크로구조 (호가·체결)',
+        description:
+          '호가 불균형, 스프레드, 테이프 속도, VPIN 근사로 초단기 수급을 보강합니다. WebSocket 체결·호가가 있을 때만 점수가 납니다.',
+      },
       vwap: {
         name: 'VWAP 되돌림',
         description: '가격이 VWAP 근처로 되돌아올 때 평균 회귀와 추세 지속 가능성을 함께 평가해 진입합니다.',

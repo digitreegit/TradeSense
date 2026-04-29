@@ -56,6 +56,67 @@ def playbook_micro_scalp(price: float, indicators: dict, volumes: list) -> Tuple
     return score, reasons
 
 
+# ─── Microstructure (quote + tape; complements slow RSI/BB) ───────────
+def playbook_microstructure(micro: dict | None) -> Tuple[int, List[str]]:
+    """
+    Order-flow imbalance (L1), relative spread, tape speed, simplified VPIN.
+
+    ``micro`` comes from WebSocket cache via :func:`streaming_service.get_microstructure_features`.
+    When streaming is off, returns zero — REST-only scans keep working.
+    """
+    if not micro:
+        return 0, []
+
+    score = 0
+    reasons: List[str] = []
+
+    spread = micro.get("spread_bps")
+    if spread is not None:
+        if spread < 5:
+            score += 14
+            reasons.append("spr<5bp")
+        elif spread < 12:
+            score += 8
+            reasons.append("spr<12bp")
+        elif spread < 25:
+            score += 4
+            reasons.append("spr<25bp")
+
+    ofi = micro.get("ofi")
+    if ofi is not None:
+        if ofi > 0.18:
+            score += 20
+            reasons.append("OFI+")
+        elif ofi > 0.06:
+            score += 12
+            reasons.append("ofi+")
+        elif ofi < -0.18:
+            score -= 6
+            reasons.append("OFI-")
+
+    tps = float(micro.get("tape_trades_per_sec") or 0.0)
+    if tps > 2.0:
+        score += 16
+        reasons.append("tape🔥")
+    elif tps > 0.8:
+        score += 10
+        reasons.append("tape↑")
+    elif tps > 0.25:
+        score += 5
+        reasons.append("tape")
+
+    vpin = micro.get("vpin")
+    if vpin is not None:
+        if vpin < 0.32:
+            score += 12
+            reasons.append("VPIN↓")
+        elif vpin > 0.55:
+            score -= 10
+            reasons.append("VPIN↑")
+
+    return score, reasons
+
+
 # ─── VWAP Mean Reversion ──────────────────────────────────────────
 def playbook_vwap_reversion(bars: list, price: float) -> Tuple[int, List[str]]:
     if len(bars) < 10:
@@ -144,14 +205,19 @@ def combine(
     now: datetime,
     news_score: float = 0.0,
     enabled: List[str] = None,
+    micro: dict | None = None,
 ) -> Tuple[int, List[str]]:
     """Run enabled playbooks and return (total_score, flat reasons list)."""
-    enabled = enabled or ["scalp", "vwap", "orb", "eod"]
+    enabled = enabled or ["scalp", "vwap", "orb", "eod", "micro"]
     total = 0
     reasons: List[str] = []
 
     if "scalp" in enabled:
         s, r = playbook_micro_scalp(price, indicators, volumes)
+        total += s
+        reasons += r
+    if "micro" in enabled:
+        s, r = playbook_microstructure(micro)
         total += s
         reasons += r
     if "vwap" in enabled:

@@ -13,7 +13,7 @@ Delegates:
 - Macro regime score + universe tilt                    → regime_service
 - Macro event / opening-auction blackout                → event_calendar
 - Risk preset tables driven by regime score             → core.risk_presets
-- Entry scoring (scalp + VWAP + ORB + EOD + news-fade)  → playbooks
+- Entry scoring (scalp + microstructure + VWAP + ORB + EOD + news-fade)  → playbooks
 - Marketable-limit orders + spread filter               → execution_service
 - Per-order slippage + latency JSONL                    → execution_logger
 """
@@ -40,6 +40,7 @@ from app.services.compliance_service import ComplianceService
 from app.services.event_calendar import is_blackout, symbol_is_earnings_today
 from app.services.execution_logger import ExecutionLogger
 from app.services.execution_service import Executor, spread_info
+from app.services import streaming_service
 from app.services.playbooks import combine as combine_playbooks
 from app.services.regime_service import RegimeService
 
@@ -99,6 +100,11 @@ class TradingEngine:
             "id": "scalp",
             "name": "Micro-Scalping v4",
             "description": "RSI/MACD/BB + volume surge on 5-min bars",
+        },
+        {
+            "id": "micro",
+            "name": "Microstructure (L1 + tape)",
+            "description": "Order-flow imbalance, spread, tape speed, VPIN proxy (WebSocket)",
         },
         {
             "id": "vwap",
@@ -221,7 +227,7 @@ class TradingEngine:
 
         # Playbook routing
         self.auto_playbooks: bool = True
-        self.manual_playbooks: list = ["scalp", "vwap", "orb", "eod"]
+        self.manual_playbooks: list = ["scalp", "micro", "vwap", "orb", "eod"]
         self._last_active_playbooks: list = list(self.manual_playbooks)
         self._sync_regime_playbook_display()
 
@@ -472,6 +478,7 @@ class TradingEngine:
             active.append("vwap")
         if time(9, 35) <= t < time(15, 45):
             active.append("scalp")
+            active.append("micro")
         if time(15, 30) <= t < time(15, 58):
             active.append("eod")
         if news <= -0.6:
@@ -1170,6 +1177,7 @@ class TradingEngine:
                 indicators = self._calculate_indicators(closes)
                 price = closes[-1]
 
+                micro = streaming_service.get_microstructure_features(symbol)
                 total, reasons = combine_playbooks(
                     price=price,
                     indicators=indicators,
@@ -1178,6 +1186,7 @@ class TradingEngine:
                     now=now_et,
                     news_score=self.regime_data.get("news_score", 0.0) or 0.0,
                     enabled=active_playbooks,
+                    micro=micro,
                 )
 
                 if len(closes) >= 10:

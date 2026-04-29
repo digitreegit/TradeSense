@@ -8,8 +8,10 @@ the engine reads synchronously.
 
 This module is intentionally small:
 
-- ``LATEST_TRADE[sym]`` → most recent (price, ts)
+- ``LATEST_TRADE[sym]`` → most recent (price, size, ts)
 - ``LATEST_QUOTE[sym]`` → most recent (bid, ask, bid_size, ask_size, ts)
+- ``TRADE_RING[sym]`` → recent trades ``(ts, size)`` for tape-speed
+- ``VPIN_STATE[sym]`` → volume buckets for a simplified VPIN-style toxicity estimate
 - ``MINUTE_BARS[sym]`` → deque of recent **1-minute** OHLCV bars from
   ``subscribe_bars`` (Alpaca streams minute bars only).  Callers that need
   ``5Min`` bars aggregate these in memory; see :func:`intraday_bars_from_buffer`.
@@ -66,6 +68,14 @@ LATEST_QUOTE: Dict[str, Quote] = {}
 MINUTE_BARS: Dict[str, deque] = {}
 BAR_BUFFER_MAX: int = max(60, int(os.getenv("STREAMING_BAR_BUFFER", "360")))
 
+# Microstructure buffers (HFT-style features; best-effort when socket is up).
+TRADE_RING_MAX: int = max(500, int(os.getenv("STREAMING_TRADE_RING", "2500")))
+TAPE_WINDOW_SEC: float = float(os.getenv("STREAMING_TAPE_WINDOW_SEC", "30"))
+VPIN_BUCKET_VOL: float = float(os.getenv("STREAMING_VPIN_BUCKET_VOL", "300"))
+
+TRADE_RING: Dict[str, deque] = {}
+VPIN_STATE: Dict[str, Dict[str, Any]] = {}
+
 _task: Optional[asyncio.Task] = None
 _stop_evt: Optional[asyncio.Event] = None
 _subscribed: set[str] = set()
@@ -84,6 +94,82 @@ def latest_trade(symbol: str) -> Optional[Trade]:
 
 def latest_quote(symbol: str) -> Optional[Quote]:
     return LATEST_QUOTE.get(symbol.upper())
+
+
+def _vpin_add_classified_volume(sym: str, buy_vol: float, sell_vol: float) -> None:
+    """Volume-synchronized buckets: each time cumulative classified vol ≥ VPIN_BUCKET_VOL, record |B−S|/(B+S)."""
+    if buy_vol <= 0 and sell_vol <= 0:
+        return
+    st = VPIN_STATE.setdefault(
+        sym,
+        {"b": 0.0, "s": 0.0, "hist": deque(maxlen=40)},
+    )
+    st["b"] = float(st.get("b", 0.0)) + float(buy_vol)
+    st["s"] = float(st.get("s", 0.0)) + float(sell_vol)
+    b, s = st["b"], st["s"]
+    hist: deque = st["hist"]
+    V = VPIN_BUCKET_VOL
+    while b + s >= V - 1e-9:
+        tot = b + s
+        if tot <= 0:
+            break
+        imb = abs(b - s) / tot
+        hist.append(imb)
+        r = V / tot
+        b *= 1.0 - r
+        s *= 1.0 - r
+    st["b"], st["s"] = b, s
+
+
+def get_microstructure_features(symbol: str) -> Optional[Dict[str, Any]]:
+    """
+    Quote + tape summary for scalping playbooks.
+
+    Returns ``None`` only when there is no usable quote and no tape in the ring.
+    """
+    import time as _time
+
+    sym = symbol.upper()
+    now = _time.time()
+    q = LATEST_QUOTE.get(sym)
+    ring = TRADE_RING.get(sym)
+
+    spread_bps: Optional[float] = None
+    ofi: Optional[float] = None
+    if q and q.bid > 0 and q.ask > 0:
+        mid = (q.bid + q.ask) / 2.0
+        spread_bps = (q.ask - q.bid) / mid * 10000.0
+        bs = float(q.bid_size)
+        az = float(q.ask_size)
+        ofi = (bs - az) / (bs + az + 1e-9)
+
+    tape_tps = 0.0
+    if ring:
+        lo = now - TAPE_WINDOW_SEC
+        tape_tps = sum(1 for ts, _ in ring if ts >= lo) / TAPE_WINDOW_SEC
+
+    vpin: Optional[float] = None
+    st = VPIN_STATE.get(sym)
+    if st:
+        hist = st.get("hist")
+        if isinstance(hist, deque) and len(hist) >= 2:
+            vpin = sum(hist) / len(hist)
+
+    has_quote = spread_bps is not None
+    has_tape = bool(ring and len(ring) > 0)
+
+    if not has_quote and not has_tape:
+        return None
+
+    return {
+        "spread_bps": spread_bps,
+        "ofi": ofi,
+        "tape_trades_per_sec": tape_tps,
+        "vpin": vpin,
+        "has_quote": has_quote,
+        "has_tape": has_tape,
+        "tape_window_sec": TAPE_WINDOW_SEC,
+    }
 
 
 def _bar_buffer_quick_stats() -> Dict[str, Any]:
@@ -211,12 +297,34 @@ async def _run_stream(symbols: Iterable[str], api_key: str, secret: str, feed: s
             return
         ts_obj = getattr(trade, "timestamp", None)
         ts = ts_obj.timestamp() if ts_obj else time.time()
+        tr_price = float(getattr(trade, "price", 0.0) or 0.0)
+        tr_sz = int(getattr(trade, "size", 0) or 0)
         LATEST_TRADE[sym] = Trade(
             symbol=sym,
-            price=float(getattr(trade, "price", 0.0) or 0.0),
-            size=int(getattr(trade, "size", 0) or 0),
+            price=tr_price,
+            size=tr_sz,
             ts=float(ts),
         )
+        # Tape + VPIN: Lee–Ready style split using most recent NBBO mid.
+        q_prev = LATEST_QUOTE.get(sym)
+        mid = None
+        if q_prev and q_prev.bid > 0 and q_prev.ask > 0:
+            mid = (q_prev.bid + q_prev.ask) / 2.0
+        buy_v = sell_v = 0.0
+        if mid is not None and mid > 0 and tr_sz > 0:
+            if tr_price > mid:
+                buy_v = float(tr_sz)
+            elif tr_price < mid:
+                sell_v = float(tr_sz)
+            else:
+                half = float(tr_sz) / 2.0
+                buy_v = sell_v = half
+        elif tr_sz > 0:
+            half = float(tr_sz) / 2.0
+            buy_v = sell_v = half
+        _vpin_add_classified_volume(sym, buy_v, sell_v)
+        tape = TRADE_RING.setdefault(sym, deque(maxlen=TRADE_RING_MAX))
+        tape.append((float(ts), tr_sz))
 
     async def on_quote(q):
         sym = str(getattr(q, "symbol", "")).upper()
@@ -365,6 +473,8 @@ async def stop() -> None:
     _state["minute_bars_channel"] = None
     _state["started_at"] = None
     MINUTE_BARS.clear()
+    TRADE_RING.clear()
+    VPIN_STATE.clear()
 
 
 stop_streaming = stop
