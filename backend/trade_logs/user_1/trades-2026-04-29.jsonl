@@ -5,3 +5,5 @@
 {"time": "2026-04-29T10:33:29.916496-04:00", "symbol": "XOM", "qty": 2, "proceeds": 304.44, "cost_basis": 304.27, "pnl": 0.17, "hold_term": "short"}
 {"time": "2026-04-29T10:35:49.176531-04:00", "symbol": "SLB", "qty": 8, "proceeds": 448.08, "cost_basis": 449.04, "pnl": -0.96, "hold_term": "short"}
 {"time": "2026-04-29T11:17:56.137750-04:00", "symbol": "OXY", "qty": 7, "proceeds": 415.17, "cost_basis": 414.54, "pnl": 0.63, "hold_term": "short"}
+{"time": "2026-04-29T12:06:02.890752-04:00", "symbol": "GOOGL", "qty": 1, "proceeds": 350.22, "cost_basis": 351.0, "pnl": -0.78, "hold_term": "short"}
+{"time": "2026-04-29T12:29:30.633677-04:00", "symbol": "NVDA", "qty": 2, "proceeds": 419.93, "cost_basis": 420.87, "pnl": -0.94, "hold_term": "short"}

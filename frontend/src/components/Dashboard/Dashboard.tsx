@@ -106,8 +106,8 @@ const Dashboard: React.FC = () => {
         regimeData.timestamp &&
         (dismissedRegimeTimestamp !== regimeData.timestamp) && (
           <div className="card regime-notification" style={{
-            background: 'rgba(59, 130, 246, 0.1)',
-            border: '1px solid rgba(59, 130, 246, 0.3)',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-primary)',
             color: 'var(--text-primary)',
             marginBottom: '24px',
             padding: '20px',
@@ -225,7 +225,7 @@ const Dashboard: React.FC = () => {
                   marginTop: (regimeData as any).market_scores ? '8px' : '6px',
                   paddingTop: (regimeData as any).market_scores ? '8px' : '0',
                   borderTop: (regimeData as any).market_scores
-                    ? '1px solid rgba(255, 255, 255, 0.06)'
+                    ? '1px solid var(--border-primary)'
                     : 'none',
                 }}
               >

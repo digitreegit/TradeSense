@@ -58,7 +58,6 @@ const Header: React.FC = () => {
     <header className="header">
       <div className="header-left">
         <h2 className="header-title">{titles[currentPage] || t('dashboard')}</h2>
-        <span className="header-badge">{t('marketSummaryBadge')}</span>
       </div>
       <div className="header-right">
         <div className="market-status">

@@ -340,7 +340,6 @@ body {
   align-items: center;
   gap: var(--space-md);
   padding: var(--space-xl);
-  border-bottom: 1px solid var(--border-primary);
 }
 
 .sidebar-logo-icon {
@@ -2109,7 +2108,6 @@ body {
 
 .sidebar-logo {
   padding: 20px;
-  border-bottom: 1px solid var(--border-secondary);
 }
 
 .sidebar-logo-icon {
@@ -2648,13 +2646,14 @@ body {
 }
 
 [data-theme="light"] {
-  --bg-primary: #f0f3fa;
+  /* Light surfaces: canvas · sidebar · header/content separator */
+  --bg-primary: #f6f6f6;
   --bg-secondary: #ffffff;
-  --bg-tertiary: #f5f6fb;
+  --bg-tertiary: #ebebeb;
   --bg-card: #ffffff;
-  --bg-card-hover: #f8f9fd;
+  --bg-card-hover: #f5f5f5;
   --bg-glass: #ffffff;
-  --bg-input: #f0f3fa;
+  --bg-input: #ffffff;
   --bg-overlay: rgba(19, 23, 34, 0.35);
 
   --accent-primary: #2962ff;
@@ -2680,14 +2679,14 @@ body {
   --text-tertiary: #787b86;
   --text-muted: #9598a1;
 
-  --border-primary: #e0e3eb;
-  --border-secondary: #f0f3fa;
+  --border-primary: #e0e0e0;
+  --border-secondary: #ededed;
   --border-accent: rgba(41, 98, 255, 0.42);
 
   --gradient-primary: linear-gradient(180deg, #2962ff 0%, #1e53e5 100%);
   --gradient-card: linear-gradient(180deg, #ffffff 0%, #ffffff 100%);
   --gradient-glass: linear-gradient(180deg, #ffffff 0%, #ffffff 100%);
-  --gradient-sidebar: linear-gradient(180deg, #ffffff 0%, #ffffff 100%);
+  --gradient-sidebar: linear-gradient(180deg, #f1f1f1 0%, #f1f1f1 100%);
 
   --shadow-sm: none;
   --shadow-md: 0 8px 24px rgba(19, 23, 34, 0.08);
@@ -2695,9 +2694,9 @@ body {
   --shadow-xl: 0 28px 72px rgba(19, 23, 34, 0.14);
   --header-bg: #ffffff;
   --chart-canvas-bg: #ffffff;
-  --chart-grid: #f0f3fa;
+  --chart-grid: #f0f0f0;
   --chart-axis-label: #787b86;
-  --chart-loading-bg: rgba(240, 243, 250, 0.88);
+  --chart-loading-bg: rgba(241, 241, 241, 0.92);
 }
 
 html,
@@ -2740,7 +2739,6 @@ body {
 .sidebar-logo {
   min-height: 56px;
   padding: 10px 16px;
-  border-bottom: 1px solid var(--border-primary);
 }
 
 .sidebar-logo-icon {
@@ -2805,7 +2803,9 @@ body {
 }
 
 [data-theme="light"] .sidebar-item.active {
-  color: var(--accent-primary);
+  background: #e4e4e4;
+  color: var(--text-primary);
+  box-shadow: none;
 }
 
 .sidebar-footer {
@@ -3312,4 +3312,13 @@ body {
   .stats-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Final override: earlier duplicate [data-theme="light"] blocks can fight each other.
+   Pin Cursor-like neutrals when <html data-theme="light"> (requires light mode toggle). */
+html[data-theme='light'] {
+  --bg-primary: #f6f6f6;
+  --border-primary: #e0e0e0;
+  --border-secondary: #ededed;
+  --gradient-sidebar: linear-gradient(180deg, #f1f1f1 0%, #f1f1f1 100%);
 }
