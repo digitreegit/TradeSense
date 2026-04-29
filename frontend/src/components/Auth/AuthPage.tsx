@@ -44,21 +44,57 @@ const AuthPage: React.FC = () => {
   return (
     <div className="auth-shell">
       <div className="auth-card">
-        <h1 className="auth-title">Welcome to TradeSense</h1>
-        <p className="auth-subtitle">Sign in with Google to continue</p>
+        <section className="auth-hero" aria-label="TradeSense overview">
+          <div>
+            <span className="auth-eyebrow">TradeSense Agent</span>
+            <h1 className="auth-title">The best way to trade with AI.</h1>
+            <p className="auth-subtitle">
+              Built to make market research, execution, and risk checks feel as focused as coding in Cursor.
+            </p>
+            <button
+              type="button"
+              className="auth-google-btn auth-inline-google"
+              onClick={handleGoogle}
+              disabled={loading}
+            >
+              <GoogleIcon />
+              {loading ? 'Redirecting…' : 'Continue with Google'}
+            </button>
+          </div>
 
-        {error && <p className="auth-error">{error}</p>}
-        {info && <p className="auth-info">{info}</p>}
+          <div className="auth-agent-card" aria-hidden="true">
+            <div className="auth-agent-row">
+              <span>This Week</span>
+              <strong>Market Regime Scan</strong>
+            </div>
+            <div className="auth-agent-row">
+              <span>Agent</span>
+              <strong>Risk-aware scalping</strong>
+            </div>
+            <div className="auth-agent-row">
+              <span>Done</span>
+              <strong>Daily summary ready</strong>
+            </div>
+          </div>
+        </section>
 
-        <button
-          type="button"
-          className="auth-google-btn"
-          onClick={handleGoogle}
-          disabled={loading}
-        >
-          <GoogleIcon />
-          {loading ? 'Redirecting…' : 'Continue with Google'}
-        </button>
+        <section className="auth-panel" aria-label="Sign in">
+          <h2 className="auth-panel-title">Start with TradeSense</h2>
+          <p className="auth-subtitle">Sign in with Google to continue.</p>
+
+          {error && <p className="auth-error">{error}</p>}
+          {info && <p className="auth-info">{info}</p>}
+
+          <button
+            type="button"
+            className="auth-google-btn"
+            onClick={handleGoogle}
+            disabled={loading}
+          >
+            <GoogleIcon />
+            {loading ? 'Redirecting…' : 'Continue with Google'}
+          </button>
+        </section>
       </div>
     </div>
   );
