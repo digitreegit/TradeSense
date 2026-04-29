@@ -1,23 +1,23 @@
 """TradeSense - Portfolio API Routes"""
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from app.services.alpaca_service import alpaca_service
+from app.api.deps import get_current_engine
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 
 
 @router.get("/positions")
-async def get_positions():
+async def get_positions(engine=Depends(get_current_engine)):
     """Get all open positions."""
-    positions = alpaca_service.get_positions()
+    positions = engine._alpaca.get_positions()
     return {"positions": positions}
 
 
 @router.get("/summary")
-async def get_portfolio_summary():
+async def get_portfolio_summary(engine=Depends(get_current_engine)):
     """Get portfolio summary."""
-    account = alpaca_service.get_account()
-    positions = alpaca_service.get_positions()
+    account = engine._alpaca.get_account()
+    positions = engine._alpaca.get_positions()
     return {
         "account": account,
         "positions": positions,

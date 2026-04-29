@@ -2,12 +2,11 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import './styles/index.css'
-import { readStoredColorMode, applyColorMode } from './theme'
-import { useAppStore } from './stores/useAppStore'
+import { applyLocaleToDocument, readStoredLocale } from './locale/locale'
+import { applyThemeToDocument, readStoredTheme } from './theme/theme'
 
-const initialMode = readStoredColorMode()
-applyColorMode(initialMode)
-useAppStore.setState({ colorMode: initialMode })
+applyThemeToDocument(readStoredTheme())
+applyLocaleToDocument(readStoredLocale())
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

@@ -1,16 +1,27 @@
 import { create } from 'zustand';
-import type { AccountInfo, Position, WatchlistItem, TradeLog, AgentMessage, Strategy, Order, PageId, RegimeData } from './types';
-import type { ColorMode } from '../theme';
-import { applyColorMode } from '../theme';
+import type {
+  AccountInfo,
+  Position,
+  WatchlistItem,
+  TradeLog,
+  AgentMessage,
+  Strategy,
+  Order,
+  PageId,
+  RegimeData,
+  ComplianceStatus,
+  AlpacaApiUsage,
+  AppLocale,
+  ColorTheme,
+} from './types';
+import { applyLocaleToDocument, persistLocale, readStoredLocale } from '../locale/locale';
+import { getUiStrings } from '../locale/uiStrings';
+import { applyThemeToDocument, persistTheme, readStoredTheme } from '../theme/theme';
 
 interface AppState {
   // Navigation
   currentPage: PageId;
   setCurrentPage: (page: PageId) => void;
-
-  colorMode: ColorMode;
-  setColorMode: (mode: ColorMode) => void;
-  toggleColorMode: () => void;
 
   // Account
   account: AccountInfo;
@@ -33,12 +44,15 @@ interface AppState {
   // Trading Bot
   botActive: boolean;
   setBotActive: (active: boolean) => void;
+  botDailyTrades: number;
+  setBotDailyTrades: (count: number) => void;
   tradeLogs: TradeLog[];
   addTradeLog: (log: TradeLog) => void;
   setTradeLogs: (logs: TradeLog[]) => void;
 
   // AI Agent
   agentMessages: AgentMessage[];
+  setAgentMessages: (messages: AgentMessage[]) => void;
   addAgentMessage: (msg: AgentMessage) => void;
   agentLoading: boolean;
   setAgentLoading: (loading: boolean) => void;
@@ -60,29 +74,104 @@ interface AppState {
   setRegimeData: (data: RegimeData | null) => void;
   dismissedRegimeTimestamp: string | null;
   setDismissedRegimeTimestamp: (ts: string | null) => void;
+  compliance: ComplianceStatus | null;
+  setCompliance: (c: ComplianceStatus | null) => void;
+  alpacaUsage: AlpacaApiUsage | null;
+  setAlpacaUsage: (u: AlpacaApiUsage | null) => void;
+
+  // Playbook routing (AUTO vs MANUAL set + currently-active list)
+  playbookAuto: boolean;
+  setPlaybookAuto: (v: boolean) => void;
+  manualPlaybooks: string[];
+  setManualPlaybooks: (ids: string[]) => void;
+  activePlaybooks: string[];
+  setActivePlaybooks: (ids: string[]) => void;
+
+  /** Signed-in user (null = guest / legacy env Alpaca) */
+  authEmail: string | null;
+  authAlpacaConfigured: boolean;
+  /** Alpaca API endpoint: paper vs live (only meaningful when keys are saved). */
+  authAlpacaPaperTrading: boolean;
+  setAuthProfile: (
+    email: string | null,
+    alpacaConfigured: boolean,
+    alpacaPaperTrading?: boolean | null,
+  ) => void;
+  authMethod: 'google' | 'email' | null;
+  setAuthMethod: (method: 'google' | 'email' | null) => void;
+
+  colorTheme: ColorTheme;
+  setColorTheme: (theme: ColorTheme) => void;
+
+  appLocale: AppLocale;
+  setAppLocale: (locale: AppLocale) => void;
 }
 
-export const useAppStore = create<AppState>((set, get) => ({
+export const useAppStore = create<AppState>((set) => ({
   // Navigation
   currentPage: 'dashboard',
   setCurrentPage: (page) => set({ currentPage: page }),
-
-  colorMode: 'dark',
-  setColorMode: (mode) => {
-    applyColorMode(mode);
-    set({ colorMode: mode });
-  },
-  toggleColorMode: () => {
-    const next = get().colorMode === 'dark' ? 'light' : 'dark';
-    applyColorMode(next);
-    set({ colorMode: next });
-  },
 
   // Regime
   regimeData: null,
   setRegimeData: (data) => set({ regimeData: data }),
   dismissedRegimeTimestamp: null,
   setDismissedRegimeTimestamp: (ts) => set({ dismissedRegimeTimestamp: ts }),
+  compliance: null,
+  setCompliance: (c) => set({ compliance: c }),
+  alpacaUsage: null,
+  setAlpacaUsage: (u) => set({ alpacaUsage: u }),
+
+  playbookAuto: true,
+  setPlaybookAuto: (v) => set({ playbookAuto: v }),
+  manualPlaybooks: ['scalp', 'vwap', 'orb', 'eod'],
+  setManualPlaybooks: (ids) => set({ manualPlaybooks: ids }),
+  activePlaybooks: [],
+  setActivePlaybooks: (ids) => set({ activePlaybooks: ids }),
+
+  authEmail: null,
+  authAlpacaConfigured: false,
+  authAlpacaPaperTrading: true,
+  setAuthProfile: (email, alpacaConfigured, alpacaPaperTrading) =>
+    set({
+      authEmail: email,
+      authAlpacaConfigured: alpacaConfigured,
+      authAlpacaPaperTrading:
+        email === null
+          ? true
+          : alpacaPaperTrading !== undefined && alpacaPaperTrading !== null
+            ? Boolean(alpacaPaperTrading)
+            : useAppStore.getState().authAlpacaPaperTrading,
+    }),
+  authMethod: null,
+  setAuthMethod: (method) => set({ authMethod: method }),
+
+  colorTheme: readStoredTheme(),
+  setColorTheme: (theme) => {
+    persistTheme(theme);
+    applyThemeToDocument(theme);
+    set({ colorTheme: theme });
+  },
+
+  appLocale: readStoredLocale(),
+  setAppLocale: (locale) => {
+    persistLocale(locale);
+    applyLocaleToDocument(locale);
+    set((state) => {
+      const welcome = {
+        id: '1',
+        role: 'ai' as const,
+        content: getUiStrings(locale).agent.welcomeMessage,
+        timestamp: new Date().toISOString(),
+      };
+      const msgs = state.agentMessages;
+      const onlyDefaultWelcome = msgs.length === 1 && msgs[0].id === '1' && msgs[0].role === 'ai';
+      return {
+        appLocale: locale,
+        agentMessages: onlyDefaultWelcome ? [welcome] : msgs,
+      };
+    });
+  },
 
   // Account - $3000 paper trading
   account: {
@@ -125,6 +214,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Trading Bot
   botActive: false,
   setBotActive: (active) => set({ botActive: active }),
+  botDailyTrades: 0,
+  setBotDailyTrades: (count) => set({ botDailyTrades: Math.max(0, Number(count) || 0) }),
   tradeLogs: [
     { time: new Date().toLocaleTimeString(), type: 'info', message: 'TradeSense v3 — Cash Account Scalp Engine Initialized ($3,000)' },
     { time: new Date().toLocaleTimeString(), type: 'info', message: 'PDT-Exempt mode active. GFV monitoring enabled.' },
@@ -135,15 +226,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   })),
   setTradeLogs: (logs) => set({ tradeLogs: logs }),
 
-  // AI Agent
+  // AI Agent (welcome string follows readStoredLocale() at first load)
   agentMessages: [
     {
       id: '1',
       role: 'ai',
-      content: '안녕하세요! 저는 TradeSense v3 마이크로 스캘핑 에이전트입니다. ⚡️\n\n**$3,000 캐시 어카운트**를 활용해 매일 **+1% 수익**을 목표로 복리 투자를 진행합니다.\n\n현재 모니터링 중인 스캘핑 전략:\n• RSI 과매도 반등 스캘핑 (5-min)\n• VWAP 지지/저항 돌파\n• AI 기반 섹터 순환 (Paid Tier)',
+      content: getUiStrings(readStoredLocale()).agent.welcomeMessage,
       timestamp: new Date().toISOString(),
     },
   ],
+  setAgentMessages: (messages) => set({ agentMessages: messages }),
   addAgentMessage: (msg) => set((state) => ({
     agentMessages: [...state.agentMessages, msg],
   })),
@@ -155,7 +247,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     {
       id: 'scalp',
       name: 'Micro-Scalping v3',
-      description: '5분봉 기준 RSI/VWAP 지표를 활용한 빠른 단타 전략. 매일 1% 수익을 목표로 합니다.',
+      description: 'Fast intraday scalps on 5-min bars using RSI/VWAP. Targets ~1% per day.',
       active: true,
       winRate: 0,
       trades: 0,
@@ -164,7 +256,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     {
       id: 'regime-adaptive',
       name: 'AI Sector Adaptive',
-      description: '실시간 시장 이슈(전쟁, 금리 등)에 따라 집중 섹터와 종목을 AI가 자동으로 변경합니다.',
+      description: 'AI rotates focus sectors and symbols as macro headlines shift (war, rates, etc.).',
       active: true,
       winRate: 0,
       trades: 0,
@@ -173,7 +265,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     {
       id: 'ml-predict',
       name: 'ML Prediction',
-      description: 'Gradient Boosting 모델을 이용한 가격 예측 전략. 기술적 지표를 feature로 사용.',
+      description: 'Gradient-boosting price outlook using technical features as inputs.',
       active: false,
       winRate: 55.8,
       trades: 0,
@@ -181,7 +273,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     },
   ],
   setStrategies: (strategies) => set({ strategies }),
-  activeStrategy: 'momentum',
+  activeStrategy: 'scalp',
   setActiveStrategy: (id) => set({ activeStrategy: id }),
 
   // Connection

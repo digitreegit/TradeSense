@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
+import { useUiStrings } from '../../hooks/useUiStrings';
 import { formatCurrency, formatPercent } from '../../utils/helpers';
 import type { BarData } from '../../stores/types';
 import api from '../../services/api';
@@ -10,7 +11,8 @@ const TF_MAP: Record<string, string> = {
 };
 
 const ChartView: React.FC = () => {
-  const { selectedSymbol, setSelectedSymbol, watchlist, colorMode } = useAppStore();
+  const t = useUiStrings();
+  const { selectedSymbol, setSelectedSymbol, watchlist, colorTheme } = useAppStore();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [timeframe, setTimeframe] = useState('1D');
   const [searchInput, setSearchInput] = useState(selectedSymbol);
@@ -39,8 +41,8 @@ const ChartView: React.FC = () => {
       }
     };
     fetchBars();
-    // Refresh every 30s
-    const interval = setInterval(fetchBars, 30000);
+    // Refresh every 60s (reduces API pressure / UI jank)
+    const interval = setInterval(fetchBars, 60000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [selectedSymbol, timeframe]);
 
@@ -64,8 +66,12 @@ const ChartView: React.FC = () => {
     const volumeHeight = height * 0.2;
     const volumeTop = chartHeight + 10;
 
-    // Clear — match Cursor editor background (dark / light modern)
-    ctx.fillStyle = colorMode === 'dark' ? '#1f1f1f' : '#ffffff';
+    const cs = getComputedStyle(document.documentElement);
+    const chartBg = (cs.getPropertyValue('--chart-canvas-bg').trim() || '#1f1f1f');
+    const gridCol = (cs.getPropertyValue('--chart-grid').trim() || 'rgba(255, 255, 255, 0.06)');
+    const axisLbl = (cs.getPropertyValue('--chart-axis-label').trim() || '#6e7681');
+
+    ctx.fillStyle = chartBg;
     ctx.fillRect(0, 0, width, height);
 
     // Calculate price range
@@ -82,8 +88,7 @@ const ChartView: React.FC = () => {
     const candleWidth = (width - 60) / visibleData.length;
     const bodyWidth = Math.max(candleWidth * 0.6, 2);
 
-    // Grid lines
-    ctx.strokeStyle = colorMode === 'dark' ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.06)';
+    ctx.strokeStyle = gridCol;
     ctx.lineWidth = 1;
     const gridLines = 6;
     for (let i = 0; i <= gridLines; i++) {
@@ -95,7 +100,7 @@ const ChartView: React.FC = () => {
 
       // Price labels
       const price = adjustedMax - (i / gridLines) * adjustedRange;
-      ctx.fillStyle = colorMode === 'dark' ? '#6e7681' : '#6e7681';
+      ctx.fillStyle = axisLbl;
       ctx.font = '11px Inter, sans-serif';
       ctx.textAlign = 'right';
       ctx.fillText(price.toFixed(2), width - 4, y + 3);
@@ -141,10 +146,10 @@ const ChartView: React.FC = () => {
     };
 
     if (indicators.ma20) {
-      drawMA(ma20, colorMode === 'dark' ? 'rgba(0, 120, 212, 0.65)' : 'rgba(0, 95, 184, 0.65)');
+      drawMA(ma20, colorTheme === 'dark' ? 'rgba(0, 120, 212, 0.65)' : 'rgba(0, 95, 184, 0.65)');
     }
     if (indicators.ma50) {
-      drawMA(ma50, colorMode === 'dark' ? 'rgba(133, 182, 255, 0.65)' : 'rgba(38, 86, 158, 0.58)');
+      drawMA(ma50, colorTheme === 'dark' ? 'rgba(133, 182, 255, 0.65)' : 'rgba(38, 86, 158, 0.58)');
     }
 
     // Draw candles
@@ -209,7 +214,7 @@ const ChartView: React.FC = () => {
       ctx.textAlign = 'center';
       ctx.fillText(lastCandle.close.toFixed(2), width - 26, lastY + 4);
     }
-  }, [candleData, indicators, colorMode]);
+  }, [candleData, indicators, colorTheme]);
 
   useEffect(() => {
     drawChart();
@@ -342,11 +347,11 @@ const ChartView: React.FC = () => {
             <div style={{
               position: 'absolute', inset: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'var(--bg-overlay)', zIndex: 10, gap: '12px',
+              background: 'var(--chart-loading-bg)', zIndex: 10, gap: '12px',
               fontSize: '13px', color: 'var(--text-tertiary)',
             }}>
               <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span>
-              Alpaca에서 차트 데이터 로딩 중...
+              {t.chart.loading}
             </div>
           )}
           {!loading && candleData.length === 0 && (
@@ -357,7 +362,7 @@ const ChartView: React.FC = () => {
               fontSize: '13px', color: 'var(--text-tertiary)',
             }}>
               <span style={{ fontSize: '32px' }}>📭</span>
-              <span>이 종목의 차트 데이터가 없습니다</span>
+              <span>{t.chart.noData}</span>
             </div>
           )}
           <canvas
@@ -398,7 +403,12 @@ const ChartView: React.FC = () => {
           >
             {item.symbol}
             <span style={{
-              color: item.change >= 0 ? 'var(--profit)' : 'var(--loss)',
+              color:
+                selectedSymbol === item.symbol
+                  ? '#ffffff'
+                  : item.change >= 0
+                    ? 'var(--profit)'
+                    : 'var(--loss)',
               marginLeft: '4px',
             }}>
               {formatPercent(item.changePercent)}

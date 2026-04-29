@@ -1,5 +1,10 @@
 // Zustand store types and shared interfaces
 
+export type ColorTheme = 'dark' | 'light';
+
+/** UI language (Settings and future i18n). */
+export type AppLocale = 'en' | 'ko';
+
 export interface Position {
   symbol: string;
   qty: number;
@@ -70,6 +75,8 @@ export interface Strategy {
   name: string;
   description: string;
   active: boolean;
+  /** Optional: from API playbook list */
+  enabled?: boolean;
   winRate: number;
   trades: number;
   pnl: number;
@@ -90,15 +97,88 @@ export interface RegimeData {
   risk_level: string;
   max_position_percent: number;
   stop_loss_percent: number;
+  take_profit_percent?: number;
   prev_strategy?: string;
   prev_risk_level?: string;
   timestamp?: string;
-  /** From backend regime payload (optional) */
-  market_level?: string;
-  market_score?: number;
   focus_sectors?: string[];
   focus_symbols?: string[];
+  daily_target?: string;
+  daily_pnl?: string;
+  account_type?: string;
+  /** AI regime sub-scores (war/earnings/fed/gold/crypto/others) */
+  market_level?: string;
+  market_score?: number;
+  ai_market_score?: number;
   market_scores?: Record<string, number>;
+  /** Quantitative regime sub-scores (vix/bonds/dxy/gold/energy/crypto/spy) */
+  quant_scores?: Record<string, number>;
+  quant_changes_5d_pct?: Record<string, number | null>;
+  vix_proxy_level?: number;
+  sector_tilt?: string | null;
+  blackout?: boolean;
+  blackout_reason?: string;
+  news_score?: number;
+  /** Currently enabled playbooks in engine (AUTO or MANUAL routing) */
+  active_playbooks?: string[];
+  playbook_mode?: 'auto' | 'manual';
 }
 
-export type PageId = 'dashboard' | 'chart' | 'agent' | 'trading' | 'portfolio' | 'history';
+/** `/api/trading/playbooks` payload */
+export interface PlaybookConfig {
+  auto: boolean;
+  manual: string[];
+  active: string[];
+  playbooks: Array<{
+    id: string;
+    name: string;
+    description: string;
+    manual_enabled: boolean;
+    active_now: boolean;
+  }>;
+}
+
+/** Alpaca REST rate-limit snapshot (from response headers via /v2/clock probe). */
+export interface AlpacaApiUsage {
+  ok: boolean;
+  connected?: boolean;
+  error?: string;
+  note?: string;
+  http_probe_error?: string;
+  limit?: number | null;
+  remaining?: number | null;
+  used?: number | null;
+  reset_epoch?: number | null;
+  reset_in_seconds?: number | null;
+  percent_used?: number | null;
+  /** False when Alpaca responded OK but sent no rate-limit headers */
+  headers_available?: boolean;
+}
+
+export interface ComplianceStatus {
+  unsettled_cash: number;
+  open_unsettled_lots: number;
+  gfv_count_12mo: number;
+  gfv_level: 'OK' | 'NOTICE' | 'WARNING' | 'RESTRICTED';
+  loss_streak: number;
+  cooling_down: boolean;
+  cooldown_remaining_s: number;
+  wash_sale_cooldowns: Record<string, string>;
+}
+
+export interface BotStatusResponse {
+  active: boolean;
+  strategy?: string;
+  regime_data?: RegimeData;
+  regime_reason?: string;
+}
+
+export type PageId =
+  | 'dashboard'
+  | 'chart'
+  | 'agent'
+  | 'trading'
+  | 'portfolio'
+  | 'history'
+  | 'auth'
+  | 'settings';

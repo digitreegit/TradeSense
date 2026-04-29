@@ -1,15 +1,19 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
+import { useUiStrings } from '../../hooks/useUiStrings';
 import { generateId } from '../../utils/helpers';
 import api from '../../services/api';
 
 const AgentPanel: React.FC = () => {
+  const t = useUiStrings();
+  const a = t.agent;
   const {
     agentMessages,
     addAgentMessage,
     agentLoading,
     setAgentLoading,
     selectedSymbol,
+    appLocale,
   } = useAppStore();
 
   const [input, setInput] = useState('');
@@ -22,11 +26,13 @@ const AgentPanel: React.FC = () => {
   const handleSend = async () => {
     if (!input.trim() || agentLoading) return;
 
-    const query = input.trim();
+    const raw = input.trim();
+    const queryForApi =
+      appLocale === 'ko' ? `다음에 한국어로 답하세요. 전문용어는 필요하면 괄호로 영어를 병기해도 됩니다.\n\n${raw}` : raw;
     const userMsg = {
       id: generateId(),
       role: 'user' as const,
-      content: query,
+      content: raw,
       timestamp: new Date().toISOString(),
     };
 
@@ -35,16 +41,12 @@ const AgentPanel: React.FC = () => {
     setAgentLoading(true);
 
     try {
-      const result = await api.chat(query) as { response: string };
-      let content = result.response || "⚠️ 답변을 생성할 수 없습니다.";
+      const result = await api.chat(queryForApi) as { response: string };
+      let content = result.response || a.noResponse;
       
       // Filter out raw API error dumps from Gemini quota issues
       if (content.includes('RESOURCE_EXHAUSTED') || content.includes('429') || content.includes('quota')) {
-        content = "⚠️ AI 분석 요청이 일시적으로 제한되었습니다.\n\n" +
-          "Google Gemini 무료 API의 분당 호출 제한에 도달했습니다.\n" +
-          "약 1분 후에 다시 시도해 주세요.\n\n" +
-          "💡 TIP: Trading Bot이 실행 중이면 봇도 AI를 사용하므로,\n" +
-          "채팅 전에 봇을 잠시 멈추면 더 원활하게 대화할 수 있습니다.";
+        content = a.quotaError;
       }
       
       addAgentMessage({
@@ -58,7 +60,7 @@ const AgentPanel: React.FC = () => {
       addAgentMessage({
         id: generateId(),
         role: 'ai',
-        content: "⚠️ 서버와 연결할 수 없습니다.\n\n서버가 실행 중인지 확인해 주세요.\n(터미널에서 backend 폴더로 이동 후 `python -m uvicorn app.main:app --reload` 실행)",
+        content: a.serverError('`cd backend && python -m uvicorn app.main:app --reload`'),
         timestamp: new Date().toISOString(),
       });
     } finally {
@@ -66,13 +68,16 @@ const AgentPanel: React.FC = () => {
     }
   };
 
-  const quickActions = [
-    { label: `Analyze ${selectedSymbol}`, msg: `${selectedSymbol} 종합 분석해줘` },
-    { label: 'Market Overview', msg: '현재 시장 상황 분석해줘' },
-    { label: 'Trading Signal', msg: '지금 매매 시그널 있어?' },
-    { label: 'Portfolio Review', msg: '내 포트폴리오 리뷰해줘' },
-    { label: 'Risk Report', msg: '리스크 리포트 보여줘' },
-  ];
+  const quickActions = useMemo(
+    () => [
+      { label: a.analyzeSym(selectedSymbol), msg: a.quickMsgAnalyze(selectedSymbol) },
+      { label: a.marketOverview, msg: a.quickMsgMarket },
+      { label: a.tradingSignal, msg: a.quickMsgSignal },
+      { label: a.portfolioReview, msg: a.quickMsgPortfolio },
+      { label: a.riskReport, msg: a.quickMsgRisk },
+    ],
+    [a, selectedSymbol],
+  );
 
   return (
     <div className="page-enter" style={{
@@ -83,7 +88,7 @@ const AgentPanel: React.FC = () => {
       <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
         <div className="card-header">
           <span className="card-title">
-            🤖 TradeSense AI Agent
+            🤖 {a.title}
             <span style={{
               fontSize: '10px',
               padding: '2px 8px',
@@ -139,7 +144,7 @@ const AgentPanel: React.FC = () => {
               }}>
                 <span className="spinner" style={{ width: 14, height: 14 }} />
                 <span style={{ color: 'var(--text-tertiary)', fontSize: '12px', marginLeft: '8px' }}>
-                  Analyzing...
+                  {a.analyzing}
                 </span>
               </div>
             </div>
@@ -153,6 +158,7 @@ const AgentPanel: React.FC = () => {
           display: 'flex',
           gap: '6px',
           padding: '8px 16px 0',
+          marginBottom: '12px',
           overflowX: 'auto',
         }}>
           {quickActions.map((action, i) => (
@@ -162,7 +168,7 @@ const AgentPanel: React.FC = () => {
               style={{
                 padding: '4px 12px',
                 border: '1px solid var(--border-primary)',
-                borderRadius: 'var(--radius-full)',
+                borderRadius: 'var(--btn-radius-sm)',
                 background: 'none',
                 color: 'var(--text-tertiary)',
                 fontSize: '12px',
@@ -193,7 +199,7 @@ const AgentPanel: React.FC = () => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder="Ask TradeSense AI anything about stocks, strategies, or market..."
+            placeholder={a.placeholder}
             disabled={agentLoading}
           />
           <button

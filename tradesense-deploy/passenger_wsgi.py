@@ -1,29 +1,30 @@
 """
-Passenger WSGI entry point for InMotion Hosting (cPanel).
-This file should be placed in the application root directory
-configured via cPanel → Setup Python App.
+Passenger WSGI entry point for shared hosting (cPanel).
+Converts the FastAPI ASGI app to WSGI for Phusion Passenger.
 """
-import sys
+import logging
 import os
+import sys
 
-# Set the application directory
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("passenger")
+
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_DIR = os.path.join(APP_DIR, "backend")
 
-# Add backend to Python path
+os.chdir(APP_DIR)
 sys.path.insert(0, BACKEND_DIR)
 
-# Load environment variables from .env if present
 from dotenv import load_dotenv
+
 env_path = os.path.join(APP_DIR, ".env")
 if os.path.exists(env_path):
-    load_dotenv(env_path)
+    load_dotenv(env_path, override=True)
+    logger.info("Loaded .env from %s", env_path)
+else:
+    logger.warning(".env not found at %s", env_path)
 
-# Import the FastAPI app and wrap with ASGI-to-WSGI adapter
 from app.main import app as fastapi_app
+from a2wsgi import ASGIMiddleware
 
-try:
-    # If a]syncio-compatible Passenger (supports ASGI)
-    application = fastapi_app
-except Exception:
-    pass
+application = ASGIMiddleware(fastapi_app)

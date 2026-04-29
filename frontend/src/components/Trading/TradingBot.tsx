@@ -1,7 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import { formatCurrency, formatPercent } from '../../utils/helpers';
 import api from '../../services/api';
+import {
+  readStoredRiskSettings,
+  persistRiskSettings,
+  DEFAULT_RISK_SETTINGS,
+  type StoredRiskLevel,
+  type StoredRiskSettings,
+} from '../../trading/riskSettingsStorage';
+import { useUiStrings } from '../../hooks/useUiStrings';
 
 // Heroicons v2 Outline SVGs
 const BoltIcon = (props: React.ComponentProps<'svg'>) => (
@@ -77,21 +85,114 @@ const ErrorIcon = (props: React.ComponentProps<'svg'>) => (
 );
 
 const TradingBot: React.FC = () => {
+  const t = useUiStrings();
+  const u = t.trading;
+  const pbLabels = u.playbookById;
+  const riskLevelLabel: Record<StoredRiskLevel, string> = {
+    conservative: u.conservative,
+    moderate: u.moderate,
+    aggressive: u.aggressive,
+  };
   const {
     botActive,
     setBotActive,
     tradeLogs,
     setTradeLogs,
     strategies,
-    activeStrategy,
-    setActiveStrategy,
     account,
+    authEmail,
+    authAlpacaConfigured,
+    authAlpacaPaperTrading,
+    playbookAuto,
+    setPlaybookAuto,
+    manualPlaybooks,
+    setManualPlaybooks,
+    activePlaybooks,
+    setActivePlaybooks,
+    colorTheme,
+    appLocale,
   } = useAppStore();
 
-  const [riskLevel, setRiskLevel] = useState<'conservative' | 'moderate' | 'aggressive'>('moderate');
-  const [maxPositionSize, setMaxPositionSize] = useState(15);
-  const [stopLossPercent, setStopLossPercent] = useState(0.3);
-  const [takeProfitPercent, setTakeProfitPercent] = useState(0.8);
+  const getPlaybookText = (strat: { id: string; name: string; description: string }) => {
+    if (appLocale !== 'ko') {
+      return { name: strat.name, description: strat.description };
+    }
+    const loc = pbLabels[strat.id as keyof typeof pbLabels];
+    if (loc) {
+      return { name: loc.name, description: loc.description };
+    }
+    return { name: strat.name, description: strat.description };
+  };
+
+  const isLight = colorTheme === 'light';
+  const playbookSwitchStyle = useMemo(() => {
+    const green = 'var(--profit)';
+    if (isLight) {
+      return {
+        trackOff: 'rgba(0,0,0,0.1)',
+        trackOn: green,
+        thumb: '#f8fafc',
+        trackBorderOff: '1px solid rgba(0,0,0,0.22)',
+        trackBorderOn: '1px solid rgba(5, 150, 105, 0.55)',
+        thumbShadow: '0 1px 3px rgba(0,0,0,0.2)',
+      };
+    }
+    return {
+      trackOff: 'rgba(255,255,255,0.14)',
+      trackOn: green,
+      thumb: '#f8fafc',
+      trackBorderOff: '1px solid rgba(255,255,255,0.28)',
+      trackBorderOn: '1px solid rgba(16, 185, 129, 0.5)',
+      thumbShadow: '0 1px 3px rgba(0,0,0,0.35)',
+    };
+  }, [isLight]);
+
+  /** Logged in + saved keys + live API — do not let the user tune risk in the browser. */
+  const riskControlLocked = Boolean(
+    authEmail && authAlpacaConfigured && !authAlpacaPaperTrading,
+  );
+
+  const [savingPlaybooks, setSavingPlaybooks] = useState(false);
+
+  const pushPlaybookConfig = useCallback(
+    async (next: { auto?: boolean; manual?: string[] }) => {
+      try {
+        setSavingPlaybooks(true);
+        const cfg = await api.setPlaybookConfig(next);
+        if (typeof cfg.auto === 'boolean') setPlaybookAuto(cfg.auto);
+        if (Array.isArray(cfg.manual)) setManualPlaybooks(cfg.manual);
+        if (Array.isArray(cfg.active)) setActivePlaybooks(cfg.active);
+      } catch (err) {
+        console.error('Failed to update playbooks:', err);
+      } finally {
+        setSavingPlaybooks(false);
+      }
+    },
+    [setPlaybookAuto, setManualPlaybooks, setActivePlaybooks],
+  );
+
+  const handleToggleAuto = () => {
+    pushPlaybookConfig({ auto: !playbookAuto });
+  };
+
+  const handleToggleManual = (id: string) => {
+    if (playbookAuto) return; // editing the manual set only matters in AUTO-OFF
+    const next = manualPlaybooks.includes(id)
+      ? manualPlaybooks.filter((p) => p !== id)
+      : [...manualPlaybooks, id];
+    pushPlaybookConfig({ manual: next });
+  };
+
+  const [risk, setRisk] = useState<StoredRiskSettings>(() => readStoredRiskSettings());
+
+  const effectiveRisk: StoredRiskSettings = riskControlLocked
+    ? { ...DEFAULT_RISK_SETTINGS }
+    : risk;
+
+  useEffect(() => {
+    if (riskControlLocked) return;
+    persistRiskSettings(risk);
+  }, [risk, riskControlLocked]);
 
   const [sessionStats, setSessionStats] = useState({
     total_trades: 0,
@@ -130,13 +231,48 @@ const TradingBot: React.FC = () => {
     return () => clearInterval(interval);
   }, [pollBotStatus]);
 
+  const applyRiskPreset = (level: StoredRiskLevel) => {
+    if (riskControlLocked) return;
+    if (level === 'conservative') {
+      setRisk((s) => ({
+        ...s,
+        riskLevel: 'conservative',
+        maxPositionSize: 10,
+        stopLossPercent: 0.2,
+        takeProfitPercent: 0.4,
+      }));
+    } else if (level === 'moderate') {
+      setRisk((s) => ({
+        ...s,
+        riskLevel: 'moderate',
+        maxPositionSize: 15,
+        stopLossPercent: 0.3,
+        takeProfitPercent: 0.8,
+      }));
+    } else {
+      setRisk((s) => ({
+        ...s,
+        riskLevel: 'aggressive',
+        maxPositionSize: 20,
+        stopLossPercent: 0.5,
+        takeProfitPercent: 1.5,
+      }));
+    }
+  };
+
+  const handleResetRisk = () => {
+    if (riskControlLocked) return;
+    setRisk({ ...DEFAULT_RISK_SETTINGS });
+  };
+
   const handleToggleBot = async () => {
     try {
       if (!botActive) {
-        await api.startBot(activeStrategy || 'momentum', {
-          stop_loss: stopLossPercent,
-          take_profit: takeProfitPercent,
-          max_position: maxPositionSize,
+        await api.startBot('scalp', {
+          stop_loss: effectiveRisk.stopLossPercent,
+          take_profit: effectiveRisk.takeProfitPercent,
+          max_position: effectiveRisk.maxPositionSize,
+          risk_level: effectiveRisk.riskLevel,
         });
         setBotActive(true);
       } else {
@@ -188,10 +324,10 @@ const TradingBot: React.FC = () => {
             </div>
             <div>
               <h2 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '4px' }}>
-                TradeSense Trading Bot
+                {u.title}
               </h2>
               <p style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
-                Automated quant trading • Paper Trading Mode • Capital: {formatCurrency(account.equity)}
+                {u.subtitle(formatCurrency(account.equity))}
               </p>
             </div>
           </div>
@@ -203,7 +339,7 @@ const TradingBot: React.FC = () => {
               color: botActive ? 'var(--profit)' : 'var(--text-tertiary)',
               letterSpacing: '0.5px',
             }}>
-              {botActive ? '● RUNNING' : '○ STOPPED'}
+              {botActive ? u.running : u.stopped}
             </span>
             <button
               className={botActive ? 'btn-stop' : 'btn-start'}
@@ -212,12 +348,12 @@ const TradingBot: React.FC = () => {
               {botActive ? (
                 <>
                   <StopIcon style={{ width: '18px', height: '18px' }} />
-                  Stop Bot
+                  {u.stopBot}
                 </>
               ) : (
                 <>
                   <RocketIcon style={{ width: '18px', height: '18px' }} />
-                  Start Bot
+                  {u.startBot}
                 </>
               )}
             </button>
@@ -231,52 +367,139 @@ const TradingBot: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <CheckBadgeIcon className="card-icon" /> Trading Strategies
+                <CheckBadgeIcon className="card-icon" /> {u.strategies}
               </span>
+              <div
+                style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}
+                title={u.autoHelp}
+              >
+                <span
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    color: playbookAuto ? 'var(--text-tertiary)' : 'var(--text-primary)',
+                  }}
+                >
+                  {u.manual}
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={playbookAuto}
+                  aria-label={playbookAuto ? 'Playbook mode: Auto' : 'Playbook mode: Manual'}
+                  onClick={handleToggleAuto}
+                  disabled={savingPlaybooks}
+                  style={{
+                    position: 'relative',
+                    width: 44,
+                    height: 24,
+                    flexShrink: 0,
+                    borderRadius: 9999,
+                    boxSizing: 'border-box',
+                    border: playbookAuto ? playbookSwitchStyle.trackBorderOn : playbookSwitchStyle.trackBorderOff,
+                    padding: 0,
+                    cursor: savingPlaybooks ? 'not-allowed' : 'pointer',
+                    opacity: savingPlaybooks ? 0.5 : 1,
+                    background: playbookAuto ? playbookSwitchStyle.trackOn : playbookSwitchStyle.trackOff,
+                    transition: 'background 0.2s ease, border-color 0.2s ease',
+                  }}
+                >
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: 2,
+                      /* 22 vs 24: nudge ON thumb left so it does not sit flush to the right edge (44 - 18 - 2px pad) */
+                      left: playbookAuto ? 22 : 2,
+                      width: 18,
+                      height: 18,
+                      borderRadius: '50%',
+                      background: playbookSwitchStyle.thumb,
+                      boxShadow: playbookSwitchStyle.thumbShadow,
+                      transition: 'left 0.2s ease',
+                    }}
+                  />
+                </button>
+                <span
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    color: playbookAuto ? 'var(--text-primary)' : 'var(--text-tertiary)',
+                    minWidth: '36px',
+                  }}
+                >
+                  {u.auto}
+                </span>
+              </div>
             </div>
             <div style={{ padding: 'var(--space-lg)' }}>
+              {playbookAuto && (
+                <p style={{
+                  fontSize: '12px',
+                  color: 'var(--text-tertiary)',
+                  marginBottom: '12px',
+                  lineHeight: 1.5,
+                }}>
+                  {u.autoHelp}
+                </p>
+              )}
               <div className="strategy-grid">
-                {strategies.map((strat) => (
-                  <div
-                    key={strat.id}
-                    className={`strategy-card ${activeStrategy === strat.id ? 'active' : ''}`}
-                    onClick={() => setActiveStrategy(strat.id)}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span className="strategy-name">{strat.name}</span>
-                      <span style={{
-                        width: 12,
-                        height: 12,
-                        borderRadius: '50%',
-                        border: '2px solid',
-                        borderColor: activeStrategy === strat.id ? 'var(--accent-primary)' : 'var(--text-muted)',
-                        background: activeStrategy === strat.id ? 'var(--accent-primary)' : 'transparent',
-                        display: 'inline-block',
-                      }} />
-                    </div>
-                    <p className="strategy-description">{strat.description}</p>
-                    <div className="strategy-stats">
-                      <div className="strategy-stat">
-                        <span className="strategy-stat-label">Win Rate</span>
-                        <span className="strategy-stat-value" style={{ color: 'var(--profit)' }}>
-                          {strat.winRate}%
-                        </span>
-                      </div>
-                      <div className="strategy-stat">
-                        <span className="strategy-stat-label">Trades</span>
-                        <span className="strategy-stat-value">{strat.trades}</span>
-                      </div>
-                      <div className="strategy-stat">
-                        <span className="strategy-stat-label">P&L</span>
-                        <span className="strategy-stat-value" style={{
-                          color: strat.pnl >= 0 ? 'var(--profit)' : 'var(--loss)',
+                {strategies.map((strat) => {
+                  const { name: pbName, description: pbDesc } = getPlaybookText(strat);
+                  const isActiveNow = activePlaybooks.includes(strat.id);
+                  const isManualOn = manualPlaybooks.includes(strat.id);
+                  const isOn = playbookAuto ? isActiveNow : isManualOn;
+                  return (
+                    <div
+                      key={strat.id}
+                      className={`strategy-card ${isOn ? 'active' : ''}`}
+                      onClick={() => handleToggleManual(strat.id)}
+                      style={{
+                        cursor: playbookAuto ? 'default' : 'pointer',
+                        opacity: playbookAuto && !isActiveNow ? 0.75 : 1,
+                      }}
+                      title={
+                        playbookAuto
+                          ? isActiveNow
+                            ? u.statusActive
+                            : u.statusIdle
+                          : isManualOn
+                            ? u.statusManual
+                            : u.statusDisabled
+                      }
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span className="strategy-name">{pbName}</span>
+                        <span style={{
+                          width: 14,
+                          height: 14,
+                          borderRadius: '4px',
+                          border: '2px solid',
+                          borderColor: isOn ? 'var(--btn-primary-bg)' : 'var(--text-muted)',
+                          background: isOn ? 'var(--btn-primary-bg)' : 'transparent',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: 'white',
+                          fontSize: '10px',
+                          fontWeight: 800,
                         }}>
-                          {strat.pnl >= 0 ? '+' : ''}{formatCurrency(strat.pnl)}
+                          {isOn ? '✓' : ''}
                         </span>
                       </div>
+                      <p className="strategy-description">{pbDesc}</p>
+                      <div style={{
+                        marginTop: '6px',
+                        fontSize: '10px',
+                        fontFamily: 'var(--font-mono)',
+                        color: isActiveNow ? 'var(--profit)' : 'var(--text-muted)',
+                        letterSpacing: '0.5px',
+                      }}>
+                        {isActiveNow ? u.activeNow : u.idleLine}
+                        {!playbookAuto && isManualOn && !isActiveNow ? u.manualPending : ''}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -285,14 +508,14 @@ const TradingBot: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <ListIcon className="card-icon" /> Activity Log
+                <ListIcon className="card-icon" /> {u.activityLog}
               </span>
               <span style={{
                 fontSize: '12px',
                 color: 'var(--text-tertiary)',
                 fontFamily: 'var(--font-mono)',
               }}>
-                {tradeLogs.length} events
+                {u.events(String(tradeLogs.length))}
               </span>
             </div>
             <div className="bot-log" style={{ maxHeight: '400px' }}>
@@ -315,12 +538,28 @@ const TradingBot: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <ShieldIcon className="card-icon" /> Risk Settings
+                <ShieldIcon className="card-icon" /> {u.riskSettings}
               </span>
             </div>
             <div style={{ padding: 'var(--space-xl)', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', lineHeight: 1.5, margin: 0 }}>
+                {riskControlLocked ? (
+                  <>{u.riskLocked}</>
+                ) : (
+                  <>
+                    {u.riskSaveHint}
+                    {botActive ? u.riskRunHint : ''}
+                  </>
+                )}
+              </p>
+
               {/* Risk Level */}
-              <div>
+              <div
+                style={{
+                  opacity: riskControlLocked ? 0.7 : 1,
+                  pointerEvents: riskControlLocked ? 'none' : 'auto',
+                }}
+              >
                 <label style={{
                   fontSize: '12px',
                   textTransform: 'uppercase',
@@ -330,39 +569,26 @@ const TradingBot: React.FC = () => {
                   display: 'block',
                   marginBottom: '8px',
                 }}>
-                  Risk Level
+                  {u.riskLevel}
                 </label>
                 <div style={{ display: 'flex', gap: '4px' }}>
                   {(['conservative', 'moderate', 'aggressive'] as const).map((level) => (
                     <button
                       key={level}
-                      className={`btn btn-sm ${riskLevel === level ? 'btn-primary' : 'btn-secondary'}`}
-                      onClick={() => {
-                        setRiskLevel(level);
-                        if (level === 'conservative') {
-                          setMaxPositionSize(10);
-                          setStopLossPercent(0.2);
-                          setTakeProfitPercent(0.4);
-                        } else if (level === 'moderate') {
-                          setMaxPositionSize(15);
-                          setStopLossPercent(0.3);
-                          setTakeProfitPercent(0.8);
-                        } else if (level === 'aggressive') {
-                          setMaxPositionSize(20);
-                          setStopLossPercent(0.5);
-                          setTakeProfitPercent(1.5);
-                        }
-                      }}
+                      type="button"
+                      disabled={riskControlLocked}
+                      className={`btn btn-sm ${effectiveRisk.riskLevel === level ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => applyRiskPreset(level)}
                       style={{ flex: 1, textTransform: 'capitalize' }}
                     >
-                      {level}
+                      {riskLevelLabel[level]}
                     </button>
                   ))}
                 </div>
               </div>
 
               {/* Max Position */}
-              <div>
+              <div style={{ opacity: riskControlLocked ? 0.7 : 1 }}>
                 <label style={{
                   fontSize: '12px',
                   textTransform: 'uppercase',
@@ -372,21 +598,22 @@ const TradingBot: React.FC = () => {
                   display: 'block',
                   marginBottom: '8px',
                 }}>
-                  Max Position Size: {maxPositionSize}% ({formatCurrency(account.equity * maxPositionSize / 100)})
+                  {u.maxPos(String(effectiveRisk.maxPositionSize), formatCurrency(account.equity * effectiveRisk.maxPositionSize / 100))}
                 </label>
                 <input
                   type="range"
+                  className="risk-range-input risk-range--maxpos"
                   min={5}
                   max={25}
                   step={1}
-                  value={maxPositionSize}
-                  onChange={(e) => setMaxPositionSize(parseInt(e.target.value))}
-                  style={{ width: '100%', accentColor: 'var(--accent-primary)' }}
+                  value={effectiveRisk.maxPositionSize}
+                  disabled={riskControlLocked}
+                  onChange={(e) => setRisk((s) => ({ ...s, maxPositionSize: parseInt(e.target.value, 10) }))}
                 />
               </div>
 
               {/* Stop Loss */}
-              <div>
+              <div style={{ opacity: riskControlLocked ? 0.7 : 1 }}>
                 <label style={{
                   fontSize: '12px',
                   textTransform: 'uppercase',
@@ -396,21 +623,22 @@ const TradingBot: React.FC = () => {
                   display: 'block',
                   marginBottom: '8px',
                 }}>
-                  Stop Loss: -{stopLossPercent}%
+                  {u.stopLossL(String(effectiveRisk.stopLossPercent))}
                 </label>
                 <input
                   type="range"
+                  className="risk-range-input risk-range--stop"
                   min={0.1}
                   max={2.0}
                   step={0.05}
-                  value={stopLossPercent}
-                  onChange={(e) => setStopLossPercent(parseFloat(e.target.value))}
-                  style={{ width: '100%', accentColor: 'var(--loss)' }}
+                  value={effectiveRisk.stopLossPercent}
+                  disabled={riskControlLocked}
+                  onChange={(e) => setRisk((s) => ({ ...s, stopLossPercent: parseFloat(e.target.value) }))}
                 />
               </div>
 
               {/* Take Profit */}
-              <div>
+              <div style={{ opacity: riskControlLocked ? 0.7 : 1 }}>
                 <label style={{
                   fontSize: '12px',
                   textTransform: 'uppercase',
@@ -420,17 +648,29 @@ const TradingBot: React.FC = () => {
                   display: 'block',
                   marginBottom: '8px',
                 }}>
-                  Take Profit: +{takeProfitPercent}%
+                  {u.takeProfitL(String(effectiveRisk.takeProfitPercent))}
                 </label>
                 <input
                   type="range"
+                  className="risk-range-input risk-range--take"
                   min={0.2}
                   max={5.0}
                   step={0.05}
-                  value={takeProfitPercent}
-                  onChange={(e) => setTakeProfitPercent(parseFloat(e.target.value))}
-                  style={{ width: '100%', accentColor: 'var(--profit)' }}
+                  value={effectiveRisk.takeProfitPercent}
+                  disabled={riskControlLocked}
+                  onChange={(e) => setRisk((s) => ({ ...s, takeProfitPercent: parseFloat(e.target.value) }))}
                 />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleResetRisk}
+                  disabled={riskControlLocked}
+                >
+                  {u.resetDefaults}
+                </button>
               </div>
 
               {/* Summary */}
@@ -442,15 +682,26 @@ const TradingBot: React.FC = () => {
                 lineHeight: 1.8,
               }}>
                   <div style={{ fontWeight: 600, marginBottom: '8px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <ListIcon style={{ width: '16px', height: '16px' }} /> Configuration Summary
+                    <ListIcon style={{ width: '16px', height: '16px' }} /> {u.configSummary}
                   </div>
                 <div style={{ color: 'var(--text-secondary)' }}>
-                  • Capital: {formatCurrency(account.equity)}<br/>
-                  • Strategy: {strategies.find(s => s.id === activeStrategy)?.name}<br/>
-                  • Max per trade: {formatCurrency(account.equity * maxPositionSize / 100)}<br/>
-                  • Stop Loss: {formatPercent(-stopLossPercent)}<br/>
-                  • Take Profit: {formatPercent(takeProfitPercent)}<br/>
-                  • Risk/Reward: 1:{(takeProfitPercent / stopLossPercent).toFixed(1)}
+                  • {u.cap}: {formatCurrency(account.equity)}<br/>
+                  • {u.strategyLine(
+                    playbookAuto ? 'AUTO' : 'MANUAL',
+                    (playbookAuto ? activePlaybooks : manualPlaybooks).join(', ') || (playbookAuto ? 'idle' : 'none'),
+                  )}<br/>
+                  • {u.maxPer}: {formatCurrency(account.equity * effectiveRisk.maxPositionSize / 100)}<br/>
+                  • {u.sl}: {formatPercent(-effectiveRisk.stopLossPercent)}<br/>
+                  • {u.tp}: {formatPercent(effectiveRisk.takeProfitPercent)}<br/>
+                  • {u.rr}: 1:{(effectiveRisk.takeProfitPercent / effectiveRisk.stopLossPercent).toFixed(1)}
+                  {riskControlLocked && (
+                    <>
+                      <br />
+                      <span style={{ color: 'var(--text-tertiary)' }}>
+                        • {u.liveLockNote}
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -460,16 +711,16 @@ const TradingBot: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <ChartBarIcon className="card-icon" /> Session Stats
+                <ChartBarIcon className="card-icon" /> {u.sessionStats}
               </span>
             </div>
             <div style={{ padding: 'var(--space-xl)' }}>
               {[
-                { label: 'Total Trades', value: sessionStats.total_trades.toString(), color: 'var(--text-primary)' },
-                { label: 'Win Rate', value: `${sessionStats.win_rate.toFixed(1)}%`, color: sessionStats.win_rate >= 50 ? 'var(--profit)' : 'var(--text-tertiary)' },
-                { label: 'Winning Trades', value: sessionStats.winning_trades.toString(), color: 'var(--profit)' },
-                { label: 'Losing Trades', value: sessionStats.losing_trades.toString(), color: 'var(--loss)' },
-                { label: 'Total P&L', value: formatCurrency(sessionStats.total_pnl), color: sessionStats.total_pnl >= 0 ? 'var(--profit)' : 'var(--loss)' },
+                { label: u.totalTrades, value: sessionStats.total_trades.toString(), color: 'var(--text-primary)' },
+                { label: u.winRate, value: `${sessionStats.win_rate.toFixed(1)}%`, color: sessionStats.win_rate >= 50 ? 'var(--profit)' : 'var(--text-tertiary)' },
+                { label: u.winTrades, value: sessionStats.winning_trades.toString(), color: 'var(--profit)' },
+                { label: u.loseTrades, value: sessionStats.losing_trades.toString(), color: 'var(--loss)' },
+                { label: u.totalPnl, value: formatCurrency(sessionStats.total_pnl), color: sessionStats.total_pnl >= 0 ? 'var(--profit)' : 'var(--loss)' },
               ].map((stat, i) => (
                 <div key={i} style={{
                   display: 'flex',

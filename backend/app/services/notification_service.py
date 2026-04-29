@@ -1,49 +1,217 @@
-import os
 import logging
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+from typing import Any, Optional
+
+import httpx
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+
+def _telegram_text(title: str, message: str, level: str) -> str:
+    return f"[{level}] {title}\n\n{message}"
+
+
+def _load_user_notify_row(user_id: int) -> Optional[dict[str, Any]]:
+    from app.db import users_db
+
+    row = users_db.get_user_by_id(user_id)
+    if not row:
+        return None
+    return row
+
+
 class NotificationService:
     def __init__(self):
-        # .env에서 설정을 가져옵니다. (없으면 로그만 남깁니다)
-        self.smtp_server   = os.getenv("SMTP_SERVER", "smtp.gmail.com")
-        self.smtp_port     = int(os.getenv("SMTP_PORT", "587"))
-        self.sender_email  = os.getenv("SENDER_EMAIL", "")
-        self.sender_pwd    = os.getenv("SENDER_PASSWORD", "")
-        self.receiver_email = os.getenv("RECEIVER_EMAIL", "")
+        self.resend_api_key = settings.resend_api_key
+        self.resend_from_email = settings.resend_from_email
 
-    def send_alert(self, title: str, message: str, level: str = "INFO"):
-        """종합 알림 전송 (이메일 및 로그)"""
+    def send_alert(
+        self,
+        title: str,
+        message: str,
+        level: str = "INFO",
+        to_email: Optional[str] = None,
+        user_id: Optional[int] = None,
+    ):
+        """Send alert: log + optional Resend + Telegram."""
         full_msg = f"[{level}] {title}\n\n{message}"
-        
-        # 1. 시스템 로그 및 봇 로그에 남기기
+
         logger.info(f"🔔 ALERT: {title} - {message}")
-        
-        # 2. 이메일 발송 (설정이 되어있을 경우)
-        if self.sender_email and self.sender_pwd and self.receiver_email:
-            try:
-                self._send_email(title, full_msg)
-            except Exception as e:
-                logger.error(f"Email alert failed: {e}")
 
-    def _send_email(self, subject: str, content: str):
-        msg = MIMEMultipart()
-        msg['From']    = self.sender_email
-        msg['To']      = self.receiver_email
-        msg['Subject'] = f"🚀 TradeSense Alert: {subject}"
-        
-        msg.attach(MIMEText(content, 'plain'))
-        
-        with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
-            server.starttls()
-            server.login(self.sender_email, self.sender_pwd)
-            server.send_message(msg)
-            logger.info("📧 Email sent successfully.")
+        recipient = (to_email or "").strip() or settings.receiver_email
+        if self.resend_api_key and self.resend_from_email and recipient:
+            self._send_resend_email(
+                subject=f"TradeSense Alert: {title}",
+                text=full_msg,
+                to_email=recipient,
+            )
 
-# Singleton
+        self._send_telegram_alert(title, message, level, user_id=user_id)
+
+    def send_daily_summary(
+        self,
+        *,
+        to_email: str,
+        trading_date: str,
+        daily_pnl: float,
+        daily_pnl_pct: float,
+        equity: float,
+        portfolio_value: float,
+        cash: float,
+        trades: int,
+        win_rate_pct: float,
+        user_id: Optional[int] = None,
+    ) -> None:
+        subject = f"TradeSense Daily Summary — {trading_date}"
+        text = (
+            f"Date: {trading_date}\n"
+            f"Daily P&L: ${daily_pnl:+,.2f} ({daily_pnl_pct:+.2f}%)\n"
+            f"Portfolio Value: ${portfolio_value:,.2f}\n"
+            f"Equity: ${equity:,.2f}\n"
+            f"Cash Available: ${cash:,.2f}\n"
+            f"Total Trades: {trades}\n"
+            f"Win Rate: {win_rate_pct:.1f}%\n"
+        )
+        if to_email:
+            self._send_resend_email(subject=subject, text=text, to_email=to_email)
+        body = text.strip()
+        self._send_telegram_alert(subject, body, "INFO", user_id=user_id)
+
+    def _send_resend_email(self, *, subject: str, text: str, to_email: str) -> None:
+        if not self.resend_api_key or not self.resend_from_email:
+            logger.info("Resend not configured; skip email send.")
+            return
+        try:
+            response = httpx.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {self.resend_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "from": self.resend_from_email,
+                    "to": [to_email],
+                    "subject": subject,
+                    "text": text,
+                },
+                timeout=15.0,
+            )
+            if response.status_code >= 400:
+                logger.error("Email alert failed: %s %s", response.status_code, response.text)
+                return
+            logger.info("📧 Email sent successfully via Resend.")
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Email alert failed: %s", exc)
+
+    def _send_telegram_alert(
+        self,
+        title: str,
+        message: str,
+        level: str,
+        *,
+        user_id: Optional[int],
+    ) -> None:
+        token = (settings.telegram_bot_token or "").strip()
+        if not token:
+            return
+
+        chat_id = ""
+        if user_id is not None:
+            row = _load_user_notify_row(user_id)
+            if not row:
+                return
+            if not bool(int(row.get("notify_telegram") or 0)):
+                return
+            chat_id = (row.get("telegram_chat_id") or "").strip()
+        else:
+            chat_id = (settings.telegram_default_chat_id or "").strip()
+
+        if not chat_id:
+            return
+
+        body = _telegram_text(title, message, level)
+        if len(body) > 4000:
+            body = body[:3990] + "\n…"
+
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        try:
+            r = httpx.post(
+                url,
+                json={"chat_id": chat_id, "text": body},
+                timeout=15.0,
+            )
+            if r.status_code >= 400:
+                logger.error("Telegram send failed: %s %s", r.status_code, r.text)
+                return
+            data = r.json()
+            if not data.get("ok"):
+                logger.error("Telegram API error: %s", data)
+                return
+            logger.info("📱 Telegram alert sent.")
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Telegram send failed: %s", exc)
+
+    def try_send_telegram_test(self, user_id: int) -> dict:
+        """Send a one-off test message; return {ok, message?} or {ok: False, error}."""
+        token = (settings.telegram_bot_token or "").strip()
+        if not token:
+            return {
+                "ok": False,
+                "error": (
+                    "Server has no TELEGRAM_BOT_TOKEN. Put it in backend/.env (or repo root .env), "
+                    "then restart uvicorn so the process reloads environment variables."
+                ),
+            }
+
+        row = _load_user_notify_row(user_id)
+        if not row:
+            return {"ok": False, "error": "User not found."}
+
+        if not bool(int(row.get("notify_telegram") or 0)):
+            return {
+                "ok": False,
+                "error": "Turn on “Send alerts to Telegram”, enter your chat ID, then click Save before Send test.",
+            }
+
+        chat_id = (row.get("telegram_chat_id") or "").strip()
+        if not chat_id:
+            return {
+                "ok": False,
+                "error": "Enter your Telegram chat ID and click Save first.",
+            }
+
+        title = "TradeSense test"
+        message = "If you see this, Telegram alerts are configured correctly."
+        body = _telegram_text(title, message, "INFO")
+        if len(body) > 4000:
+            body = body[:3990] + "\n…"
+
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        try:
+            r = httpx.post(
+                url,
+                json={"chat_id": chat_id, "text": body},
+                timeout=15.0,
+            )
+            data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Telegram test failed: %s", exc)
+            return {"ok": False, "error": f"Network error calling Telegram: {exc}"}
+
+        if not data.get("ok"):
+            desc = data.get("description") or data.get("error_code") or r.text or "unknown error"
+            hint = ""
+            low = str(desc).lower()
+            if "chat not found" in low or "chat_id" in low:
+                hint = " Check the chat ID (digits only for private chats). Open @userinfobot in Telegram to copy your id."
+            elif "forbidden" in low or "blocked" in low:
+                hint = " Open your bot in Telegram and tap Start (/start) so it can message you."
+            logger.error("Telegram test API error: %s", data)
+            return {"ok": False, "error": f"Telegram: {desc}.{hint}"}
+
+        logger.info("📱 Telegram test message sent to chat_id=%s", chat_id)
+        return {"ok": True, "message": "Message delivered to Telegram."}
+
+
 notification_service = NotificationService()
-import os

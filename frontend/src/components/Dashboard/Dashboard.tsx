@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import { formatCurrency, formatPercent, getChangeClass } from '../../utils/helpers';
 import api from '../../services/api';
+import { useUiStrings } from '../../hooks/useUiStrings';
 
 // Heroicons v2 Outline SVGs
 const ChartBarIcon = (props: React.ComponentProps<'svg'>) => (
@@ -42,6 +43,10 @@ const XMarkIcon = (props: React.ComponentProps<'svg'>) => (
 );
 
 const Dashboard: React.FC = () => {
+  const t = useUiStrings();
+  const d = t.dashboard;
+  const c = t.common;
+  const tr = t.trading;
   const {
     account,
     positions,
@@ -57,7 +62,32 @@ const Dashboard: React.FC = () => {
     regimeData,
     dismissedRegimeTimestamp,
     setDismissedRegimeTimestamp,
+    compliance,
+    playbookAuto,
+    activePlaybooks,
+    manualPlaybooks,
+    botDailyTrades,
+    colorTheme,
+    appLocale,
   } = useAppStore();
+
+  const playbookName = (id: string, fallback: string) => {
+    if (appLocale !== 'ko') return fallback;
+    const loc = tr.playbookById[id as keyof typeof tr.playbookById];
+    return loc?.name ?? fallback;
+  };
+
+  const regimeDivider =
+    colorTheme === 'light' ? '1px solid rgba(15, 23, 42, 0.16)' : '1px solid rgba(255, 255, 255, 0.12)';
+
+  const strategyBanner = useMemo(() => {
+    const mode = playbookAuto ? 'AUTO' : 'MANUAL';
+    const ids = playbookAuto
+      ? (activePlaybooks.length ? activePlaybooks : [])
+      : manualPlaybooks;
+    const upper = ids.map((s) => s.toUpperCase());
+    return `${mode} · ${upper.join(' + ') || '—'}`;
+  }, [playbookAuto, activePlaybooks, manualPlaybooks]);
 
   const totalPL = account.equity - account.initial_capital;
   const totalPLPct = ((account.equity - account.initial_capital) / account.initial_capital) * 100;
@@ -95,8 +125,8 @@ const Dashboard: React.FC = () => {
         regimeData.timestamp &&
         (dismissedRegimeTimestamp !== regimeData.timestamp) && (
           <div className="card regime-notification" style={{
-            background: 'rgba(59, 130, 246, 0.1)',
-            border: '1px solid rgba(59, 130, 246, 0.3)',
+            background: 'rgba(59, 130, 246, 0.05)',
+            border: '1px solid rgba(59, 130, 246, 0.18)',
             color: 'var(--text-primary)',
             marginBottom: '24px',
             padding: '20px',
@@ -121,7 +151,7 @@ const Dashboard: React.FC = () => {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                borderRadius: '50%',
+                borderRadius: 'var(--btn-radius-sm)',
                 transition: 'all 0.2s'
               }}
               onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
@@ -132,26 +162,41 @@ const Dashboard: React.FC = () => {
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--accent-primary)' }}>
               <BoltIcon style={{ width: 20, height: 20 }} />
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>AI Market Adaptive System</h3>
-              <span style={{ fontSize: '12px', opacity: 0.6, marginLeft: 'auto', marginRight: '32px' }}>Last Updated: {regimeData.timestamp}</span>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>{d.regimeTitle}</h3>
+              <span
+                style={{
+                  fontSize: '12px',
+                  marginLeft: 'auto',
+                  marginRight: '32px',
+                  color: 'var(--text-tertiary)',
+                }}
+              >
+                {d.lastUpdated} {regimeData.timestamp}
+              </span>
             </div>
 
             <p style={{ margin: 0, fontSize: '14px', lineHeight: 1.5, color: 'var(--text-secondary)' }}>
-              <strong>Reasoning:</strong> {regimeData.reasoning}
+              <strong>{d.reasoning}</strong> {regimeData.reasoning}
             </p>
 
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', fontSize: '13px', marginTop: '4px' }}>
               <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
-                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Strategy:</span>
-                <strong style={{ color: 'var(--accent-primary)' }}>{regimeData.strategy?.toUpperCase()}</strong>
+                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{d.strategy}</span>
+                <strong style={{ color: 'var(--accent-primary)' }}>
+                  {regimeData.playbook_mode && regimeData.active_playbooks?.length
+                    ? `${regimeData.playbook_mode.toUpperCase()} · ${regimeData.active_playbooks
+                        .map((s) => s.toUpperCase())
+                        .join(' + ')}`
+                    : strategyBanner}
+                </strong>
               </div>
 
                <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
-                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Market Status:</span>
+                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{d.marketStatus}</span>
                 <strong style={{ 
                   color: (regimeData.market_level?.toUpperCase() === 'EXCELLENT' || regimeData.risk_level?.toUpperCase() === 'LOW') ? 'var(--profit)' : 
                          (regimeData.market_level?.toUpperCase() === 'GOOD') ? '#34d399' :
-                         (regimeData.market_level?.toUpperCase() === 'NORMAL' || regimeData.risk_level?.toUpperCase() === 'MODERATE') ? '#fef08a' :
+                         (regimeData.market_level?.toUpperCase() === 'NORMAL' || regimeData.risk_level?.toUpperCase() === 'MODERATE') ? '#ca8a04' :
                          (regimeData.market_level?.toUpperCase() === 'BAD') ? '#f97316' : 
                          (regimeData.market_level?.toUpperCase() === 'DANGEROUS' || regimeData.risk_level?.toUpperCase() === 'AGGRESSIVE') ? 'var(--loss)' : '#ffffff',
                   padding: '2px 8px',
@@ -164,23 +209,23 @@ const Dashboard: React.FC = () => {
               </div>
 
               <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
-                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Risk Setting:</span>
+                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{d.riskSetting}</span>
                 <strong style={{ 
                   color: regimeData.risk_level === 'aggressive' ? 'var(--loss)' : 
-                         regimeData.risk_level === 'moderate' ? '#fef08a' : 'var(--profit)' 
+                         regimeData.risk_level === 'moderate' ? '#ca8a04' : 'var(--profit)' 
                 }}>
                   {regimeData.risk_level?.toUpperCase() || 'MODERATE'}
                 </strong>
               </div>
 
               <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
-                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Stop Loss:</span>
+                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{d.stopLoss}</span>
                 <strong style={{ color: 'var(--loss)' }}>{regimeData.stop_loss_percent}%</strong>
               </div>
 
               {(regimeData as any).daily_pnl && (
                 <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
-                  <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Daily P&L:</span>
+                  <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{d.dailyPnL}</span>
                   <strong style={{ color: String((regimeData as any).daily_pnl).includes('-') ? 'var(--loss)' : 'var(--profit)' }}>
                     {(regimeData as any).daily_pnl}
                   </strong>
@@ -194,9 +239,9 @@ const Dashboard: React.FC = () => {
                 display: 'grid', 
                 gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', 
                 gap: '8px', 
-                marginTop: '12px',
-                paddingTop: '12px',
-                borderTop: '1px solid rgba(255,255,255,0.08)'
+                marginTop: '4px',
+                paddingTop: '6px',
+                borderTop: regimeDivider,
               }}>
                 {Object.entries((regimeData as any).market_scores).map(([key, val]) => {
                   const score = Number(val);
@@ -211,7 +256,7 @@ const Dashboard: React.FC = () => {
                     border: '1px solid rgba(255,255,255,0.05)'
                   }}>
                     <span style={{ color: 'var(--text-tertiary)', textTransform: 'capitalize' }}>
-                      {key === 'fed' ? 'Fed Policy' : key === 'war' ? 'Geopolitical' : key}
+                      {key === 'fed' ? d.fedPolicy : key === 'war' ? d.geopolitical : key}
                     </span>
                     <strong style={{ 
                       color: score >= 70 ? 'var(--profit)' : score >= 40 ? 'var(--warning)' : 'var(--loss)'
@@ -224,9 +269,13 @@ const Dashboard: React.FC = () => {
 
             {/* Focus Sectors & Symbols */}
             {(regimeData as any).focus_symbols && (
-              <div style={{ marginTop: '4px' }}>
-                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '6px' }}>
-                  Focus Sectors: <strong style={{ color: 'var(--text-secondary)' }}>{((regimeData as any).focus_sectors || []).join(', ')}</strong>
+              <div
+                style={{
+                  marginTop: (regimeData as any).market_scores ? '4px' : '6px',
+                }}
+              >
+                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '10px' }}>
+                  {d.focusSectors} <strong style={{ color: 'var(--text-secondary)' }}>{((regimeData as any).focus_sectors || []).join(', ')}</strong>
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                   {((regimeData as any).focus_symbols || []).map((sym: string) => (
@@ -247,10 +296,70 @@ const Dashboard: React.FC = () => {
           </div>
         )}
 
+      {/* Compliance / Blackout banner */}
+      {(compliance || regimeData?.blackout) && (
+        <div style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '8px',
+          marginBottom: '16px',
+          fontSize: '12px',
+        }}>
+          {regimeData?.blackout && (
+            <span style={{
+              padding: '4px 10px',
+              borderRadius: 'var(--radius-full)',
+              background: 'rgba(249, 115, 22, 0.15)',
+              border: '1px solid rgba(249, 115, 22, 0.4)',
+              color: '#f97316',
+              fontWeight: 600,
+            }}>
+              {d.entryBlackout(regimeData.blackout_reason || '')}
+            </span>
+          )}
+          {compliance && compliance.gfv_level !== 'OK' && (
+            <span style={{
+              padding: '4px 10px',
+              borderRadius: 'var(--radius-full)',
+              background: 'rgba(239, 68, 68, 0.15)',
+              border: '1px solid rgba(239, 68, 68, 0.4)',
+              color: 'var(--loss)',
+              fontWeight: 600,
+            }}>
+              {d.gfv(String(compliance.gfv_level), String(compliance.gfv_count_12mo))}
+            </span>
+          )}
+          {compliance && compliance.cooling_down && (
+            <span style={{
+              padding: '4px 10px',
+              borderRadius: 'var(--radius-full)',
+              background: 'rgba(250, 204, 21, 0.15)',
+              border: '1px solid rgba(250, 204, 21, 0.4)',
+              color: '#facc15',
+              fontWeight: 600,
+            }}>
+              {d.cooldown(compliance.cooldown_remaining_s, compliance.loss_streak)}
+            </span>
+          )}
+          {compliance && compliance.unsettled_cash > 0 && (
+            <span style={{
+              padding: '4px 10px',
+              borderRadius: 'var(--radius-full)',
+              background: 'rgba(59, 130, 246, 0.12)',
+              border: '1px solid rgba(59, 130, 246, 0.3)',
+              color: 'var(--accent-primary)',
+              fontFamily: 'var(--font-mono)',
+            }}>
+              {d.unsettled(compliance.unsettled_cash.toFixed(2))}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Stats Grid */}
       <div className="stats-grid">
         <div className={`stat-card ${totalPL >= 0 ? 'profit' : 'loss'}`}>
-          <div className="stat-label">Portfolio Value (Total Return)</div>
+          <div className="stat-label">{d.portfolioValue}</div>
           <div className={`stat-value ${getChangeClass(totalPL)}`}>
             {formatCurrency(account.equity)}
           </div>
@@ -260,27 +369,27 @@ const Dashboard: React.FC = () => {
         </div>
 
         <div className="stat-card accent">
-          <div className="stat-label">Cash Available</div>
+          <div className="stat-label">{d.cashAvailable}</div>
           <div className="stat-value" style={{ color: 'var(--text-primary)' }}>
             {formatCurrency(account.cash)}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '6px' }}>
-            Buying Power: {formatCurrency(account.buying_power)}
+            {d.buyingPower}: {formatCurrency(account.buying_power)}
           </div>
         </div>
 
         <div className="stat-card accent">
-          <div className="stat-label">Active Positions</div>
+          <div className="stat-label">{d.activePositions}</div>
           <div className="stat-value" style={{ color: 'var(--accent-secondary)' }}>
             {activePositionCount}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '6px' }}>
-            {strategies.filter(s => s.active).length} strategies active
+            {d.strategiesActive(String(strategies.filter(s => s.active).length))}
           </div>
         </div>
 
         <div className="stat-card accent">
-          <div className="stat-label">Bot Status</div>
+          <div className="stat-label">{d.botStatus}</div>
           <div className="stat-value" style={{
             color: botActive ? 'var(--profit)' : 'var(--text-tertiary)',
             fontSize: '22px',
@@ -289,10 +398,13 @@ const Dashboard: React.FC = () => {
             gap: '8px',
           }}>
             <span style={{ fontSize: '14px', lineHeight: 1 }}>{botActive ? '●' : '○'}</span>
-            <span>{botActive ? 'ACTIVE' : 'IDLE'}</span>
+            <span>{botActive ? d.active : d.idle}</span>
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '6px' }}>
-            {tradeLogs.length} events logged
+            {d.eventsLogged(String(tradeLogs.length))} · {d.dailyScalping}{' '}
+            <strong style={{ color: 'var(--accent-primary)', fontFamily: 'var(--font-mono)' }}>
+              {Number.isFinite(botDailyTrades) ? botDailyTrades : 0}
+            </strong>
           </div>
         </div>
       </div>
@@ -304,10 +416,10 @@ const Dashboard: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <ChartBarIcon className="card-icon" /> Portfolio Performance
+                <ChartBarIcon className="card-icon" /> {d.performanceTitle}
               </span>
               <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
-                Starting: {formatCurrency(account.initial_capital)}
+                {d.starting(formatCurrency(account.initial_capital))}
               </span>
             </div>
             <div className="card-body" style={{ padding: '24px' }}>
@@ -333,7 +445,7 @@ const Dashboard: React.FC = () => {
                     fontWeight: 600,
                     marginTop: '4px',
                   }}>
-                    {account.daily_profit_loss >= 0 ? '▲' : '▼'} {formatCurrency(Math.abs(account.daily_profit_loss))} ({formatPercent(account.daily_profit_loss_pct)}) Today's Return
+                    {account.daily_profit_loss >= 0 ? '▲' : '▼'} {formatCurrency(Math.abs(account.daily_profit_loss))} ({formatPercent(account.daily_profit_loss_pct)}) {d.todaysReturn}
                   </div>
                 </div>
                 <svg width="120" height="32" viewBox="0 0 120 32">
@@ -367,7 +479,7 @@ const Dashboard: React.FC = () => {
               }}>
                 <div>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                    Initial Capital
+                    {d.initialCapital}
                   </div>
                   <div style={{ fontSize: '16px', fontWeight: 700, fontFamily: 'var(--font-mono)', marginTop: '4px' }}>
                     {formatCurrency(account.initial_capital)}
@@ -375,7 +487,7 @@ const Dashboard: React.FC = () => {
                 </div>
                 <div>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                    Total P&L
+                    {d.totalPL}
                   </div>
                   <div style={{
                     fontSize: '16px',
@@ -389,7 +501,7 @@ const Dashboard: React.FC = () => {
                 </div>
                 <div>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                    Daily P&L
+                    {d.dailyPnL}
                   </div>
                   <div style={{
                     fontSize: '16px',
@@ -409,13 +521,13 @@ const Dashboard: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <BriefcaseIcon className="card-icon" /> Open Positions
+                <BriefcaseIcon className="card-icon" /> {d.openPositions}
               </span>
               <button
                 className="btn btn-secondary btn-sm"
                 onClick={() => setCurrentPage('portfolio')}
               >
-                View All
+                {c.viewAll}
               </button>
             </div>
             <div>
@@ -425,25 +537,25 @@ const Dashboard: React.FC = () => {
                     <>
                       <div style={{ fontSize: '32px', marginBottom: '8px' }}>🤖</div>
                       <div style={{ fontWeight: 700, color: 'var(--profit)', marginBottom: '6px', fontSize: '16px' }}>
-                        Bot is Running
+                        {d.noPositionsBot.title}
                       </div>
                       <div style={{ fontSize: '13px', color: 'var(--text-tertiary)' }}>
-                        Scanning for entry signals… Positions will appear here when opened.
+                        {d.noPositionsBot.sub}
                       </div>
                     </>
                   ) : (
                     <>
                       <div className="empty-state-icon">📭</div>
-                      <div className="empty-state-title">No Open Positions</div>
+                      <div className="empty-state-title">{d.noPositions.title}</div>
                       <div className="empty-state-text">
-                        Start the trading bot or manually place a trade to open positions.
+                        {d.noPositions.sub}
                       </div>
                       <button
                         className="btn btn-primary"
                         style={{ marginTop: '12px' }}
                         onClick={() => setCurrentPage('trading')}
                       >
-                        ⚡ Start Trading Bot
+                        {d.noPositions.cta}
                       </button>
                     </>
                   )}
@@ -452,11 +564,11 @@ const Dashboard: React.FC = () => {
                 <table className="positions-table">
                   <thead>
                     <tr>
-                      <th>Symbol</th>
-                      <th>Qty</th>
-                      <th>Avg Entry</th>
-                      <th>Current</th>
-                      <th>P&L</th>
+                      <th>{d.tableSymbol}</th>
+                      <th>{d.tableQty}</th>
+                      <th>{d.tableAvg}</th>
+                      <th>{d.tableCurrent}</th>
+                      <th>{d.tablePL}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -487,7 +599,7 @@ const Dashboard: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <BoltIcon className="card-icon" /> Trading Bot Activity
+                <BoltIcon className="card-icon" /> {d.botActivity}
               </span>
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <span style={{
@@ -495,7 +607,7 @@ const Dashboard: React.FC = () => {
                   fontWeight: 600,
                   color: botActive ? 'var(--profit)' : 'var(--text-tertiary)',
                 }}>
-                  {botActive ? '● Running' : '○ Stopped'}
+                  {botActive ? d.running : d.stopped}
                 </span>
                 <button
                   className={`btn btn-sm ${botActive ? 'btn-danger' : 'btn-primary'}`}
@@ -509,7 +621,7 @@ const Dashboard: React.FC = () => {
                     }
                   }}
                 >
-                  {botActive ? 'Stop' : 'Start'}
+                  {botActive ? d.stop : d.start}
                 </button>
               </div>
             </div>
@@ -530,10 +642,10 @@ const Dashboard: React.FC = () => {
           <div className="card" style={{ flex: 1 }}>
             <div className="card-header">
               <span className="card-title">
-                <EyeIcon className="card-icon" /> Watchlist
+                <EyeIcon className="card-icon" /> {d.watchlist}
               </span>
               <button className="btn btn-secondary btn-sm" onClick={() => setCurrentPage('chart')}>
-                Full Chart
+                {c.fullChart}
               </button>
             </div>
             <div className="watchlist">
@@ -567,10 +679,10 @@ const Dashboard: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <CheckBadgeIcon className="card-icon" /> Active Strategies
+                <CheckBadgeIcon className="card-icon" /> {d.activeStrategies}
               </span>
               <button className="btn btn-secondary btn-sm" onClick={() => setCurrentPage('trading')}>
-                Manage
+                {c.manage}
               </button>
             </div>
             <div style={{ padding: 'var(--space-lg)' }}>
@@ -591,7 +703,7 @@ const Dashboard: React.FC = () => {
                       display: 'inline-block',
                     }} />
                     <span style={{ fontSize: '13px', fontWeight: 600 }}>
-                      {strat.name}
+                      {playbookName(strat.id, strat.name)}
                     </span>
                   </div>
                   <span style={{
@@ -599,7 +711,7 @@ const Dashboard: React.FC = () => {
                     fontFamily: 'var(--font-mono)',
                     color: 'var(--text-tertiary)',
                   }}>
-                    WR: {strat.winRate}%
+                    {d.winRate(String(strat.winRate))}
                   </span>
                 </div>
               ))}

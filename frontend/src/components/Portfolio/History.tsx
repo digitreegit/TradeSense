@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAppStore } from '../../stores/useAppStore';
+import { useUiStrings } from '../../hooks/useUiStrings';
 import { formatCurrency } from '../../utils/helpers';
 
 // Heroicons v2 Outline SVGs
@@ -16,6 +17,8 @@ const HistoryIcon = (props: React.ComponentProps<'svg'>) => (
 );
 
 const History: React.FC = () => {
+  const t = useUiStrings();
+  const h = t.history;
   const { orders } = useAppStore();
 
   return (
@@ -23,10 +26,10 @@ const History: React.FC = () => {
       <div className="card">
         <div className="card-header">
           <span className="card-title">
-            <ListBulletIcon className="card-icon" /> Trade History
+            <ListBulletIcon className="card-icon" /> {h.title}
           </span>
           <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
-            {orders.length} order{orders.length !== 1 ? 's' : ''}
+            {h.orders(String(orders.length))}
           </span>
         </div>
         <div>
@@ -35,22 +38,22 @@ const History: React.FC = () => {
               <div className="empty-state-icon">
                 <HistoryIcon style={{ width: '48px', height: '48px', color: 'var(--text-tertiary)' }} />
               </div>
-              <div className="empty-state-title">No Trade History</div>
+              <div className="empty-state-title">{h.emptyTitle}</div>
               <div className="empty-state-text">
-                Your trade history will appear here once the bot starts executing trades in paper trading mode.
+                {h.emptyText}
               </div>
             </div>
           ) : (
             <table className="positions-table">
               <thead>
                 <tr>
-                  <th>Date</th>
-                  <th>Symbol</th>
-                  <th>Side</th>
-                  <th>Type</th>
-                  <th>Qty</th>
-                  <th>Price</th>
-                  <th>Status</th>
+                  <th>{h.thDate}</th>
+                  <th>{h.thSymbol}</th>
+                  <th>{h.thSide}</th>
+                  <th>{h.thType}</th>
+                  <th>{h.thQty}</th>
+                  <th>{h.thPrice}</th>
+                  <th>{h.thStatus}</th>
                 </tr>
               </thead>
               <tbody>

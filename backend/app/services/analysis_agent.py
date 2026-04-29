@@ -41,6 +41,9 @@ class AnalysisAgent:
                     self.gemini_version = "legacy"
                     self.gemini_client = None  # Will be set on first successful call
                     self._initialized = True
+                    # Refresh candidate list from the live API so retired models
+                    # (e.g. gemini-1.5-*) don't produce 404s at call time.
+                    self._discover_gemini_models()
                     logger.info("✅ AI Agent initialized with Google Gemini (Legacy SDK)")
                 except ImportError:
                     try:
@@ -57,15 +60,70 @@ class AnalysisAgent:
         except Exception as e:
             logger.error(f"❌ Failed to initialize AI Agent: {e}")
 
-    # Models to try in order — newest verified first
+    # Models to try in order — newest generally-available first.
+    # NOTE: gemini-1.5-* was retired from v1beta in late 2025, so we prefer
+    # 2.5 / 2.0 families. The live list is also fetched dynamically via
+    # list_models() (see _discover_gemini_models) when the SDK supports it.
     GEMINI_MODEL_CANDIDATES = [
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-pro",
         "gemini-2.0-flash-001",
         "gemini-2.0-flash",
-        "gemini-1.5-flash-002",
-        "gemini-1.5-flash-001",
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
+        "gemini-2.0-flash-lite",
     ]
+
+    def _discover_gemini_models(self) -> None:
+        """Query the Gemini API for models that actually support generateContent
+        and prepend them to the candidate list. Fails silently on errors."""
+        try:
+            genai = getattr(self, "_gemini_genai", None)
+            if not genai or not hasattr(genai, "list_models"):
+                return
+            available: list[str] = []
+            for m in genai.list_models():
+                methods = getattr(m, "supported_generation_methods", None) or []
+                if "generateContent" not in methods:
+                    continue
+                raw = getattr(m, "name", "") or ""
+                short = raw.split("/")[-1] if "/" in raw else raw
+                if not short or "embedding" in short.lower():
+                    continue
+                available.append(short)
+
+            if not available:
+                return
+
+            def rank(name: str) -> tuple:
+                n = name.lower()
+                fam = 3
+                if "2.5" in n:
+                    fam = 0
+                elif "2.0" in n:
+                    fam = 1
+                elif "1.5" in n:
+                    fam = 2
+                tier = 2
+                if "flash" in n and "lite" not in n:
+                    tier = 0
+                elif "flash-lite" in n or "flash_lite" in n or "lite" in n:
+                    tier = 1
+                elif "pro" in n:
+                    tier = 2
+                return (fam, tier, name)
+
+            available.sort(key=rank)
+            merged: list[str] = []
+            for name in available + self.GEMINI_MODEL_CANDIDATES:
+                if name not in merged:
+                    merged.append(name)
+            self.GEMINI_MODEL_CANDIDATES = merged
+            logger.info(
+                "Gemini model candidates (live): %s",
+                ", ".join(self.GEMINI_MODEL_CANDIDATES[:6]),
+            )
+        except Exception as e:
+            logger.warning(f"Could not list Gemini models: {e}")
 
     @property
     def is_ready(self) -> bool:
@@ -100,7 +158,7 @@ class AnalysisAgent:
                 for p in pos[:5]:
                     context_str += f"\n  • {p.get('symbol','?')}: {p.get('qty','?')} shares, P&L ${p.get('unrealized_pl','?')}"
 
-        prompt = f"{system_prompt}{context_str}\n\nUser Question: {message}\n\nProvide a helpful, detailed, context-aware response in Korean. Use emojis and formatting."
+        prompt = f"{system_prompt}{context_str}\n\nUser Question: {message}\n\nProvide a helpful, detailed, context-aware response in English. Use emojis and formatting."
 
         if self.openai_client:
             return await self._query_openai(message, system_prompt)
@@ -141,7 +199,7 @@ class AnalysisAgent:
             return response.choices[0].message.content
         except Exception as e:
             logger.error(f"OpenAI query error: {e}")
-            return f"AI 분석 중 오류가 발생했습니다: {str(e)}"
+            return f"AI analysis error: {str(e)}"
 
     async def _query_gemini(self, prompt: str) -> str:
         """Query Google Gemini with auto model detection and rate limiting."""
@@ -181,32 +239,45 @@ class AnalysisAgent:
             error_str = str(e)
             if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str or "quota" in error_str.lower():
                 logger.warning("Gemini API quota exhausted, returning friendly message")
-                return "⚠️ 현재 AI 사용량이 많아 할당량이 일시적으로 소진되었습니다. 잠시 후(약 1분 뒤) 다시 질문해 주세요."
+                return "⚠️ AI quota is temporarily exhausted. Please try again in about a minute."
             logger.error(f"Gemini query error: {error_str}")
-            return f"AI 분석 중 오류가 발생했습니다: {error_str}"
+            return f"AI analysis error: {error_str}"
 
     def _call_legacy_sdk(self, prompt: str) -> str:
         """Call Gemini using the legacy google-generativeai SDK with auto model fallback."""
-        # If we already found a working model, use it
+        # If we already found a working model, try it once; on 404 fall back.
         if self.gemini_client:
-            response = self.gemini_client.generate_content(prompt)
-            return response.text
-        
-        # Otherwise try each model candidate
+            try:
+                response = self.gemini_client.generate_content(prompt)
+                return response.text
+            except Exception as e:
+                err = str(e)
+                if "404" in err or "NOT_FOUND" in err.upper() or "is not supported" in err:
+                    logger.warning(
+                        "Cached Gemini model returned 404; re-discovering models."
+                    )
+                    self.gemini_client = None
+                    self._discover_gemini_models()
+                else:
+                    raise
+
         last_error = None
         for model_name in self.GEMINI_MODEL_CANDIDATES:
             try:
                 model = self._gemini_genai.GenerativeModel(model_name)
                 response = model.generate_content(prompt)
-                # Success! Save this model for future calls
                 self.gemini_client = model
                 logger.info(f"✅ Found working Gemini model: {model_name}")
                 return response.text
             except Exception as e:
                 last_error = e
+                err = str(e)
+                if "404" in err or "NOT_FOUND" in err.upper() or "is not supported" in err:
+                    logger.warning(f"Model {model_name} not available, trying next...")
+                    continue
                 logger.warning(f"Model {model_name} failed: {e}")
                 continue
-        
+
         raise last_error or Exception("No working Gemini model found")
 
     def _call_new_sdk(self, prompt: str) -> str:
@@ -248,7 +319,7 @@ Your core mission:
 4. GFV awareness: Remind users about cash settlement rules when relevant.
 
 Guidelines:
-- Respond in Korean when the user writes in Korean.
+- Respond in English unless the user explicitly asks for another language.
 - Be specific: give exact entry prices, stop losses, and targets.
 - Use emojis for readability.
 - Focus on the most liquid stocks (AAPL, MSFT, NVDA, AMD, META, TSLA, SPY, QQQ) for tight spreads.
@@ -266,7 +337,7 @@ Guidelines:
 
 Market Data: {data_str}
 
-Please provide the analysis in Korean with clear formatting and emojis."""
+Please provide the analysis in English with clear formatting and emojis."""
 
     def _build_signal_prompt(self, symbols: list, market_data: dict) -> str:
         return f"""Based on the following market data, generate trading signals for these stocks:
@@ -284,30 +355,27 @@ Market Data: {str(market_data)}"""
 
     # ─── Template fallbacks ────────────────────────────────────
     def _template_analysis(self, symbol: str, market_data: dict) -> str:
-        return f"""📊 **{symbol} 분석 리포트** (Template Mode)
+        return f"""📊 **{symbol} analysis** (Template Mode)
 
-🔹 기술적 분석:
-  • RSI (14): 분석을 위해 AI API 키를 설정해주세요
-  • MACD: API 연결 후 실시간 분석 가능
+🔹 Technical analysis:
+  • RSI (14): set OPENAI_API_KEY or GOOGLE_API_KEY in .env for live AI analysis
+  • MACD: available after API is connected
 
-💡 AI 분석을 활성화하려면:
-  1. .env 파일에 OPENAI_API_KEY 또는 GOOGLE_API_KEY를 설정하세요
-  2. 서버를 재시작하세요
+💡 To enable AI:
+  1. Add OPENAI_API_KEY or GOOGLE_API_KEY to .env
+  2. Restart the server
 
-⚠️ 현재 Paper Trading 모드로 실행 중입니다."""
+⚠️ Running in Paper Trading mode."""
 
     def _template_chat(self, message: str) -> str:
-        return f"""알겠습니다! "{message}"에 대해 답변드립니다.
+        return f"""Thanks for your message about "{message}".
 
-현재 AI API가 연결되지 않아 템플릿 모드로 응답합니다.
+The AI API is not connected — this is a template response.
 
-💡 OpenAI GPT-4o 또는 Google Gemini API 키를 .env 파일에 설정하면
-더 정확한 AI 분석을 받으실 수 있습니다.
-
-설정 방법:
-1. OPENAI_API_KEY=sk-... 또는
-2. GOOGLE_API_KEY=... 를 .env에 추가
-3. AI_PROVIDER=openai 또는 gemini로 선택"""
+💡 Add OpenAI or Google Gemini keys to .env for full analysis:
+1. OPENAI_API_KEY=sk-...
+2. GOOGLE_API_KEY=...
+3. AI_PROVIDER=openai or gemini"""
 
     def _parse_signals(self, response: str, symbols: list) -> list:
         """Parse trading signals from LLM response."""
@@ -347,7 +415,7 @@ Market Data: {str(market_data)}"""
 
     DEFAULT_REGIME = {
         "strategy": "momentum",
-        "reasoning": "뉴스가 충분하지 않아 기본 대형 기술주 중심으로 운용합니다.",
+        "reasoning": "Insufficient news; defaulting to large-cap tech-focused universe.",
         "risk_level": "moderate",
         "market_score": 50.0,
         "market_level": "NORMAL",
@@ -365,41 +433,41 @@ Market Data: {str(market_data)}"""
 
         news_text = "\n".join([f"- {n['headline']}" for n in news[:15]])
         
-        prompt = f"""당신은 세계 최고의 매크로 퀀트 전략가입니다. 아래 뉴스를 분석하여 현재 시장의 리스크를 6가지 항목으로 계량화하고 최적의 전략을 제안하세요.
+        prompt = f"""You are a senior macro quant strategist. Read the news below, quantify current market risk across six dimensions (0–100 each; higher = more favorable/safer for risk-on equities), and propose an optimal tactical tilt.
 
-핵심 분석 항목 (각 0~100점, 100점일수록 시장에 긍정적/안전):
-1. Geopolitical (전쟁/정치적 상황): 평화로우면 100, 전쟁/위기 시 0
-2. Earnings (기업 실적/실적발표): 어닝 서프라이즈 시 100, 어닝 쇼크 시 0
-3. Fed Policy (금리/연준 정책): 금리 인하/완화 시 100, 인상/긴축 시 0
-4. Gold (금값 동향): 금값 안정 시 100, 폭등(불안 시) 시 0
-5. Crypto (크립토 시장): 상승/활기 시 100, 폭락 시 0
-6. Others (기타 경제지표): 고용/소비가 안정적이면 100, 불안하면 0
+Dimensions (0–100 each):
+1. Geopolitical: peaceful/stable = 100, war/crisis = 0
+2. Earnings: positive surprises = 100, major misses = 0
+3. Fed Policy: easing/dovish = 100, tightening/hawkish = 0
+4. Gold: calm/stable gold = 100, fear-driven spike = 0
+5. Crypto: risk-on / strong = 100, crash / risk-off = 0
+6. Others (macro data): stable jobs/consumption = 100, deterioration = 0
 
-상세 섹터 가이드:
-- 전쟁 위기 → defense, energy_oil, gold_safe 집중
-- 금리 인하 → tech_software, tech_cloud, ev_auto 집중
-- 실적 호재 → 해당 섹터 집중
+Sector playbook:
+- War / geopolitical stress → tilt defense, energy_oil, gold_safe
+- Fed easing → tilt tech_software, tech_cloud, ev_auto
+- Positive earnings theme → tilt that sector
 
-사용 가능한 섹터: {list(self.SECTOR_UNIVERSE.keys())}
+Available sectors: {list(self.SECTOR_UNIVERSE.keys())}
 
-뉴스 데이터:
+News headlines:
 {news_text}
 
-반드시 아래 JSON 형식으로만 응답하세요:
+Reply with ONLY valid JSON in this exact shape:
 {{
-    "strategy": "momentum" 또는 "mean-reversion",
-    "reasoning": "분석 근거를 한 문장으로 기술",
-    "risk_level": "low" (안전) / "moderate" (보통) / "aggressive" (위험),
+    "strategy": "momentum" or "mean-reversion",
+    "reasoning": "one-sentence rationale in English",
+    "risk_level": "low" / "moderate" / "aggressive",
     "market_scores": {{
-        "war": 점수,
-        "earnings": 점수,
-        "fed": 점수,
-        "gold": 점수,
-        "crypto": 점수,
-        "others": 점수
+        "war": <number>,
+        "earnings": <number>,
+        "fed": <number>,
+        "gold": <number>,
+        "crypto": <number>,
+        "others": <number>
     }},
-    "max_position_percent": 10~25,
-    "stop_loss_percent": 0.2~1.0,
+    "max_position_percent": <10-25>,
+    "stop_loss_percent": <0.2-1.0>,
     "focus_sectors": ["sector1", "sector2"],
     "focus_symbols": ["SYM1", "SYM2", "SYM3", "SYM4", "SYM5", "SYM6", "SYM7", "SYM8"]
 }}"""
@@ -441,7 +509,7 @@ Market Data: {str(market_data)}"""
 
                 return {
                     "strategy": data.get("strategy", "momentum"),
-                    "reasoning": data.get("reasoning", "시장 흐름에 따라 전략을 운용합니다."),
+                    "reasoning": data.get("reasoning", "Operating tactically per current market conditions."),
                     "risk_level": data.get("risk_level", "moderate"),
                     "market_score": round(avg_score, 1),
                     "market_level": level,
