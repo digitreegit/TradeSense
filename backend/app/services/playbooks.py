@@ -186,6 +186,13 @@ def playbook_eod_drift(bars: list, price: float, now: datetime) -> Tuple[int, Li
 
 
 # ─── News Spike Fade (AI sentiment hook) ──────────────────────────
+def playbook_ml_predict(price: float, indicators: dict, bars: list, volumes: list) -> Tuple[int, List[str]]:
+    """HistGradientBoosting direction probability; drift guard in ml_signal_service."""
+    from app.services.ml_signal_service import playbook_score
+
+    return playbook_score(price, indicators, bars, volumes)
+
+
 def playbook_news_fade(news_score: float) -> Tuple[int, List[str]]:
     """
     AI agent can compute a short-term exhaustion signal. We accept a
@@ -234,6 +241,10 @@ def combine(
         reasons += r
     if "news-fade" in enabled and news_score:
         s, r = playbook_news_fade(news_score)
+        total += s
+        reasons += r
+    if "ml-predict" in enabled:
+        s, r = playbook_ml_predict(price, indicators, bars, volumes)
         total += s
         reasons += r
 

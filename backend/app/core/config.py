@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     # Half-spread cushion for marketable limits (basis points on top of bid/ask or ref)
     execution_slippage_bps: float = float(os.getenv("EXECUTION_SLIPPAGE_BPS", "8"))
 
+    # ML signal (HistGradientBoosting daily retrain + drift monitoring)
+    ml_model_dir: str = os.getenv("ML_MODEL_DIR", str(_repo_root / "data" / "ml_signal"))
+    ml_daily_retrain_enabled: bool = os.getenv("ML_DAILY_RETRAIN_ENABLED", "true").lower() != "false"
+    ml_retrain_after_hour_et: int = int(os.getenv("ML_RETRAIN_AFTER_HOUR_ET", "5"))
+    ml_drift_warn_z: float = float(os.getenv("ML_DRIFT_WARN_Z", "2.2"))
+    ml_drift_alert_z: float = float(os.getenv("ML_DRIFT_ALERT_Z", "3.0"))
+
     # AI
     ai_provider: str = os.getenv("AI_PROVIDER", "openai")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")

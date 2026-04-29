@@ -5,6 +5,7 @@ from typing import List, Optional
 
 from app.api.deps import get_current_engine, get_current_user_id
 from app.core.config import settings
+from app.services import ml_signal_service
 from app.services.user_runtime import get_or_create_engine
 
 router = APIRouter(prefix="/trading", tags=["trading"])
@@ -176,6 +177,15 @@ async def get_playbooks(engine=Depends(get_current_engine)):
 async def set_playbooks(req: PlaybookConfigRequest, engine=Depends(get_current_engine)):
     """Update AUTO flag and/or manual enabled set."""
     return engine.set_playbook_config(auto=req.auto, manual=req.manual)
+
+
+@router.get("/ml-signal")
+async def get_ml_signal_status(engine=Depends(get_current_engine)):
+    """HistGradientBoosting model: last train, AUC, feature-drift telemetry."""
+    return {
+        "global": ml_signal_service.get_status_dict(),
+        "regime_snapshot": engine.regime_data.get("ml_signal"),
+    }
 
 
 class CapitalScaleRequest(BaseModel):

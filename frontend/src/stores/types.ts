@@ -120,6 +120,20 @@ export interface RegimeData {
   /** Currently enabled playbooks in engine (AUTO or MANUAL routing) */
   active_playbooks?: string[];
   playbook_mode?: 'auto' | 'manual';
+  /** SPY 1m/5m realized vol → entry threshold delta (refreshed each ET minute) */
+  entry_vol_regime?: {
+    proxy?: string;
+    rv_1m_pct?: number | null;
+    rv_5m_pct?: number | null;
+    delta_1m?: number;
+    delta_5m?: number;
+    vol_entry_delta?: number;
+    minute_et?: string;
+  };
+  /** Preset threshold after vol + session adjustments */
+  entry_score_threshold_effective?: number;
+  /** HistGradientBoosting: train metadata + last drift z */
+  ml_signal?: Record<string, unknown>;
 }
 
 /** `/api/trading/playbooks` payload */

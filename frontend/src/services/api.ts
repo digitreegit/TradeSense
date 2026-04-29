@@ -169,6 +169,9 @@ export const api = {
 
   getPlaybookConfig: () => request<PlaybookConfig>('/trading/playbooks'),
 
+  getMlSignal: () =>
+    request<{ global: Record<string, unknown>; regime_snapshot?: unknown }>('/trading/ml-signal'),
+
   setPlaybookConfig: (body: { auto?: boolean; manual?: string[] }) =>
     request<PlaybookConfig>('/trading/playbooks', {
       method: 'POST',

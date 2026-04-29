@@ -159,12 +159,18 @@ const TradingBot: React.FC = () => {
       },
       'ml-predict': {
         name: 'ML 예측',
-        description: '기술적 지표를 입력값으로 사용하는 그래디언트 부스팅 모델로 가격 방향성을 예측합니다.',
+        description:
+          '5분봉 피처로 HistGradientBoosting 방향 확률을 쓰고, 미국 장 평일 1일 1회 재학습합니다. 피처 분포 드리프트가 크면 점수를 끕니다.',
       },
       micro: {
         name: '마이크로구조 (호가·체결)',
         description:
           '호가 불균형, 스프레드, 테이프 속도, VPIN 근사로 초단기 수급을 보강합니다. WebSocket 체결·호가가 있을 때만 점수가 납니다.',
+      },
+      'pair-mr': {
+        name: 'ETF 페어 평균회귀',
+        description:
+          'XLE/USO, XLK/QQQ 등 로그 스프레드 z-점수로 상대적으로 싼 레그만 롱(캐시 계좌·숏 없음).',
       },
       vwap: {
         name: 'VWAP 되돌림',

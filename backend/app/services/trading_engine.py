@@ -14,6 +14,9 @@ Delegates:
 - Macro event / opening-auction blackout                → event_calendar
 - Risk preset tables driven by regime score             → core.risk_presets
 - Entry scoring (scalp + microstructure + VWAP + ORB + EOD + news-fade)  → playbooks
+- Entry threshold: SPY 1m/5m realized vol → adjusted once per ET minute
+- ETF pair mean-reversion (long laggard): XLE/USO, XLK/QQQ when ``pair-mr`` active
+- ML direction model (``ml-predict``): daily retrain + per-feature drift z-scores
 - Marketable-limit orders + spread filter               → execution_service
 - Per-order slippage + latency JSONL                    → execution_logger
 """
@@ -23,7 +26,7 @@ import asyncio
 import logging
 from datetime import date, datetime, time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 import pytz
 
@@ -43,6 +46,9 @@ from app.services.execution_service import Executor, spread_info
 from app.services import streaming_service
 from app.services.playbooks import combine as combine_playbooks
 from app.services.regime_service import RegimeService
+from app.services.volatility_regime import compute_vol_entry_adjustment
+from app.services.pair_mean_reversion import DEFAULT_ETF_PAIRS, pair_long_signal
+from app.services import ml_signal_service
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +98,7 @@ class TradingEngine:
         "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "AMD", "TSLA",
         "SPY", "QQQ", "INTC", "NFLX", "AVGO", "CRM", "UBER",
         # Added for the $30k scale — higher-ADV liquid names with tight spreads
-        "MU", "COIN", "PLTR", "SMCI", "IWM", "DIA", "XLK", "XLE",
+        "MU", "COIN", "PLTR", "SMCI", "IWM", "DIA", "XLK", "XLE", "USO",
     ]
 
     PLAYBOOKS: list = [
@@ -105,6 +111,11 @@ class TradingEngine:
             "id": "micro",
             "name": "Microstructure (L1 + tape)",
             "description": "Order-flow imbalance, spread, tape speed, VPIN proxy (WebSocket)",
+        },
+        {
+            "id": "pair-mr",
+            "name": "ETF Pair Mean-Reversion",
+            "description": "Long the cheap leg vs peer (XLE/USO, XLK/QQQ) — cash-account friendly",
         },
         {
             "id": "vwap",
@@ -176,6 +187,10 @@ class TradingEngine:
         # Per-position peaks for trailing stop high-water mark
         self._position_peaks: dict = {}
 
+        # SPY 1m/5m vol → entry score delta (refreshed at most once per ET minute)
+        self._vol_entry_minute_key: Optional[Tuple[int, int, int, int, int]] = None
+        self._vol_entry_payload: dict = {}
+
         # Active risk preset (respects scale)
         table = RISK_PRESETS_FOR(self._scale)
         self._preset = table["moderate"]
@@ -207,6 +222,7 @@ class TradingEngine:
             "equity_session": "closed",
             "allow_extended_hours": getattr(settings, "allow_extended_hours", False),
             "timestamp": datetime.now().strftime("%b %d, %Y, %-I:%M%p"),
+            "entry_vol_regime": {},
         }
 
         # Session stats
@@ -227,7 +243,7 @@ class TradingEngine:
 
         # Playbook routing
         self.auto_playbooks: bool = True
-        self.manual_playbooks: list = ["scalp", "micro", "vwap", "orb", "eod"]
+        self.manual_playbooks: list = ["scalp", "micro", "pair-mr", "ml-predict", "vwap", "orb", "eod"]
         self._last_active_playbooks: list = list(self.manual_playbooks)
         self._sync_regime_playbook_display()
 
@@ -479,6 +495,8 @@ class TradingEngine:
         if time(9, 35) <= t < time(15, 45):
             active.append("scalp")
             active.append("micro")
+            active.append("pair-mr")
+            active.append("ml-predict")
         if time(15, 30) <= t < time(15, 58):
             active.append("eod")
         if news <= -0.6:
@@ -504,6 +522,17 @@ class TradingEngine:
         self.regime_data["playbook_mode"] = "auto" if self.auto_playbooks else "manual"
         self.regime_data["strategy"] = " + ".join(p.upper() for p in active)
 
+    def _refresh_entry_vol_regime(self, now_et: datetime) -> dict:
+        """Fetch SPY 1m/5m realized vol at most once per ET minute; stash in regime_data."""
+        key = (now_et.year, now_et.month, now_et.day, now_et.hour, now_et.minute)
+        if self._vol_entry_minute_key == key and self._vol_entry_payload:
+            return self._vol_entry_payload
+        payload = compute_vol_entry_adjustment(self._alpaca, now_et)
+        self._vol_entry_minute_key = key
+        self._vol_entry_payload = payload
+        self.regime_data["entry_vol_regime"] = payload
+        return payload
+
     # ─── Main Loop ────────────────────────────────────────────
 
     async def run_cycle(self):
@@ -515,6 +544,9 @@ class TradingEngine:
         if self._trading_date != today:
             self._reset_daily(today)
             self._compliance.sweep_settlements()
+
+        await ml_signal_service.maybe_retrain_daily_async(now_et, self._alpaca)
+        self.regime_data["ml_signal"] = ml_signal_service.get_status_dict()
 
         ext_schedule = getattr(settings, "allow_extended_hours", False)
         sess_start = time(3, 55) if ext_schedule else time(9, 20)
@@ -1148,11 +1180,15 @@ class TradingEngine:
             self._log("info", f"💤 Settled cash too low: ${settled:,.2f}")
             return
 
-        entry_threshold = preset.entry_score_threshold
+        entry_threshold = float(preset.entry_score_threshold)
+        vol_payload = self._refresh_entry_vol_regime(now_et)
+        entry_threshold += float(vol_payload.get("vol_entry_delta", 0))
         if time(9, 35) <= now_et.time() < time(10, 5):
-            entry_threshold = max(20, entry_threshold - 8)
+            entry_threshold = max(20.0, entry_threshold - 8.0)
         if self._daily_target_reached:
-            entry_threshold = max(entry_threshold, 70)
+            entry_threshold = max(entry_threshold, 70.0)
+        entry_threshold = int(max(18, min(98, round(entry_threshold))))
+        self.regime_data["entry_score_threshold_effective"] = entry_threshold
 
         # ── 3. Scan universe ────────────────────────────────────
         scored = []
@@ -1201,9 +1237,50 @@ class TradingEngine:
             except Exception as exc:
                 logger.warning(f"Scan error for {symbol}: {exc}")
 
+        # ── 3b. ETF pair mean-reversion (long laggard; no short leg) ──
+        if "pair-mr" in active_playbooks:
+            pair_occupied = set(current_symbols) | set(pending_buys)
+            for spec in DEFAULT_ETF_PAIRS:
+                if spec.a in pair_occupied or spec.b in pair_occupied:
+                    continue
+                try:
+                    bars_a = self._alpaca.get_bars(spec.a, "5Min", 64)
+                    bars_b = self._alpaca.get_bars(spec.b, "5Min", 64)
+                    sig = pair_long_signal(bars_a, bars_b, spec)
+                    if not sig:
+                        continue
+                    target = str(sig["target"])
+                    if target in current_symbols or target in pending_buys:
+                        continue
+                    if symbol_is_earnings_today(target, getattr(self, "_earnings_today", {})):
+                        continue
+                    block = self._compliance.can_enter(target)
+                    if block:
+                        continue
+                    z = float(sig["z"])
+                    price = float(sig["price"])
+                    z_ex = float(spec.z_entry)
+                    extras = min(28, int(max(0.0, abs(z) - z_ex) * 12))
+                    pair_score = int(entry_threshold + 4 + extras)
+                    reasons = [
+                        f"pair:{sig['pair_label']} z={z:+.2f}→{target}",
+                    ]
+                    scored.append((pair_score, target, price, reasons))
+                except Exception as exc:
+                    logger.warning("Pair scan %s: %s", spec.label, exc)
+
+        # One row per symbol: keep best score (single-name vs pair overlap).
+        by_sym: dict = {}
+        for row in scored:
+            score_val, symbol, price, reasons = row
+            prev = by_sym.get(symbol)
+            if prev is None or score_val > prev[0]:
+                by_sym[symbol] = row
+        scored = list(by_sym.values())
+
         # ── 4. Execute ──────────────────────────────────────────
         scored.sort(key=lambda x: -x[0])
-        fast_names = {"TSLA", "NVDA", "AMD", "META", "QQQ", "SMCI", "COIN"}
+        fast_names = {"TSLA", "NVDA", "AMD", "META", "QQQ", "SMCI", "COIN", "XLK", "XLE", "USO"}
         for score_val, symbol, price, reasons in scored[:slots]:
             if symbol in pending_symbols:
                 continue
