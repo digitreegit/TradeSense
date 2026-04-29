@@ -2,6 +2,8 @@ import React, { useMemo } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import { formatCurrency, formatPercent, getChangeClass } from '../../utils/helpers';
 import api from '../../services/api';
+import { useI18n } from '../../i18n';
+import { PortfolioIcon } from '../icons/PortfolioIcon';
 
 // Heroicons v2 Outline SVGs
 const ChartBarIcon = (props: React.ComponentProps<'svg'>) => (
@@ -14,12 +16,6 @@ const EyeIcon = (props: React.ComponentProps<'svg'>) => (
   <svg {...props} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
     <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-  </svg>
-);
-
-const BriefcaseIcon = (props: React.ComponentProps<'svg'>) => (
-  <svg {...props} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 14.15v4.25c0 .621-.504 1.125-1.125 1.125H4.875A1.125 1.125 0 0 1 3.75 18.4V14.15m16.5 0a5.122 5.122 0 0 0-4.75-4.65M16.5 14.15m16.5 0a1.125 1.125 0 0 1-1.125 1.125H4.875a1.125 1.125 0 0 1-1.125-1.125m16.5 0h-16.5" />
   </svg>
 );
 
@@ -42,6 +38,7 @@ const XMarkIcon = (props: React.ComponentProps<'svg'>) => (
 );
 
 const Dashboard: React.FC = () => {
+  const { language, t } = useI18n();
   const {
     account,
     positions,
@@ -146,7 +143,9 @@ const Dashboard: React.FC = () => {
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--accent-primary)' }}>
               <BoltIcon style={{ width: 20, height: 20 }} />
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>AI Market Adaptive System</h3>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>
+                {language === 'ko' ? 'AI 시장 적응 시스템' : 'AI Market Adaptive System'}
+              </h3>
               <span
                 style={{
                   fontSize: '12px',
@@ -155,17 +154,17 @@ const Dashboard: React.FC = () => {
                   color: 'var(--text-tertiary)',
                 }}
               >
-                Last Updated: {regimeData.timestamp}
+                {language === 'ko' ? '최근 업데이트' : 'Last Updated'}: {regimeData.timestamp}
               </span>
             </div>
 
             <p style={{ margin: 0, fontSize: '14px', lineHeight: 1.5, color: 'var(--text-secondary)' }}>
-              <strong>Reasoning:</strong> {regimeData.reasoning}
+              <strong>{language === 'ko' ? '판단 근거' : 'Reasoning'}:</strong> {regimeData.reasoning}
             </p>
 
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', fontSize: '13px', marginTop: '4px' }}>
               <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
-                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Strategy:</span>
+                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{language === 'ko' ? '전략' : 'Strategy'}:</span>
                 <strong style={{ color: 'var(--accent-primary)' }}>
                   {regimeData.playbook_mode && regimeData.active_playbooks?.length
                     ? `${regimeData.playbook_mode.toUpperCase()} · ${regimeData.active_playbooks
@@ -176,7 +175,7 @@ const Dashboard: React.FC = () => {
               </div>
 
                <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
-                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Market Status:</span>
+                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{language === 'ko' ? '시장 상태' : 'Market Status'}:</span>
                 <strong style={{ 
                   color: (regimeData.market_level?.toUpperCase() === 'EXCELLENT' || regimeData.risk_level?.toUpperCase() === 'LOW') ? 'var(--profit)' : 
                          (regimeData.market_level?.toUpperCase() === 'GOOD') ? '#34d399' :
@@ -193,7 +192,7 @@ const Dashboard: React.FC = () => {
               </div>
 
               <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
-                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Risk Setting:</span>
+                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{language === 'ko' ? '리스크 설정' : 'Risk Setting'}:</span>
                 <strong style={{ 
                   color: regimeData.risk_level === 'aggressive' ? 'var(--loss)' : 
                          regimeData.risk_level === 'moderate' ? '#fef08a' : 'var(--profit)' 
@@ -203,29 +202,38 @@ const Dashboard: React.FC = () => {
               </div>
 
               <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
-                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Stop Loss:</span>
+                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{t('stopLoss')}:</span>
                 <strong style={{ color: 'var(--loss)' }}>{regimeData.stop_loss_percent}%</strong>
               </div>
 
               {(regimeData as any).daily_pnl && (
                 <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
-                  <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>Daily P&L:</span>
+                  <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{t('dailyPL')}:</span>
                   <strong style={{ color: String((regimeData as any).daily_pnl).includes('-') ? 'var(--loss)' : 'var(--profit)' }}>
                     {(regimeData as any).daily_pnl}
                   </strong>
                 </div>
               )}
             </div>
- 
-            {/* 6 Core Indicators Grid (Market Adaptive) */}
+
+            {(((regimeData as any).market_scores) || ((regimeData as any).focus_symbols)) && (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  marginTop: (regimeData as any).market_scores ? '8px' : '6px',
+                  paddingTop: (regimeData as any).market_scores ? '8px' : '0',
+                  borderTop: (regimeData as any).market_scores
+                    ? '1px solid rgba(255, 255, 255, 0.06)'
+                    : 'none',
+                }}
+              >
             {(regimeData as any).market_scores && (
               <div style={{ 
                 display: 'grid', 
                 gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', 
-                gap: '8px', 
-                marginTop: '12px',
-                paddingTop: '12px',
-                borderTop: '1px solid rgba(255,255,255,0.08)'
+                gap: '8px',
               }}>
                 {Object.entries((regimeData as any).market_scores).map(([key, val]) => {
                   const score = Number(val);
@@ -251,11 +259,10 @@ const Dashboard: React.FC = () => {
               </div>
             )}
 
-            {/* Focus Sectors & Symbols */}
             {(regimeData as any).focus_symbols && (
-              <div style={{ marginTop: '4px' }}>
-                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '6px' }}>
-                  Focus Sectors: <strong style={{ color: 'var(--text-secondary)' }}>{((regimeData as any).focus_sectors || []).join(', ')}</strong>
+              <div>
+                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '4px' }}>
+                  {language === 'ko' ? '집중 섹터' : 'Focus Sectors'}: <strong style={{ color: 'var(--text-secondary)' }}>{((regimeData as any).focus_sectors || []).join(', ')}</strong>
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                   {((regimeData as any).focus_symbols || []).map((sym: string) => (
@@ -271,6 +278,8 @@ const Dashboard: React.FC = () => {
                     }}>{sym}</span>
                   ))}
                 </div>
+              </div>
+            )}
               </div>
             )}
           </div>
@@ -339,7 +348,7 @@ const Dashboard: React.FC = () => {
       {/* Stats Grid */}
       <div className="stats-grid">
         <div className={`stat-card ${totalPL >= 0 ? 'profit' : 'loss'}`}>
-          <div className="stat-label">Portfolio Value</div>
+          <div className="stat-label">{t('portfolioValueLabel')}</div>
           <div className={`stat-value ${getChangeClass(totalPL)}`}>
             {formatCurrency(account.equity)}
           </div>
@@ -349,27 +358,27 @@ const Dashboard: React.FC = () => {
         </div>
 
         <div className="stat-card accent">
-          <div className="stat-label">Cash Available</div>
+          <div className="stat-label">{t('cashAvailable')}</div>
           <div className="stat-value" style={{ color: 'var(--text-primary)' }}>
             {formatCurrency(account.cash)}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '6px' }}>
-            Buying Power: {formatCurrency(account.buying_power)}
+            {t('buyingPower')}: {formatCurrency(account.buying_power)}
           </div>
         </div>
 
         <div className="stat-card accent">
-          <div className="stat-label">Active Positions</div>
+          <div className="stat-label">{t('activePositions')}</div>
           <div className="stat-value" style={{ color: 'var(--accent-secondary)' }}>
             {activePositionCount}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '6px' }}>
-            {strategies.filter(s => s.active).length} strategies active
+            {strategies.filter(s => s.active).length} {language === 'ko' ? '개 전략 활성' : 'strategies active'}
           </div>
         </div>
 
         <div className="stat-card accent">
-          <div className="stat-label">Bot Status</div>
+          <div className="stat-label">{t('botStatus')}</div>
           <div className="stat-value" style={{
             color: botActive ? 'var(--profit)' : 'var(--text-tertiary)',
             fontSize: '22px',
@@ -378,7 +387,7 @@ const Dashboard: React.FC = () => {
             gap: '8px',
           }}>
             <span style={{ fontSize: '14px', lineHeight: 1 }}>{botActive ? '●' : '○'}</span>
-            <span>{botActive ? 'ACTIVE' : 'IDLE'}</span>
+            <span>{botActive ? (language === 'ko' ? '활성' : 'ACTIVE') : (language === 'ko' ? '대기' : 'IDLE')}</span>
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '6px' }}>
             {tradeLogs.length} events logged · Daily Scalping:{' '}
@@ -396,10 +405,10 @@ const Dashboard: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <ChartBarIcon className="card-icon" /> Portfolio Performance
+                <ChartBarIcon className="card-icon" /> {t('portfolioPerformance')}
               </span>
               <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
-                Starting: {formatCurrency(account.initial_capital)}
+                {t('starting')}: {formatCurrency(account.initial_capital)}
               </span>
             </div>
             <div className="card-body" style={{ padding: '24px' }}>
@@ -425,7 +434,7 @@ const Dashboard: React.FC = () => {
                     fontWeight: 600,
                     marginTop: '4px',
                   }}>
-                    {account.daily_profit_loss >= 0 ? '▲' : '▼'} {formatCurrency(Math.abs(account.daily_profit_loss))} ({formatPercent(account.daily_profit_loss_pct)}) Today's Return
+                    {account.daily_profit_loss >= 0 ? '▲' : '▼'} {formatCurrency(Math.abs(account.daily_profit_loss))} ({formatPercent(account.daily_profit_loss_pct)}) {t('todaysReturn')}
                   </div>
                 </div>
                 <svg width="120" height="32" viewBox="0 0 120 32">
@@ -459,7 +468,7 @@ const Dashboard: React.FC = () => {
               }}>
                 <div>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                    Initial Capital
+                    {t('initialCapital')}
                   </div>
                   <div style={{ fontSize: '16px', fontWeight: 700, fontFamily: 'var(--font-mono)', marginTop: '4px' }}>
                     {formatCurrency(account.initial_capital)}
@@ -467,7 +476,7 @@ const Dashboard: React.FC = () => {
                 </div>
                 <div>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                    Total P&L
+                    {t('totalPL')}
                   </div>
                   <div style={{
                     fontSize: '16px',
@@ -481,7 +490,7 @@ const Dashboard: React.FC = () => {
                 </div>
                 <div>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                    Daily P&L
+                    {t('dailyPL')}
                   </div>
                   <div style={{
                     fontSize: '16px',
@@ -501,13 +510,13 @@ const Dashboard: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <BriefcaseIcon className="card-icon" /> Open Positions
+                <PortfolioIcon className="card-icon" /> {t('openPositions')}
               </span>
               <button
                 className="btn btn-secondary btn-sm"
                 onClick={() => setCurrentPage('portfolio')}
               >
-                View All
+                {t('viewAll')}
               </button>
             </div>
             <div>
@@ -517,25 +526,25 @@ const Dashboard: React.FC = () => {
                     <>
                       <div style={{ fontSize: '32px', marginBottom: '8px' }}>🤖</div>
                       <div style={{ fontWeight: 700, color: 'var(--profit)', marginBottom: '6px', fontSize: '16px' }}>
-                        Bot is Running
+                        {language === 'ko' ? '봇 실행 중' : 'Bot is Running'}
                       </div>
                       <div style={{ fontSize: '13px', color: 'var(--text-tertiary)' }}>
-                        Scanning for entry signals… Positions will appear here when opened.
+                        {language === 'ko' ? '진입 신호를 스캔 중입니다… 포지션이 열리면 여기에 표시됩니다.' : 'Scanning for entry signals… Positions will appear here when opened.'}
                       </div>
                     </>
                   ) : (
                     <>
                       <div className="empty-state-icon">📭</div>
-                      <div className="empty-state-title">No Open Positions</div>
+                      <div className="empty-state-title">{t('noOpenPositions')}</div>
                       <div className="empty-state-text">
-                        Start the trading bot or manually place a trade to open positions.
+                        {t('noOpenPositionsText')}
                       </div>
                       <button
                         className="btn btn-primary"
                         style={{ marginTop: '12px' }}
                         onClick={() => setCurrentPage('trading')}
                       >
-                        ⚡ Start Trading Bot
+                        ⚡ {t('startTradingBot')}
                       </button>
                     </>
                   )}
@@ -544,11 +553,11 @@ const Dashboard: React.FC = () => {
                 <table className="positions-table">
                   <thead>
                     <tr>
-                      <th>Symbol</th>
-                      <th>Qty</th>
-                      <th>Avg Entry</th>
-                      <th>Current</th>
-                      <th>P&L</th>
+                      <th>{t('symbol')}</th>
+                      <th>{t('qty')}</th>
+                      <th>{t('avgEntry')}</th>
+                      <th>{t('current')}</th>
+                      <th>{t('totalPL')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -579,7 +588,7 @@ const Dashboard: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <BoltIcon className="card-icon" /> Trading Bot Activity
+                <BoltIcon className="card-icon" /> {t('tradingBotActivity')}
               </span>
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <span style={{
@@ -587,7 +596,7 @@ const Dashboard: React.FC = () => {
                   fontWeight: 600,
                   color: botActive ? 'var(--profit)' : 'var(--text-tertiary)',
                 }}>
-                  {botActive ? '● Running' : '○ Stopped'}
+                  {botActive ? `● ${t('running')}` : `○ ${t('stopped')}`}
                 </span>
                 <button
                   className={`btn btn-sm ${botActive ? 'btn-danger' : 'btn-primary'}`}
@@ -601,7 +610,7 @@ const Dashboard: React.FC = () => {
                     }
                   }}
                 >
-                  {botActive ? 'Stop' : 'Start'}
+                  {botActive ? t('stop') : t('start')}
                 </button>
               </div>
             </div>
@@ -622,10 +631,10 @@ const Dashboard: React.FC = () => {
           <div className="card" style={{ flex: 1 }}>
             <div className="card-header">
               <span className="card-title">
-                <EyeIcon className="card-icon" /> Watchlist
+                <EyeIcon className="card-icon" /> {t('watchlist')}
               </span>
               <button className="btn btn-secondary btn-sm" onClick={() => setCurrentPage('chart')}>
-                Full Chart
+                {t('fullChart')}
               </button>
             </div>
             <div className="watchlist">
@@ -659,10 +668,10 @@ const Dashboard: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <CheckBadgeIcon className="card-icon" /> Active Strategies
+                <CheckBadgeIcon className="card-icon" /> {t('activeStrategies')}
               </span>
               <button className="btn btn-secondary btn-sm" onClick={() => setCurrentPage('trading')}>
-                Manage
+                {t('manage')}
               </button>
             </div>
             <div style={{ padding: 'var(--space-lg)' }}>

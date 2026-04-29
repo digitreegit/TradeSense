@@ -2,6 +2,7 @@ import React from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import { isMarketOpen } from '../../utils/helpers';
 import UserMenu from './UserMenu';
+import { useI18n } from '../../i18n';
 
 // Heroicons v2 Outline SVGs
 const DocumentCheckIcon = (props: React.ComponentProps<'svg'>) => (
@@ -10,8 +11,29 @@ const DocumentCheckIcon = (props: React.ComponentProps<'svg'>) => (
   </svg>
 );
 
+const MoonIcon = (props: React.ComponentProps<'svg'>) => (
+  <svg {...props} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"
+    />
+  </svg>
+);
+
+const SunIcon = (props: React.ComponentProps<'svg'>) => (
+  <svg {...props} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"
+    />
+  </svg>
+);
+
 const Header: React.FC = () => {
-  const { currentPage, marketOpen } = useAppStore();
+  const { currentPage, marketOpen, colorTheme, setColorTheme } = useAppStore();
+  const { language, t } = useI18n();
   const [time, setTime] = React.useState(new Date());
 
   React.useEffect(() => {
@@ -22,46 +44,85 @@ const Header: React.FC = () => {
   }, []);
 
   const titles: Record<string, string> = {
-    dashboard: 'Dashboard',
-    chart: 'Live Chart',
-    agent: 'AI Analysis Agent',
-    trading: 'Trading Bot',
-    portfolio: 'Portfolio',
-    history: 'Trade History',
-    auth: 'Sign in',
-    settings: 'Settings',
-    profile: 'Profile',
+    dashboard: t('dashboard'),
+    chart: t('liveChart'),
+    agent: t('aiAgent'),
+    trading: t('tradingBot'),
+    portfolio: t('portfolio'),
+    history: t('tradeHistory'),
+    auth: t('signIn'),
+    settings: t('settings'),
   };
-
-  const currentTime = time.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true,
-  });
 
   return (
     <header className="header">
       <div className="header-left">
-        <h2 className="header-title">{titles[currentPage] || 'Dashboard'}</h2>
-        <span className="header-badge">US stocks · Overview · Market summary</span>
+        <h2 className="header-title">{titles[currentPage] || t('dashboard')}</h2>
+        <span className="header-badge">{t('marketSummaryBadge')}</span>
       </div>
       <div className="header-right">
         <div className="market-status">
           <span className={`dot ${isMarketOpen() || marketOpen ? 'open' : 'closed'}`} />
-          <span>{isMarketOpen() || marketOpen ? 'Market Open' : 'Market Closed'}</span>
+          <span>{isMarketOpen() || marketOpen ? t('marketOpen') : t('marketClosed')}</span>
         </div>
         <div className="header-badge paper" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <DocumentCheckIcon style={{ width: '14px', height: '14px' }} />
-          Paper Trading
+          {t('paperTrading')}
         </div>
         <div style={{
           fontSize: '12px',
           color: 'var(--text-secondary)',
           fontFamily: 'var(--font-mono)',
         }}>
-          {currentTime}
+          {time.toLocaleTimeString(language === 'ko' ? 'ko-KR' : 'en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: language !== 'ko',
+          })}
         </div>
+        <button
+          type="button"
+          onClick={() => setColorTheme(colorTheme === 'dark' ? 'light' : 'dark')}
+          title={
+            language === 'ko'
+              ? colorTheme === 'dark'
+                ? '라이트 모드로 전환'
+                : '다크 모드로 전환'
+              : colorTheme === 'dark'
+                ? 'Switch to light mode'
+                : 'Switch to dark mode'
+          }
+          aria-label={
+            language === 'ko'
+              ? colorTheme === 'dark'
+                ? '라이트 모드로 전환'
+                : '다크 모드로 전환'
+              : colorTheme === 'dark'
+                ? 'Switch to light mode'
+                : 'Switch to dark mode'
+          }
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: '50%',
+            border: '1px solid var(--border-secondary)',
+            background: 'var(--bg-secondary)',
+            color: 'var(--text-primary)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 0,
+            flexShrink: 0,
+          }}
+        >
+          {colorTheme === 'dark' ? (
+            <SunIcon style={{ width: 22, height: 22 }} aria-hidden />
+          ) : (
+            <MoonIcon style={{ width: 22, height: 22 }} aria-hidden />
+          )}
+        </button>
         <UserMenu />
       </div>
     </header>

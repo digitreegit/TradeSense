@@ -1,6 +1,7 @@
 // Zustand store types and shared interfaces
 
 export type ColorTheme = 'dark' | 'light';
+export type AppLanguage = 'ko' | 'en';
 
 export interface Position {
   symbol: string;
@@ -178,5 +179,4 @@ export type PageId =
   | 'portfolio'
   | 'history'
   | 'auth'
-  | 'settings'
-  | 'profile';
+  | 'settings';

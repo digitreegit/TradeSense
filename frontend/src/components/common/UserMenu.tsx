@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import { clearToken } from '../../auth/token';
 import { supabase } from '../../auth/supabase';
+import { useI18n } from '../../i18n';
 
 const UserIcon = (props: React.ComponentProps<'svg'>) => (
   <svg {...props} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -11,6 +12,7 @@ const UserIcon = (props: React.ComponentProps<'svg'>) => (
 
 const UserMenu: React.FC = () => {
   const { authEmail, setAuthProfile, setCurrentPage, setAuthMethod } = useAppStore();
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -37,7 +39,7 @@ const UserMenu: React.FC = () => {
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-haspopup="menu"
-        title="Account"
+        title={t('account')}
         style={{
           width: 40,
           height: 40,
@@ -86,25 +88,14 @@ const UserMenu: React.FC = () => {
             role="menuitem"
             className="user-menu-item"
             onClick={() => {
-              setCurrentPage('profile');
-              setOpen(false);
-            }}
-          >
-            Profile
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="user-menu-item"
-            onClick={() => {
               setCurrentPage('settings');
               setOpen(false);
             }}
           >
-            Settings
+            {t('settings')}
           </button>
           <button type="button" role="menuitem" className="user-menu-item user-menu-item-danger" onClick={logout}>
-            Sign Out
+            {t('signOut')}
           </button>
         </div>
       )}

@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import api from '../../services/api';
 import { useAppStore } from '../../stores/useAppStore';
+import type { AppLanguage } from '../../stores/types';
 import { clearToken } from '../../auth/token';
 import { supabase } from '../../auth/supabase';
+import { useI18n } from '../../i18n';
 
 type CapitalScale = '3k' | '10k' | '30k';
 
@@ -39,6 +41,7 @@ const fmtUsd = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(n);
 
 const SettingsPage: React.FC = () => {
+  const { t } = useI18n();
   const {
     authEmail,
     authAlpacaConfigured,
@@ -46,6 +49,8 @@ const SettingsPage: React.FC = () => {
     setAuthProfile,
     setCurrentPage,
     setAuthMethod,
+    language,
+    setLanguage,
   } = useAppStore();
   const [key, setKey] = useState('');
   const [secret, setSecret] = useState('');
@@ -263,13 +268,18 @@ const SettingsPage: React.FC = () => {
     setCurrentPage('auth');
   };
 
+  const chooseLanguage = (next: AppLanguage) => {
+    if (next === language) return;
+    setLanguage(next);
+  };
+
   return (
-    <div className="page-enter" style={{ maxWidth: 560, margin: '0 auto', padding: 'var(--space-xl)' }}>
+    <div className="page-enter" style={{ width: 'min(66.667vw, 1120px)', maxWidth: 'calc(100vw - 32px)', margin: '0 auto', padding: 'var(--space-xl)' }}>
       <div className="card" style={{ padding: 'var(--space-xl)' }}>
-        <h2 style={{ fontSize: '18px', marginBottom: '8px' }}>Settings</h2>
+        <h2 style={{ fontSize: '18px', marginBottom: '8px' }}>{t('Settings')}</h2>
         <p style={{ fontSize: '13px', color: 'var(--text-tertiary)', marginBottom: '20px', lineHeight: 1.5 }}>
-          Connect your <strong>Alpaca</strong> account (paper or live). Keys are encrypted and only your user can trade with them.
-          Paper keys:{' '}
+          {t('connectAlpaca')}{' '}
+          {t('paperKeys')}:{' '}
           <a
             href="https://app.alpaca.markets/paper/dashboard/overview"
             target="_blank"
@@ -279,7 +289,7 @@ const SettingsPage: React.FC = () => {
             Alpaca Paper
           </a>
           {' · '}
-          Live keys:{' '}
+          {t('liveKeys')}:{' '}
           <a
             href="https://app.alpaca.markets/dashboard/overview"
             target="_blank"
@@ -301,8 +311,8 @@ const SettingsPage: React.FC = () => {
             flexWrap: 'wrap',
           }}
         >
-          Signed in as <strong>{authEmail}</strong>
-          {authAlpacaConfigured ? ' · keys on file' : ' · keys not configured yet'}
+          {t('Signed in as')} <strong>{authEmail}</strong>
+          {authAlpacaConfigured ? ` ${t('keys on file')}` : ` ${t('keysNotConfigured')}`}
           {authAlpacaConfigured && (
             <button
               type="button"
@@ -310,12 +320,80 @@ const SettingsPage: React.FC = () => {
               onClick={() => setConfirmDeleteOpen(true)}
               disabled={deleting || loading}
             >
-              {deleting ? 'Deleting…' : 'Delete Keys'}
+              {deleting ? t('deleting') : t('deleteKeys')}
             </button>
           )}
         </p>
         {err && <p style={{ color: 'var(--loss)', fontSize: '13px', marginBottom: '8px' }}>{err}</p>}
         {msg && <p style={{ color: 'var(--profit)', fontSize: '13px', marginBottom: '8px' }}>{msg}</p>}
+
+        <div style={{ marginTop: '8px', marginBottom: '28px' }}>
+          <label
+            style={{
+              fontSize: '12px',
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              color: 'var(--text-tertiary)',
+            }}
+          >
+            {t('language')}
+          </label>
+          <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', margin: '6px 0 10px', lineHeight: 1.5 }}>
+            {t('languageHelp')}
+          </p>
+          <div
+            role="radiogroup"
+            aria-label="Language"
+            style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}
+          >
+            <button
+              type="button"
+              role="radio"
+              aria-checked={language === 'ko'}
+              onClick={() => chooseLanguage('ko')}
+              style={{
+                textAlign: 'left',
+                padding: '12px 14px',
+                borderRadius: '8px',
+                border:
+                  language === 'ko'
+                    ? '3px solid var(--border-accent, var(--info))'
+                    : '2px solid var(--border-secondary)',
+                background: language === 'ko' ? 'var(--bg-tertiary)' : 'var(--bg-secondary)',
+                color: 'var(--text-primary)',
+                cursor: 'pointer',
+              }}
+            >
+              <div style={{ fontSize: '14px', fontWeight: 700 }}>한국어</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                {t('koHelp')}
+              </div>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={language === 'en'}
+              onClick={() => chooseLanguage('en')}
+              style={{
+                textAlign: 'left',
+                padding: '12px 14px',
+                borderRadius: '8px',
+                border:
+                  language === 'en'
+                    ? '3px solid var(--border-accent, var(--info))'
+                    : '2px solid var(--border-secondary)',
+                background: language === 'en' ? 'var(--bg-tertiary)' : 'var(--bg-secondary)',
+                color: 'var(--text-primary)',
+                cursor: 'pointer',
+              }}
+            >
+              <div style={{ fontSize: '14px', fontWeight: 700 }}>English</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                {t('enHelp')}
+              </div>
+            </button>
+          </div>
+        </div>
 
         <div style={{ marginTop: '8px', marginBottom: '8px' }}>
           <label
@@ -326,7 +404,7 @@ const SettingsPage: React.FC = () => {
               color: 'var(--text-tertiary)',
             }}
           >
-            Trading mode
+            {t('tradingMode')}
           </label>
           <p
             style={{
@@ -336,8 +414,7 @@ const SettingsPage: React.FC = () => {
               lineHeight: 1.5,
             }}
           >
-            <strong>Paper money</strong> (Alpaca paper API) vs <strong>real money</strong> (live API). Save Alpaca keys
-            below first, then tap the mode you want.
+            {t('tradingModeHelp')}
           </p>
           <div
             role="radiogroup"
@@ -364,9 +441,9 @@ const SettingsPage: React.FC = () => {
                 cursor: modeLoading || !authAlpacaConfigured ? 'not-allowed' : 'pointer',
               }}
             >
-              <div style={{ fontSize: '14px', fontWeight: 700 }}>Paper money</div>
+              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t('paperMoney')}</div>
               <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px', lineHeight: 1.35 }}>
-                Virtual balances + 3k / 10k / 30k presets
+                {t('paperMoneyHelp')}
               </div>
             </button>
             <button
@@ -389,22 +466,22 @@ const SettingsPage: React.FC = () => {
                 cursor: modeLoading || !authAlpacaConfigured ? 'not-allowed' : 'pointer',
               }}
             >
-              <div style={{ fontSize: '14px', fontWeight: 700 }}>Real money</div>
+              <div style={{ fontSize: '14px', fontWeight: 700 }}>{t('realMoney')}</div>
               <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px', lineHeight: 1.35 }}>
-                Live Alpaca account (real orders)
+                {t('realMoneyHelp')}
               </div>
             </button>
           </div>
           {!authAlpacaConfigured && (
             <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '10px', lineHeight: 1.45 }}>
-              Keys not saved yet — both buttons stay inactive until you add your API key pair below.
+              {t('keysNotSaved')}
             </p>
           )}
         </div>
 
         {!keysLocked && (
           <form onSubmit={saveKeys}>
-            <label style={{ fontSize: '12px' }}>Alpaca API Key ID</label>
+            <label style={{ fontSize: '12px' }}>{t('apiKeyId')}</label>
             <input
               type="password"
               autoComplete="off"
@@ -423,7 +500,7 @@ const SettingsPage: React.FC = () => {
                 color: 'inherit',
               }}
             />
-            <label style={{ fontSize: '12px' }}>Alpaca Secret Key</label>
+            <label style={{ fontSize: '12px' }}>{t('secretKey')}</label>
             <input
               type="password"
               autoComplete="off"
@@ -442,15 +519,14 @@ const SettingsPage: React.FC = () => {
               }}
             />
             <button type="submit" className="btn-start" disabled={loading || deleting}>
-              {loading ? 'Saving…' : 'Save keys'}
+              {loading ? t('saving') : t('saveKeys')}
             </button>
           </form>
         )}
 
         {keysLocked && (
           <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '12px', lineHeight: 1.5 }}>
-            Keys are on file. Use <strong>Trading mode</strong> above to switch paper vs live, or delete keys to replace
-            them.
+            {t('keysSavedText')}
           </p>
         )}
 
@@ -464,10 +540,10 @@ const SettingsPage: React.FC = () => {
                 color: 'var(--text-tertiary)',
               }}
             >
-              Live account (Alpaca)
+              {t('liveAccount')}
             </label>
             {liveLoading && !liveSummary ? (
-              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '8px' }}>Loading balances…</p>
+              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '8px' }}>{t('loadingBalances')}</p>
             ) : liveSummary ? (
               <ul
                 style={{
@@ -480,28 +556,29 @@ const SettingsPage: React.FC = () => {
                 }}
               >
                 <li>
-                  <strong style={{ color: 'var(--text-primary)' }}>Equity</strong> {fmtUsd(liveSummary.equity)}
+                  <strong style={{ color: 'var(--text-primary)' }}>{t('equity')}</strong> {fmtUsd(liveSummary.equity)}
                 </li>
                 <li>
-                  <strong style={{ color: 'var(--text-primary)' }}>Cash</strong> {fmtUsd(liveSummary.cash)}
+                  <strong style={{ color: 'var(--text-primary)' }}>{t('cash')}</strong> {fmtUsd(liveSummary.cash)}
                 </li>
                 <li>
-                  <strong style={{ color: 'var(--text-primary)' }}>Buying power</strong>{' '}
+                  <strong style={{ color: 'var(--text-primary)' }}>{t('buyingPower')}</strong>{' '}
                   {fmtUsd(liveSummary.buying_power)}
                 </li>
                 <li>
-                  <strong style={{ color: 'var(--text-primary)' }}>Portfolio value</strong>{' '}
+                  <strong style={{ color: 'var(--text-primary)' }}>{t('portfolioValue')}</strong>{' '}
                   {fmtUsd(liveSummary.portfolio_value)}
                 </li>
               </ul>
             ) : (
               <p style={{ fontSize: '12px', color: 'var(--loss)', marginTop: '8px' }}>
-                Could not load live balances. Confirm your keys are for a live Alpaca account.
+                {t('liveBalancesError')}
               </p>
             )}
           </div>
         )}
 
+        {authAlpacaPaperTrading && (
         <div style={{ marginTop: '32px' }}>
           <label
             style={{
@@ -511,7 +588,7 @@ const SettingsPage: React.FC = () => {
               color: 'var(--text-tertiary)',
             }}
           >
-            Capital scale (paper only)
+            {t('capitalScale')}
           </label>
           <p
             style={{
@@ -521,8 +598,7 @@ const SettingsPage: React.FC = () => {
               lineHeight: 1.5,
             }}
           >
-            Swaps the active risk preset table when you are in paper mode. PDT rule does not apply to cash accounts —
-            all three options are cash-only.
+            {t('capitalScaleHelp')}
           </p>
           <div
             role="radiogroup"
@@ -542,7 +618,7 @@ const SettingsPage: React.FC = () => {
                   role="radio"
                   aria-checked={selected}
                   onClick={() => chooseScale(opt.id)}
-                  disabled={scaleLoading || !authAlpacaPaperTrading}
+                  disabled={scaleLoading}
                   style={{
                     textAlign: 'left',
                     padding: '10px 12px',
@@ -552,8 +628,8 @@ const SettingsPage: React.FC = () => {
                       : '2px solid var(--border-secondary)',
                     background: selected ? 'var(--bg-tertiary, rgba(56,132,255,0.10))' : 'var(--bg-secondary)',
                     color: 'inherit',
-                    cursor: scaleLoading || !authAlpacaPaperTrading ? 'not-allowed' : 'pointer',
-                    opacity: !authAlpacaPaperTrading ? 0.5 : 1,
+                    cursor: scaleLoading ? 'not-allowed' : 'pointer',
+                    opacity: 1,
                     transition: 'border-color 120ms, background 120ms',
                   }}
                 >
@@ -569,6 +645,7 @@ const SettingsPage: React.FC = () => {
             <p style={{ color: 'var(--profit)', fontSize: '12px', marginTop: '8px' }}>{scaleMsg}</p>
           )}
         </div>
+        )}
 
         <div style={{ marginTop: '36px' }}>
           <label
@@ -579,7 +656,7 @@ const SettingsPage: React.FC = () => {
               color: 'var(--text-tertiary)',
             }}
           >
-            Telegram alerts
+            {t('telegramAlerts')}
           </label>
           <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', margin: '6px 0 14px', lineHeight: 1.55 }}>
             Trading alerts (bot start/stop, daily summary, loss limit, target hit, regime changes) can be sent to
@@ -628,7 +705,7 @@ const SettingsPage: React.FC = () => {
               onClick={() => void saveNotificationPrefs()}
               disabled={notifSaving}
             >
-              {notifSaving ? 'Saving…' : 'Save alert preferences'}
+              {notifSaving ? t('saving') : t('saveAlertPreferences')}
             </button>
             <button
               type="button"
@@ -636,7 +713,7 @@ const SettingsPage: React.FC = () => {
               onClick={() => void sendTestNotification()}
               disabled={notifLoading || !notifyTg}
             >
-              {notifLoading ? 'Sending…' : 'Send test'}
+              {notifLoading ? t('sending') : t('sendTest')}
             </button>
           </div>
           {notifMsg && (
@@ -650,7 +727,7 @@ const SettingsPage: React.FC = () => {
           onClick={signOut}
           style={{ marginTop: '40px', width: '100%' }}
         >
-          Sign Out
+          {t('signOut')}
         </button>
       </div>
 
@@ -678,10 +755,11 @@ const SettingsPage: React.FC = () => {
               borderColor: 'var(--border-accent)',
             }}
           >
-            <h3 style={{ fontSize: '18px', marginBottom: '8px' }}>Delete stored Alpaca keys?</h3>
+            <h3 style={{ fontSize: '18px', marginBottom: '8px' }}>{t('deleteKeys')}?</h3>
             <p style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-              This will remove your currently saved key pair. Trading will stay disabled until you add
-              a new key pair.
+              {language === 'ko'
+                ? '현재 저장된 키 쌍이 삭제됩니다. 새 키를 추가할 때까지 거래는 비활성화됩니다.'
+                : 'This will remove your currently saved key pair. Trading will stay disabled until you add a new key pair.'}
             </p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '18px' }}>
               <button
@@ -690,7 +768,7 @@ const SettingsPage: React.FC = () => {
                 onClick={() => setConfirmDeleteOpen(false)}
                 disabled={deleting}
               >
-                Cancel
+                {language === 'ko' ? '취소' : 'Cancel'}
               </button>
               <button
                 type="button"
@@ -701,7 +779,7 @@ const SettingsPage: React.FC = () => {
                 }}
                 disabled={deleting}
               >
-                {deleting ? 'Deleting…' : 'Delete Keys'}
+                {deleting ? t('deleting') : t('deleteKeys')}
               </button>
             </div>
           </div>

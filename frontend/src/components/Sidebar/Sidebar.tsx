@@ -1,6 +1,11 @@
 import React from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import type { AlpacaApiUsage, PageId } from '../../stores/types';
+import { useI18n } from '../../i18n';
+import { AiAgentIcon } from '../icons/AiAgentIcon';
+import { LiveChartIcon } from '../icons/LiveChartIcon';
+import { PortfolioIcon } from '../icons/PortfolioIcon';
+import { TsLogoMark } from '../icons/TsLogoMark';
 
 // Heroicons v2 Outline SVGs directly as components
 const SquaresIcon = (props: React.ComponentProps<'svg'>) => (
@@ -9,27 +14,9 @@ const SquaresIcon = (props: React.ComponentProps<'svg'>) => (
   </svg>
 );
 
-const ChartIcon = (props: React.ComponentProps<'svg'>) => (
-  <svg {...props} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" />
-  </svg>
-);
-
-const ChipIcon = (props: React.ComponentProps<'svg'>) => (
-  <svg {...props} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 3v1.5M12 3v1.5m3.75-1.5v1.5m-9 15V21m4.5-1.5V21m4.5-1.5V21m-9-15h-1.5A2.25 2.25 0 0 0 3 8.25v1.5M3 12h1.5m-1.5 2.25v1.5A2.25 2.25 0 0 0 5.25 18h1.5m10.5-15h1.5a2.25 2.25 0 0 1 2.25 2.25v1.5M21 12h-1.5m1.5 2.25v1.5a2.25 2.25 0 0 1-2.25 2.25h-1.5M7.5 7.5h9v9h-9v-9Z" />
-  </svg>
-);
-
 const BoltIcon = (props: React.ComponentProps<'svg'>) => (
   <svg {...props} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" d="m3.75 13.5 10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75Z" />
-  </svg>
-);
-
-const BriefcaseIcon = (props: React.ComponentProps<'svg'>) => (
-  <svg {...props} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 14.15v4.25c0 .621-.504 1.125-1.125 1.125H4.875A1.125 1.125 0 0 1 3.75 18.4V14.15m16.5 0a5.122 5.122 0 0 0-4.75-4.65M16.5 14.15m16.5 0a1.125 1.125 0 0 1-1.125 1.125H4.875a1.125 1.125 0 0 1-1.125-1.125m16.5 0h-16.5" />
   </svg>
 );
 
@@ -57,10 +44,10 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: SquaresIcon, section: 'OVERVIEW' },
-  { id: 'chart', label: 'Live Chart', icon: ChartIcon, section: 'MARKET' },
-  { id: 'agent', label: 'AI Agent', icon: ChipIcon, section: 'INTELLIGENCE' },
+  { id: 'chart', label: 'Live Chart', icon: LiveChartIcon, section: 'MARKET' },
+  { id: 'agent', label: 'AI Agent', icon: AiAgentIcon, section: 'INTELLIGENCE' },
   { id: 'trading', label: 'Trading Bot', icon: BoltIcon },
-  { id: 'portfolio', label: 'Portfolio', icon: BriefcaseIcon, section: 'ACCOUNT' },
+  { id: 'portfolio', label: 'Portfolio', icon: PortfolioIcon, section: 'ACCOUNT' },
   { id: 'history', label: 'History', icon: HistoryIcon },
   { id: 'settings', label: 'Settings', icon: CogIcon },
 ];
@@ -84,6 +71,7 @@ function formatUsageLine(u: AlpacaApiUsage | null): string | null {
 }
 
 const Sidebar: React.FC = () => {
+  const { t } = useI18n();
   const {
     currentPage,
     setCurrentPage,
@@ -95,12 +83,12 @@ const Sidebar: React.FC = () => {
   } = useAppStore();
   const showConnected = Boolean(authEmail && authAlpacaConfigured && connected);
   const statusLabel = !authEmail
-    ? 'Sign in required'
+    ? t('signInRequired')
     : !authAlpacaConfigured
-      ? 'Alpaca keys required'
+      ? t('alpacaKeysRequired')
       : showConnected
-        ? 'Connected to Alpaca'
-        : 'Disconnected';
+        ? t('connectedToAlpaca')
+        : t('disconnected');
   const usageLine = formatUsageLine(alpacaUsage);
 
   let currentSection = '';
@@ -108,12 +96,12 @@ const Sidebar: React.FC = () => {
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <div className="sidebar-logo-icon">
-          <img src="/logo.svg" alt="TS" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+        <div className="sidebar-logo-icon" aria-hidden title="TradeSense">
+          <TsLogoMark style={{ width: '100%', height: '100%', display: 'block' }} />
         </div>
         <div className="sidebar-logo-text">
           <h1>TradeSense</h1>
-          <span>Markets & charts</span>
+          <span>{t('marketsAndCharts')}</span>
         </div>
       </div>
 
@@ -127,7 +115,13 @@ const Sidebar: React.FC = () => {
           return (
             <React.Fragment key={item.id}>
               {showSection && (
-                <div className="sidebar-section-label">{item.section}</div>
+                <div className="sidebar-section-label">
+                  {item.section === 'OVERVIEW' ? t('overview') :
+                    item.section === 'MARKET' ? t('market') :
+                      item.section === 'INTELLIGENCE' ? t('intelligence') :
+                        item.section === 'ACCOUNT' ? t('accountSection') :
+                          item.section}
+                </div>
               )}
               <button
                 className={`sidebar-item ${currentPage === item.id ? 'active' : ''}`}
@@ -136,7 +130,16 @@ const Sidebar: React.FC = () => {
                 <span className="icon">
                   <IconComponent className="w-5 h-5" />
                 </span>
-                <span>{item.label}</span>
+                <span>
+                  {item.id === 'dashboard' ? t('dashboard') :
+                    item.id === 'chart' ? t('liveChart') :
+                      item.id === 'agent' ? t('aiAgent') :
+                        item.id === 'trading' ? t('tradingBot') :
+                          item.id === 'portfolio' ? t('portfolio') :
+                            item.id === 'history' ? t('tradeHistory') :
+                              item.id === 'settings' ? t('settings') :
+                                item.label}
+                </span>
                 {item.id === 'trading' && botActive && (
                   <span style={{
                     marginLeft: 'auto',

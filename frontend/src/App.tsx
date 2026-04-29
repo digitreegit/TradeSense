@@ -9,16 +9,17 @@ import Portfolio from './components/Portfolio/Portfolio';
 import History from './components/Portfolio/History';
 import AuthPage from './components/Auth/AuthPage';
 import SettingsPage from './components/Settings/SettingsPage';
-import ProfilePage from './components/Profile/ProfilePage';
 import { useAppStore } from './stores/useAppStore';
 import { useMarketData } from './hooks/useMarketData';
 import api from './services/api';
 import { getLastAuthMethod, setToken } from './auth/token';
 import { supabase } from './auth/supabase';
+import { useI18n } from './i18n';
 
 const App: React.FC = () => {
   const { currentPage, setCurrentPage, setAuthProfile, setAuthMethod, authEmail } = useAppStore();
   const [bootstrapped, setBootstrapped] = useState(false);
+  const { t } = useI18n();
 
   useMarketData(); // Poll only when authEmail is set
 
@@ -78,7 +79,6 @@ const App: React.FC = () => {
       case 'portfolio': return <Portfolio />;
       case 'history': return <History />;
       case 'settings': return <SettingsPage />;
-      case 'profile': return <ProfilePage />;
       default: return <Dashboard />;
     }
   };
@@ -86,7 +86,7 @@ const App: React.FC = () => {
   if (!bootstrapped) {
     return (
       <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)' }}>
-        Loading…
+        {t('loading')}
       </div>
     );
   }

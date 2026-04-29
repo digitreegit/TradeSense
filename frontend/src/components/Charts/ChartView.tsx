@@ -3,6 +3,7 @@ import { useAppStore } from '../../stores/useAppStore';
 import { formatCurrency, formatPercent } from '../../utils/helpers';
 import type { BarData } from '../../stores/types';
 import api from '../../services/api';
+import { useI18n } from '../../i18n';
 
 const TF_MAP: Record<string, string> = {
   '1Min': '1Min', '5Min': '5Min', '15Min': '15Min',
@@ -11,6 +12,7 @@ const TF_MAP: Record<string, string> = {
 
 const ChartView: React.FC = () => {
   const { selectedSymbol, setSelectedSymbol, watchlist, colorTheme } = useAppStore();
+  const { t } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [timeframe, setTimeframe] = useState('1D');
   const [searchInput, setSearchInput] = useState(selectedSymbol);
@@ -347,7 +349,7 @@ const ChartView: React.FC = () => {
               fontSize: '13px', color: 'var(--text-tertiary)',
             }}>
               <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span>
-              Loading chart data from Alpaca...
+              {t('loadingChart')}
             </div>
           )}
           {!loading && candleData.length === 0 && (
@@ -358,7 +360,7 @@ const ChartView: React.FC = () => {
               fontSize: '13px', color: 'var(--text-tertiary)',
             }}>
               <span style={{ fontSize: '32px' }}>📭</span>
-              <span>No chart data for this symbol</span>
+              <span>{t('noChartData')}</span>
             </div>
           )}
           <canvas

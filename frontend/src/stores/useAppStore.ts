@@ -12,8 +12,33 @@ import type {
   ComplianceStatus,
   AlpacaApiUsage,
   ColorTheme,
+  AppLanguage,
 } from './types';
 import { applyThemeToDocument, persistTheme, readStoredTheme } from '../theme/theme';
+
+const LANGUAGE_STORAGE_KEY = 'tradesense-language';
+
+function readStoredLanguage(): AppLanguage {
+  try {
+    const value = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+    if (value === 'ko' || value === 'en') return value;
+  } catch {
+    /* private mode / SSR */
+  }
+  return 'ko';
+}
+
+function persistLanguage(language: AppLanguage): void {
+  try {
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
+  } catch {
+    /* ignore */
+  }
+}
+
+function applyLanguageToDocument(language: AppLanguage): void {
+  document.documentElement.lang = language === 'ko' ? 'ko' : 'en';
+}
 
 interface AppState {
   // Navigation
@@ -98,6 +123,8 @@ interface AppState {
 
   colorTheme: ColorTheme;
   setColorTheme: (theme: ColorTheme) => void;
+  language: AppLanguage;
+  setLanguage: (language: AppLanguage) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -144,6 +171,12 @@ export const useAppStore = create<AppState>((set) => ({
     persistTheme(theme);
     applyThemeToDocument(theme);
     set({ colorTheme: theme });
+  },
+  language: readStoredLanguage(),
+  setLanguage: (language) => {
+    persistLanguage(language);
+    applyLanguageToDocument(language);
+    set({ language });
   },
 
   // Account - $3000 paper trading

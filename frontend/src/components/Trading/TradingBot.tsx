@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import { formatCurrency, formatPercent } from '../../utils/helpers';
 import api from '../../services/api';
+import { useI18n } from '../../i18n';
 
 // Heroicons v2 Outline SVGs
 const BoltIcon = (props: React.ComponentProps<'svg'>) => (
@@ -91,6 +92,7 @@ const TradingBot: React.FC = () => {
     activePlaybooks,
     setActivePlaybooks,
   } = useAppStore();
+  const { language, t } = useI18n();
 
   const [savingPlaybooks, setSavingPlaybooks] = useState(false);
 
@@ -136,6 +138,70 @@ const TradingBot: React.FC = () => {
     win_rate: 0,
     max_drawdown: 0,
   });
+
+  const getStrategyText = (id: string, fallbackName: string, fallbackDescription: string) => {
+    if (language !== 'ko') {
+      return { name: fallbackName, description: fallbackDescription };
+    }
+
+    const normalizedId = id.toLowerCase();
+    const normalizedName = fallbackName.toLowerCase();
+    const normalizedDescription = fallbackDescription.toLowerCase();
+
+    const localized: Record<string, { name: string; description: string }> = {
+      scalp: {
+        name: '마이크로 스캘핑 v3',
+        description: '5분봉에서 RSI와 VWAP를 활용해 빠른 장중 단타를 수행합니다. 하루 약 1% 수익을 목표로 합니다.',
+      },
+      'regime-adaptive': {
+        name: 'AI 섹터 적응형',
+        description: '전쟁, 금리, 실적 등 매크로 헤드라인 변화에 맞춰 AI가 집중 섹터와 종목을 회전시킵니다.',
+      },
+      'ml-predict': {
+        name: 'ML 예측',
+        description: '기술적 지표를 입력값으로 사용하는 그래디언트 부스팅 모델로 가격 방향성을 예측합니다.',
+      },
+      vwap: {
+        name: 'VWAP 되돌림',
+        description: '가격이 VWAP 근처로 되돌아올 때 평균 회귀와 추세 지속 가능성을 함께 평가해 진입합니다.',
+      },
+      orb: {
+        name: '장초반 돌파',
+        description: '개장 초 형성된 고가와 저가 범위를 기준으로 거래량이 동반된 돌파 구간을 포착합니다.',
+      },
+      eod: {
+        name: '장마감 모멘텀',
+        description: '장 마감 전 수급과 추세가 강한 종목을 선별해 짧은 보유 시간의 모멘텀 거래를 수행합니다.',
+      },
+      momentum: {
+        name: '모멘텀 추종',
+        description: '상승 강도와 거래량이 함께 붙는 종목을 추적해 추세 방향으로 진입합니다.',
+      },
+      'news-spike-fade': {
+        name: '뉴스 급등 페이드',
+        description: 'AI가 감지한 패닉성 뉴스 급등 이후 매수/매도 과열이 소진되는 구간을 역추세로 공략합니다.',
+      },
+      news_spike_fade: {
+        name: '뉴스 급등 페이드',
+        description: 'AI가 감지한 패닉성 뉴스 급등 이후 매수/매도 과열이 소진되는 구간을 역추세로 공략합니다.',
+      },
+      news: {
+        name: '뉴스 급등 페이드',
+        description: 'AI가 감지한 패닉성 뉴스 급등 이후 매수/매도 과열이 소진되는 구간을 역추세로 공략합니다.',
+      },
+    };
+
+    if (localized[normalizedId]) return localized[normalizedId];
+    if (
+      normalizedName.includes('news spike') ||
+      normalizedDescription.includes('ai-detected panic') ||
+      normalizedDescription.includes('fade exhaustion')
+    ) {
+      return localized['news-spike-fade'];
+    }
+
+    return { name: fallbackName, description: fallbackDescription };
+  };
 
   // Poll bot status & logs from backend every 5 seconds
   const pollBotStatus = useCallback(async () => {
@@ -223,10 +289,10 @@ const TradingBot: React.FC = () => {
             </div>
             <div>
               <h2 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '4px' }}>
-                TradeSense Trading Bot
+                TradeSense {t('tradingBot')}
               </h2>
               <p style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
-                Automated quant trading • Paper Trading Mode • Capital: {formatCurrency(account.equity)}
+                {t('botSubtitle')} {formatCurrency(account.equity)}
               </p>
             </div>
           </div>
@@ -238,7 +304,7 @@ const TradingBot: React.FC = () => {
               color: botActive ? 'var(--profit)' : 'var(--text-tertiary)',
               letterSpacing: '0.5px',
             }}>
-              {botActive ? '● RUNNING' : '○ STOPPED'}
+              {botActive ? `● ${t('running').toUpperCase()}` : `○ ${t('stopped').toUpperCase()}`}
             </span>
             <button
               className={botActive ? 'btn-stop' : 'btn-start'}
@@ -247,12 +313,12 @@ const TradingBot: React.FC = () => {
               {botActive ? (
                 <>
                   <StopIcon style={{ width: '18px', height: '18px' }} />
-                  Stop Bot
+                  {t('stopBot')}
                 </>
               ) : (
                 <>
                   <RocketIcon style={{ width: '18px', height: '18px' }} />
-                  Start Bot
+                  {t('startBot')}
                 </>
               )}
             </button>
@@ -266,29 +332,58 @@ const TradingBot: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <CheckBadgeIcon className="card-icon" /> Trading Strategies
+                <CheckBadgeIcon className="card-icon" /> {t('tradingStrategies')}
               </span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{
-                  fontSize: '11px',
-                  color: 'var(--text-tertiary)',
-                  fontFamily: 'var(--font-mono)',
-                }}>
-                  {playbookAuto ? 'ENGINE DECIDES' : 'MANUAL'}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  opacity: savingPlaybooks ? 0.65 : 1,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: playbookAuto ? 500 : 700,
+                    color: playbookAuto ? 'var(--text-tertiary)' : 'var(--text-primary)',
+                    fontFamily: 'var(--font-sans)',
+                    letterSpacing: '0.02em',
+                  }}
+                >
+                  {language === 'ko' ? '수동' : 'Manual'}
                 </span>
                 <button
-                  className={playbookAuto ? 'btn-start' : 'btn btn-secondary btn-sm'}
+                  type="button"
+                  role="switch"
+                  aria-checked={playbookAuto}
+                  aria-label={
+                    language === 'ko'
+                      ? `전략 모드: ${playbookAuto ? '자동 — 엔진이 플레이북을 선택합니다' : '수동 — 선택한 플레이북만 실행됩니다'}`
+                      : `Strategy mode: ${playbookAuto ? 'Auto — engine selects playbooks' : 'Manual — only ticked playbooks run'}`
+                  }
+                  className="playbook-switch"
                   onClick={handleToggleAuto}
                   disabled={savingPlaybooks}
-                  style={{ minWidth: '82px', justifyContent: 'center' }}
                   title={
                     playbookAuto
-                      ? 'AUTO: engine picks active playbooks by time-of-day and regime'
-                      : 'MANUAL: only the ticked playbooks will run'
+                      ? (language === 'ko' ? 'AUTO: 시간대와 시장 국면에 따라 엔진이 플레이북을 선택합니다' : 'AUTO: engine picks active playbooks by time-of-day and regime')
+                      : (language === 'ko' ? 'MANUAL: 선택한 플레이북만 실행됩니다' : 'MANUAL: only the ticked playbooks will run')
                   }
                 >
-                  {playbookAuto ? 'AUTO ✓' : 'AUTO'}
+                  <span className="playbook-switch-thumb" aria-hidden />
                 </button>
+                <span
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: playbookAuto ? 700 : 500,
+                    color: playbookAuto ? 'var(--profit)' : 'var(--text-tertiary)',
+                    fontFamily: 'var(--font-sans)',
+                    letterSpacing: '0.02em',
+                  }}
+                >
+                  {language === 'ko' ? '자동' : 'Auto'}
+                </span>
               </div>
             </div>
             <div style={{ padding: 'var(--space-lg)' }}>
@@ -299,8 +394,9 @@ const TradingBot: React.FC = () => {
                   marginBottom: '12px',
                   lineHeight: 1.5,
                 }}>
-                  Engine routes playbooks automatically (time-of-day + regime).
-                  Turn AUTO off to restrict to the ticked set below.
+                  {language === 'ko'
+                    ? '엔진이 시간대와 시장 국면에 따라 플레이북을 자동 라우팅합니다. AUTO를 끄면 아래에서 선택한 항목만 실행됩니다.'
+                    : 'Engine routes playbooks automatically (time-of-day + regime). Turn AUTO off to restrict to the ticked set below.'}
                 </p>
               )}
               <div className="strategy-grid">
@@ -308,6 +404,7 @@ const TradingBot: React.FC = () => {
                   const isActiveNow = activePlaybooks.includes(strat.id);
                   const isManualOn = manualPlaybooks.includes(strat.id);
                   const isOn = playbookAuto ? isActiveNow : isManualOn;
+                  const strategyText = getStrategyText(strat.id, strat.name, strat.description);
                   return (
                     <div
                       key={strat.id}
@@ -320,15 +417,15 @@ const TradingBot: React.FC = () => {
                       title={
                         playbookAuto
                           ? isActiveNow
-                            ? 'Currently active (AUTO)'
-                            : 'Not active right now (AUTO will enable when conditions match)'
+                            ? (language === 'ko' ? '현재 활성화됨 (AUTO)' : 'Currently active (AUTO)')
+                            : (language === 'ko' ? '현재 비활성 (조건이 맞으면 AUTO가 활성화)' : 'Not active right now (AUTO will enable when conditions match)')
                           : isManualOn
-                            ? 'Enabled for manual mode — click to disable'
-                            : 'Disabled — click to enable for manual mode'
+                            ? (language === 'ko' ? '수동 모드에서 활성화됨 — 클릭하면 비활성화' : 'Enabled for manual mode — click to disable')
+                            : (language === 'ko' ? '비활성 — 클릭하면 수동 모드에서 활성화' : 'Disabled — click to enable for manual mode')
                       }
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span className="strategy-name">{strat.name}</span>
+                        <span className="strategy-name">{strategyText.name}</span>
                         <span style={{
                           width: 14,
                           height: 14,
@@ -346,7 +443,7 @@ const TradingBot: React.FC = () => {
                           {isOn ? '✓' : ''}
                         </span>
                       </div>
-                      <p className="strategy-description">{strat.description}</p>
+                      <p className="strategy-description">{strategyText.description}</p>
                       <div style={{
                         marginTop: '6px',
                         fontSize: '10px',
@@ -354,8 +451,8 @@ const TradingBot: React.FC = () => {
                         color: isActiveNow ? 'var(--profit)' : 'var(--text-muted)',
                         letterSpacing: '0.5px',
                       }}>
-                        {isActiveNow ? '● ACTIVE NOW' : '○ idle'}
-                        {!playbookAuto && isManualOn && !isActiveNow ? ' · manual-on' : ''}
+                        {isActiveNow ? (language === 'ko' ? '● 현재 활성' : '● ACTIVE NOW') : (language === 'ko' ? '○ 대기' : '○ idle')}
+                        {!playbookAuto && isManualOn && !isActiveNow ? (language === 'ko' ? ' · 수동 켜짐' : ' · manual-on') : ''}
                       </div>
                     </div>
                   );
@@ -368,14 +465,14 @@ const TradingBot: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <ListIcon className="card-icon" /> Activity Log
+                <ListIcon className="card-icon" /> {t('activityLog')}
               </span>
               <span style={{
                 fontSize: '12px',
                 color: 'var(--text-tertiary)',
                 fontFamily: 'var(--font-mono)',
               }}>
-                {tradeLogs.length} events
+                {tradeLogs.length} {language === 'ko' ? '개 이벤트' : 'events'}
               </span>
             </div>
             <div className="bot-log" style={{ maxHeight: '400px' }}>
@@ -398,7 +495,7 @@ const TradingBot: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <ShieldIcon className="card-icon" /> Risk Settings
+                <ShieldIcon className="card-icon" /> {t('riskLevel')}
               </span>
             </div>
             <div style={{ padding: 'var(--space-xl)', display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -413,7 +510,7 @@ const TradingBot: React.FC = () => {
                   display: 'block',
                   marginBottom: '8px',
                 }}>
-                  Risk Level
+                  {t('riskLevel')}
                 </label>
                 <div style={{ display: 'flex', gap: '4px' }}>
                   {(['conservative', 'moderate', 'aggressive'] as const).map((level) => (
@@ -438,7 +535,9 @@ const TradingBot: React.FC = () => {
                       }}
                       style={{ flex: 1, textTransform: 'capitalize' }}
                     >
-                      {level}
+                      {language === 'ko'
+                        ? level === 'conservative' ? '보수적' : level === 'moderate' ? '보통' : '공격적'
+                        : level}
                     </button>
                   ))}
                 </div>
@@ -455,7 +554,7 @@ const TradingBot: React.FC = () => {
                   display: 'block',
                   marginBottom: '8px',
                 }}>
-                  Max Position Size: {maxPositionSize}% ({formatCurrency(account.equity * maxPositionSize / 100)})
+                  {t('maxPositionSize')}: {maxPositionSize}% ({formatCurrency(account.equity * maxPositionSize / 100)})
                 </label>
                 <input
                   type="range"
@@ -479,7 +578,7 @@ const TradingBot: React.FC = () => {
                   display: 'block',
                   marginBottom: '8px',
                 }}>
-                  Stop Loss: -{stopLossPercent}%
+                  {t('stopLoss')}: -{stopLossPercent}%
                 </label>
                 <input
                   type="range"
@@ -503,7 +602,7 @@ const TradingBot: React.FC = () => {
                   display: 'block',
                   marginBottom: '8px',
                 }}>
-                  Take Profit: +{takeProfitPercent}%
+                  {t('takeProfit')}: +{takeProfitPercent}%
                 </label>
                 <input
                   type="range"
@@ -525,17 +624,17 @@ const TradingBot: React.FC = () => {
                 lineHeight: 1.8,
               }}>
                   <div style={{ fontWeight: 600, marginBottom: '8px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <ListIcon style={{ width: '16px', height: '16px' }} /> Configuration Summary
+                    <ListIcon style={{ width: '16px', height: '16px' }} /> {language === 'ko' ? '설정 요약' : 'Configuration Summary'}
                   </div>
                 <div style={{ color: 'var(--text-secondary)' }}>
-                  • Capital: {formatCurrency(account.equity)}<br/>
-                  • Strategy: {playbookAuto
+                  • {language === 'ko' ? '자본' : 'Capital'}: {formatCurrency(account.equity)}<br/>
+                  • {language === 'ko' ? '전략' : 'Strategy'}: {playbookAuto
                     ? `AUTO · ${activePlaybooks.join(', ') || 'idle'}`
                     : `MANUAL · ${manualPlaybooks.join(', ') || 'none'}`}<br/>
-                  • Max per trade: {formatCurrency(account.equity * maxPositionSize / 100)}<br/>
-                  • Stop Loss: {formatPercent(-stopLossPercent)}<br/>
-                  • Take Profit: {formatPercent(takeProfitPercent)}<br/>
-                  • Risk/Reward: 1:{(takeProfitPercent / stopLossPercent).toFixed(1)}
+                  • {language === 'ko' ? '거래당 최대' : 'Max per trade'}: {formatCurrency(account.equity * maxPositionSize / 100)}<br/>
+                  • {t('stopLoss')}: {formatPercent(-stopLossPercent)}<br/>
+                  • {t('takeProfit')}: {formatPercent(takeProfitPercent)}<br/>
+                  • {language === 'ko' ? '손익비' : 'Risk/Reward'}: 1:{(takeProfitPercent / stopLossPercent).toFixed(1)}
                 </div>
               </div>
             </div>
@@ -545,16 +644,16 @@ const TradingBot: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <ChartBarIcon className="card-icon" /> Session Stats
+                <ChartBarIcon className="card-icon" /> {t('sessionStats')}
               </span>
             </div>
             <div style={{ padding: 'var(--space-xl)' }}>
               {[
-                { label: 'Total Trades', value: sessionStats.total_trades.toString(), color: 'var(--text-primary)' },
-                { label: 'Win Rate', value: `${sessionStats.win_rate.toFixed(1)}%`, color: sessionStats.win_rate >= 50 ? 'var(--profit)' : 'var(--text-tertiary)' },
-                { label: 'Winning Trades', value: sessionStats.winning_trades.toString(), color: 'var(--profit)' },
-                { label: 'Losing Trades', value: sessionStats.losing_trades.toString(), color: 'var(--loss)' },
-                { label: 'Total P&L', value: formatCurrency(sessionStats.total_pnl), color: sessionStats.total_pnl >= 0 ? 'var(--profit)' : 'var(--loss)' },
+                { label: t('totalTrades'), value: sessionStats.total_trades.toString(), color: 'var(--text-primary)' },
+                { label: t('winRate'), value: `${sessionStats.win_rate.toFixed(1)}%`, color: sessionStats.win_rate >= 50 ? 'var(--profit)' : 'var(--text-tertiary)' },
+                { label: t('winningTrades'), value: sessionStats.winning_trades.toString(), color: 'var(--profit)' },
+                { label: t('losingTrades'), value: sessionStats.losing_trades.toString(), color: 'var(--loss)' },
+                { label: t('totalPL'), value: formatCurrency(sessionStats.total_pnl), color: sessionStats.total_pnl >= 0 ? 'var(--profit)' : 'var(--loss)' },
               ].map((stat, i) => (
                 <div key={i} style={{
                   display: 'flex',

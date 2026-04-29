@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import { generateId } from '../../utils/helpers';
 import api from '../../services/api';
+import { useI18n } from '../../i18n';
+import { AiAgentIcon } from '../icons/AiAgentIcon';
 
 const AgentPanel: React.FC = () => {
   const {
@@ -11,6 +13,7 @@ const AgentPanel: React.FC = () => {
     setAgentLoading,
     selectedSymbol,
   } = useAppStore();
+  const { language, t } = useI18n();
 
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -35,15 +38,17 @@ const AgentPanel: React.FC = () => {
     setAgentLoading(true);
 
     try {
-      const result = await api.chat(query) as { response: string };
-      let content = result.response || "⚠️ Could not generate a response.";
+      const localizedQuery = language === 'ko'
+        ? `사용자가 한국어 UI를 선택했습니다. 반드시 자연스러운 한국어로 답변하세요. 종목 티커, 지표명, 숫자는 원문을 유지해도 됩니다.\n\n사용자 질문: ${query}`
+        : query;
+      const result = await api.chat(localizedQuery) as { response: string };
+      let content = result.response || (language === 'ko' ? "⚠️ 응답을 생성하지 못했습니다." : "⚠️ Could not generate a response.");
       
       // Filter out raw API error dumps from Gemini quota issues
       if (content.includes('RESOURCE_EXHAUSTED') || content.includes('429') || content.includes('quota')) {
-        content = "⚠️ AI requests are temporarily limited.\n\n" +
-          "The Gemini API rate or quota limit was hit.\n" +
-          "Try again in about a minute.\n\n" +
-          "💡 TIP: If the Trading Bot is running it also uses AI — pause the bot for smoother chat.";
+        content = language === 'ko'
+          ? "⚠️ AI 요청이 일시적으로 제한되었습니다.\n\nGemini API 사용량 또는 속도 제한에 도달했습니다.\n약 1분 후 다시 시도하세요.\n\n💡 팁: 트레이딩 봇도 AI를 사용하므로, 더 원활한 채팅을 원하면 봇을 잠시 중지하세요."
+          : "⚠️ AI requests are temporarily limited.\n\nThe Gemini API rate or quota limit was hit.\nTry again in about a minute.\n\n💡 TIP: If the Trading Bot is running it also uses AI — pause the bot for smoother chat.";
       }
       
       addAgentMessage({
@@ -57,7 +62,9 @@ const AgentPanel: React.FC = () => {
       addAgentMessage({
         id: generateId(),
         role: 'ai',
-        content: "⚠️ Cannot reach the server.\n\nMake sure the backend is running:\n`cd backend && python -m uvicorn app.main:app --reload`",
+        content: language === 'ko'
+          ? "⚠️ 서버에 연결할 수 없습니다.\n\n백엔드가 실행 중인지 확인하세요:\n`cd backend && python -m uvicorn app.main:app --reload`"
+          : "⚠️ Cannot reach the server.\n\nMake sure the backend is running:\n`cd backend && python -m uvicorn app.main:app --reload`",
         timestamp: new Date().toISOString(),
       });
     } finally {
@@ -66,12 +73,29 @@ const AgentPanel: React.FC = () => {
   };
 
   const quickActions = [
-    { label: `Analyze ${selectedSymbol}`, msg: `Give a full analysis of ${selectedSymbol}` },
-    { label: 'Market Overview', msg: 'Summarize current market conditions' },
-    { label: 'Trading Signal', msg: 'Any trading signals right now?' },
-    { label: 'Portfolio Review', msg: 'Review my portfolio' },
-    { label: 'Risk Report', msg: 'Show a risk report' },
+    { label: `${t('analyze')} ${selectedSymbol}`, msg: language === 'ko' ? `${selectedSymbol} 전체 분석을 해줘` : `Give a full analysis of ${selectedSymbol}` },
+    { label: t('marketOverview'), msg: language === 'ko' ? '현재 시장 상황을 요약해줘' : 'Summarize current market conditions' },
+    { label: t('tradingSignal'), msg: language === 'ko' ? '지금 거래 신호가 있어?' : 'Any trading signals right now?' },
+    { label: t('portfolioReview'), msg: language === 'ko' ? '내 포트폴리오를 점검해줘' : 'Review my portfolio' },
+    { label: t('riskReport'), msg: language === 'ko' ? '리스크 보고서를 보여줘' : 'Show a risk report' },
   ];
+
+  const getDisplayContent = (content: string) => {
+    if (language !== 'ko') return content;
+    if (content.includes("I'm the TradeSense v3 micro-scalping agent")) {
+      return [
+        '안녕하세요. 저는 TradeSense v3 마이크로 스캘핑 에이전트입니다. ⚡️',
+        '',
+        '**$3,000 현금 계좌** 기준으로 복리 **일 +1%**를 목표로 합니다.',
+        '',
+        '활성 플레이북 아이디어:',
+        '• RSI 과매도 반등 스캘핑 (5분봉)',
+        '• VWAP 지지 / 저항 돌파',
+        '• AI 기반 섹터 로테이션 (유료 티어)',
+      ].join('\n');
+    }
+    return content;
+  };
 
   return (
     <div className="page-enter" style={{
@@ -81,8 +105,9 @@ const AgentPanel: React.FC = () => {
     }}>
       <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
         <div className="card-header">
-          <span className="card-title">
-            🤖 TradeSense AI Agent
+          <span className="card-title" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+            <AiAgentIcon className="card-icon" aria-hidden style={{ width: 18, height: 18 }} />
+            {t('aiAgentTitle')}
             <span style={{
               fontSize: '10px',
               padding: '2px 8px',
@@ -93,7 +118,7 @@ const AgentPanel: React.FC = () => {
               marginLeft: '8px',
               textTransform: 'uppercase'
             }}>
-              {import.meta.env.VITE_AI_PROVIDER === 'openai' ? 'GPT-4o' : 'Gemini 2.0'} Powered
+              {import.meta.env.VITE_AI_PROVIDER === 'openai' ? 'GPT-4o' : 'Gemini 2.0'} {t('powered')}
             </span>
           </span>
           <div style={{ display: 'flex', gap: '8px' }}>
@@ -115,13 +140,17 @@ const AgentPanel: React.FC = () => {
           {agentMessages.map((msg) => (
             <div key={msg.id} className={`agent-message ${msg.role}`}>
               <div className={`agent-avatar ${msg.role}`}>
-                {msg.role === 'ai' ? '🤖' : '👤'}
+                {msg.role === 'ai' ? (
+                  <AiAgentIcon style={{ width: 17, height: 17 }} aria-hidden />
+                ) : (
+                  '👤'
+                )}
               </div>
               <div className="agent-bubble">
-                {msg.content.split('\n').map((line, i) => (
+                {getDisplayContent(msg.content).split('\n').map((line, i) => (
                   <React.Fragment key={i}>
                     {line}
-                    {i < msg.content.split('\n').length - 1 && <br />}
+                    {i < getDisplayContent(msg.content).split('\n').length - 1 && <br />}
                   </React.Fragment>
                 ))}
               </div>
@@ -130,7 +159,9 @@ const AgentPanel: React.FC = () => {
 
           {agentLoading && (
             <div className="agent-message ai">
-              <div className="agent-avatar ai">🤖</div>
+              <div className="agent-avatar ai">
+                <AiAgentIcon style={{ width: 17, height: 17 }} aria-hidden />
+              </div>
               <div className="agent-bubble" style={{
                 display: 'flex',
                 gap: '4px',
@@ -138,7 +169,7 @@ const AgentPanel: React.FC = () => {
               }}>
                 <span className="spinner" style={{ width: 14, height: 14 }} />
                 <span style={{ color: 'var(--text-tertiary)', fontSize: '12px', marginLeft: '8px' }}>
-                  Analyzing...
+                  {t('analyzing')}
                 </span>
               </div>
             </div>
@@ -152,6 +183,7 @@ const AgentPanel: React.FC = () => {
           display: 'flex',
           gap: '6px',
           padding: '8px 16px 0',
+          marginBottom: 'var(--space-md)',
           overflowX: 'auto',
         }}>
           {quickActions.map((action, i) => (
@@ -192,7 +224,7 @@ const AgentPanel: React.FC = () => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder="Ask TradeSense AI anything about stocks, strategies, or market..."
+            placeholder={t('askAiPlaceholder')}
             disabled={agentLoading}
           />
           <button
