@@ -70,6 +70,15 @@ const ChartView: React.FC = () => {
     const chartBg = (cs.getPropertyValue('--chart-canvas-bg').trim() || '#060a13');
     const gridCol = (cs.getPropertyValue('--chart-grid').trim() || 'rgba(148, 163, 184, 0.08)');
     const axisLbl = (cs.getPropertyValue('--chart-axis-label').trim() || '#64748b');
+    const maFast = (cs.getPropertyValue('--chart-ma-fast').trim() || 'rgba(68, 151, 130, 0.6)');
+    const maSlow = (cs.getPropertyValue('--chart-ma-slow').trim() || 'rgba(69, 120, 237, 0.6)');
+    const candleUp = (cs.getPropertyValue('--chart-candle-up').trim() || '#449782');
+    const candleDown = (cs.getPropertyValue('--chart-candle-down').trim() || '#df484c');
+    const candleUpDim = (cs.getPropertyValue('--chart-candle-up-dim').trim() || 'rgba(68, 151, 130, 0.2)');
+    const candleDownDim = (cs.getPropertyValue('--chart-candle-down-dim').trim() || 'rgba(223, 72, 76, 0.2)');
+    const candleUpLine = (cs.getPropertyValue('--chart-candle-up-line').trim() || 'rgba(68, 151, 130, 0.5)');
+    const candleDownLine = (cs.getPropertyValue('--chart-candle-down-line').trim() || 'rgba(223, 72, 76, 0.5)');
+    const textOnAccent = (cs.getPropertyValue('--on-accent').trim() || '#ffffff');
 
     // Clear
     ctx.fillStyle = chartBg;
@@ -147,8 +156,8 @@ const ChartView: React.FC = () => {
       ctx.stroke();
     };
 
-    if (indicators.ma20) drawMA(ma20, 'rgba(0, 212, 170, 0.6)');
-    if (indicators.ma50) drawMA(ma50, 'rgba(99, 102, 241, 0.6)');
+    if (indicators.ma20) drawMA(ma20, maFast);
+    if (indicators.ma50) drawMA(ma50, maSlow);
 
     // Draw candles
     visibleData.forEach((candle, i) => {
@@ -161,7 +170,7 @@ const ChartView: React.FC = () => {
       const lowY = ((adjustedMax - candle.low) / adjustedRange) * chartHeight;
 
       // Wick
-      ctx.strokeStyle = isUp ? '#10b981' : '#ef4444';
+      ctx.strokeStyle = isUp ? candleUp : candleDown;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(x, highY);
@@ -169,7 +178,7 @@ const ChartView: React.FC = () => {
       ctx.stroke();
 
       // Body
-      ctx.fillStyle = isUp ? '#10b981' : '#ef4444';
+      ctx.fillStyle = isUp ? candleUp : candleDown;
       const top = Math.min(openY, closeY);
       const bodyHeight = Math.max(Math.abs(closeY - openY), 1);
       ctx.fillRect(x - bodyWidth / 2, top, bodyWidth, bodyHeight);
@@ -184,7 +193,7 @@ const ChartView: React.FC = () => {
         const volHeight = (vol / maxVol) * volumeHeight;
         const isUp = candle.close >= candle.open;
 
-        ctx.fillStyle = isUp ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)';
+        ctx.fillStyle = isUp ? candleUpDim : candleDownDim;
         ctx.fillRect(x + 1, volumeTop + volumeHeight - volHeight, candleWidth - 2, volHeight);
       });
     }
@@ -195,7 +204,7 @@ const ChartView: React.FC = () => {
       const lastY = ((adjustedMax - lastCandle.close) / adjustedRange) * chartHeight;
       const isUp = lastCandle.close >= lastCandle.open;
 
-      ctx.strokeStyle = isUp ? 'rgba(16, 185, 129, 0.5)' : 'rgba(239, 68, 68, 0.5)';
+      ctx.strokeStyle = isUp ? candleUpLine : candleDownLine;
       ctx.setLineDash([4, 4]);
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -205,9 +214,9 @@ const ChartView: React.FC = () => {
       ctx.setLineDash([]);
 
       // Price label
-      ctx.fillStyle = isUp ? '#10b981' : '#ef4444';
+      ctx.fillStyle = isUp ? candleUp : candleDown;
       ctx.fillRect(width - 52, lastY - 10, 52, 20);
-      ctx.fillStyle = 'white';
+      ctx.fillStyle = textOnAccent;
       ctx.font = 'bold 11px Inter, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(lastCandle.close.toFixed(2), width - 26, lastY + 4);
@@ -403,7 +412,7 @@ const ChartView: React.FC = () => {
             <span style={{
               color:
                 selectedSymbol === item.symbol
-                  ? '#ffffff'
+                  ? 'var(--on-accent)'
                   : item.change >= 0
                     ? 'var(--profit)'
                     : 'var(--loss)',

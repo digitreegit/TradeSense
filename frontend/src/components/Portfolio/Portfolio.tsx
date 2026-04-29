@@ -27,6 +27,7 @@ const ArchiveBoxIcon = (props: React.ComponentProps<'svg'>) => (
 const Portfolio: React.FC = () => {
   const { account, positions } = useAppStore();
   const { t } = useI18n();
+  const allocationColors = ['var(--profit)', 'var(--info)', 'var(--warning)', 'var(--loss)', 'var(--text-tertiary)'];
 
   const totalPL = account.equity - account.initial_capital;
   const totalPLPct = ((account.equity - account.initial_capital) / account.initial_capital) * 100;
@@ -173,19 +174,18 @@ const Portfolio: React.FC = () => {
                     <>
                       {positions.map((pos, i) => {
                         const pct = (pos.market_value / account.equity) * 100;
-                        const colors = ['#10b981', '#6366f1', '#f59e0b', '#ef4444', '#8b5cf6'];
                         return (
                           <div
                             key={pos.symbol}
                             style={{
                               width: `${pct}%`,
-                              background: colors[i % colors.length],
+                              background: allocationColors[i % allocationColors.length],
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
                               fontSize: '12px',
                               fontWeight: 700,
-                              color: 'white',
+                              color: 'var(--on-accent)',
                             }}
                           >
                             {pct > 8 ? pos.symbol : ''}
@@ -229,7 +229,6 @@ const Portfolio: React.FC = () => {
                   flexWrap: 'wrap',
                 }}>
                   {positions.map((pos, i) => {
-                    const colors = ['#10b981', '#6366f1', '#f59e0b', '#ef4444', '#8b5cf6'];
                     const pct = (pos.market_value / account.equity) * 100;
                     return (
                       <div key={pos.symbol} style={{
@@ -242,7 +241,7 @@ const Portfolio: React.FC = () => {
                           width: 8,
                           height: 8,
                           borderRadius: '50%',
-                          background: colors[i % colors.length],
+                          background: allocationColors[i % allocationColors.length],
                         }} />
                         <span style={{ fontWeight: 600 }}>{pos.symbol}</span>
                         <span style={{ color: 'var(--text-tertiary)' }}>{pct.toFixed(1)}%</span>

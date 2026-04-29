@@ -434,9 +434,7 @@ const SettingsPage: React.FC = () => {
                 border: authAlpacaPaperTrading
                   ? '3px solid var(--border-accent, var(--info))'
                   : '2px solid var(--border-secondary)',
-                background: authAlpacaPaperTrading
-                  ? 'var(--bg-tertiary, rgba(56,132,255,0.12))'
-                  : 'var(--bg-secondary)',
+                background: authAlpacaPaperTrading ? 'var(--state-info-bg)' : 'var(--bg-secondary)',
                 color: 'var(--text-primary)',
                 cursor: modeLoading || !authAlpacaConfigured ? 'not-allowed' : 'pointer',
               }}
@@ -459,9 +457,7 @@ const SettingsPage: React.FC = () => {
                 border: !authAlpacaPaperTrading
                   ? '3px solid var(--border-accent, var(--loss))'
                   : '2px solid var(--border-secondary)',
-                background: !authAlpacaPaperTrading
-                  ? 'var(--bg-tertiary, rgba(239,68,68,0.10))'
-                  : 'var(--bg-secondary)',
+                background: !authAlpacaPaperTrading ? 'var(--state-danger-bg)' : 'var(--bg-secondary)',
                 color: 'var(--text-primary)',
                 cursor: modeLoading || !authAlpacaConfigured ? 'not-allowed' : 'pointer',
               }}
@@ -626,7 +622,7 @@ const SettingsPage: React.FC = () => {
                     border: selected
                       ? '3px solid var(--border-accent, var(--info))'
                       : '2px solid var(--border-secondary)',
-                    background: selected ? 'var(--bg-tertiary, rgba(56,132,255,0.10))' : 'var(--bg-secondary)',
+                    background: selected ? 'var(--state-info-bg)' : 'var(--bg-secondary)',
                     color: 'inherit',
                     cursor: scaleLoading ? 'not-allowed' : 'pointer',
                     opacity: 1,
@@ -736,7 +732,7 @@ const SettingsPage: React.FC = () => {
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(0, 0, 0, 0.65)',
+            background: 'var(--bg-overlay)',
             backdropFilter: 'blur(3px)',
             WebkitBackdropFilter: 'blur(3px)',
             display: 'flex',

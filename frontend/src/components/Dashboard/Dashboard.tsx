@@ -135,13 +135,13 @@ const Dashboard: React.FC = () => {
                 borderRadius: '50%',
                 transition: 'all 0.2s'
               }}
-              onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+              onMouseOver={(e) => e.currentTarget.style.background = 'var(--surface-hover-soft)'}
               onMouseOut={(e) => e.currentTarget.style.background = 'none'}
             >
               <XMarkIcon style={{ width: 18, height: 18 }} />
             </button>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--accent-primary)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text-primary)' }}>
               <BoltIcon style={{ width: 20, height: 20 }} />
               <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>
                 {language === 'ko' ? 'AI 시장 적응 시스템' : 'AI Market Adaptive System'}
@@ -178,13 +178,13 @@ const Dashboard: React.FC = () => {
                 <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{language === 'ko' ? '시장 상태' : 'Market Status'}:</span>
                 <strong style={{ 
                   color: (regimeData.market_level?.toUpperCase() === 'EXCELLENT' || regimeData.risk_level?.toUpperCase() === 'LOW') ? 'var(--profit)' : 
-                         (regimeData.market_level?.toUpperCase() === 'GOOD') ? '#34d399' :
-                         (regimeData.market_level?.toUpperCase() === 'NORMAL' || regimeData.risk_level?.toUpperCase() === 'MODERATE') ? '#fef08a' :
-                         (regimeData.market_level?.toUpperCase() === 'BAD') ? '#f97316' : 
-                         (regimeData.market_level?.toUpperCase() === 'DANGEROUS' || regimeData.risk_level?.toUpperCase() === 'AGGRESSIVE') ? 'var(--loss)' : '#ffffff',
+                         (regimeData.market_level?.toUpperCase() === 'GOOD') ? 'var(--profit)' :
+                         (regimeData.market_level?.toUpperCase() === 'NORMAL' || regimeData.risk_level?.toUpperCase() === 'MODERATE') ? 'var(--warning)' :
+                         (regimeData.market_level?.toUpperCase() === 'BAD') ? 'var(--warning)' :
+                         (regimeData.market_level?.toUpperCase() === 'DANGEROUS' || regimeData.risk_level?.toUpperCase() === 'AGGRESSIVE') ? 'var(--loss)' : 'var(--on-accent)',
                   padding: '2px 8px',
                   borderRadius: '4px',
-                  background: 'rgba(255,255,255,0.05)',
+                  background: 'var(--surface-hover-soft)',
                   fontSize: '14px'
                 }}>
                   {(regimeData.market_level || 'NORMAL').toUpperCase()} ({(regimeData.market_score || 50)})
@@ -195,7 +195,7 @@ const Dashboard: React.FC = () => {
                 <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{language === 'ko' ? '리스크 설정' : 'Risk Setting'}:</span>
                 <strong style={{ 
                   color: regimeData.risk_level === 'aggressive' ? 'var(--loss)' : 
-                         regimeData.risk_level === 'moderate' ? '#fef08a' : 'var(--profit)' 
+                         regimeData.risk_level === 'moderate' ? 'var(--warning)' : 'var(--profit)' 
                 }}>
                   {regimeData.risk_level?.toUpperCase() || 'MODERATE'}
                 </strong>
@@ -243,15 +243,15 @@ const Dashboard: React.FC = () => {
                     display: 'flex', 
                     justifyContent: 'space-between',
                     padding: '6px 10px',
-                    background: 'rgba(255,255,255,0.03)',
+                    background: 'var(--surface-soft-bg)',
                     borderRadius: 'var(--radius-sm)',
-                    border: '1px solid rgba(255,255,255,0.05)'
+                    border: '1px solid var(--surface-soft-border)'
                   }}>
                     <span style={{ color: 'var(--text-tertiary)', textTransform: 'capitalize' }}>
                       {key === 'fed' ? 'Fed Policy' : key === 'war' ? 'Geopolitical' : key}
                     </span>
                     <strong style={{ 
-                      color: score >= 70 ? 'var(--profit)' : score >= 40 ? '#f59e0b' : 'var(--loss)'
+                      color: score >= 70 ? 'var(--profit)' : score >= 40 ? 'var(--warning)' : 'var(--loss)'
                     }}>{score}</strong>
                   </div>
                   );
@@ -268,8 +268,8 @@ const Dashboard: React.FC = () => {
                   {((regimeData as any).focus_symbols || []).map((sym: string) => (
                     <span key={sym} style={{
                       padding: '3px 10px',
-                      background: 'rgba(59, 130, 246, 0.15)',
-                      border: '1px solid rgba(59, 130, 246, 0.3)',
+                      background: 'var(--state-info-bg)',
+                      border: '1px solid var(--state-info-border)',
                       borderRadius: 'var(--radius-full)',
                       fontSize: '12px',
                       fontWeight: 600,
@@ -298,9 +298,9 @@ const Dashboard: React.FC = () => {
             <span style={{
               padding: '4px 10px',
               borderRadius: 'var(--radius-full)',
-              background: 'rgba(249, 115, 22, 0.15)',
-              border: '1px solid rgba(249, 115, 22, 0.4)',
-              color: '#f97316',
+              background: 'var(--state-warning-bg)',
+              border: '1px solid var(--state-warning-border)',
+              color: 'var(--warning)',
               fontWeight: 600,
             }}>
               ⏸ Entry blackout: {regimeData.blackout_reason || 'active'}
@@ -310,8 +310,8 @@ const Dashboard: React.FC = () => {
             <span style={{
               padding: '4px 10px',
               borderRadius: 'var(--radius-full)',
-              background: 'rgba(239, 68, 68, 0.15)',
-              border: '1px solid rgba(239, 68, 68, 0.4)',
+              background: 'var(--state-danger-bg)',
+              border: '1px solid var(--state-danger-border)',
               color: 'var(--loss)',
               fontWeight: 600,
             }}>
@@ -322,9 +322,9 @@ const Dashboard: React.FC = () => {
             <span style={{
               padding: '4px 10px',
               borderRadius: 'var(--radius-full)',
-              background: 'rgba(250, 204, 21, 0.15)',
-              border: '1px solid rgba(250, 204, 21, 0.4)',
-              color: '#facc15',
+              background: 'var(--state-warning-bg)',
+              border: '1px solid var(--state-warning-border)',
+              color: 'var(--warning)',
               fontWeight: 600,
             }}>
               ⏲ Cooldown {compliance.cooldown_remaining_s}s (loss streak {compliance.loss_streak})
@@ -334,8 +334,8 @@ const Dashboard: React.FC = () => {
             <span style={{
               padding: '4px 10px',
               borderRadius: 'var(--radius-full)',
-              background: 'rgba(59, 130, 246, 0.12)',
-              border: '1px solid rgba(59, 130, 246, 0.3)',
+              background: 'var(--state-info-bg)',
+              border: '1px solid var(--state-info-border)',
               color: 'var(--accent-primary)',
               fontFamily: 'var(--font-mono)',
             }}>
