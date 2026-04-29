@@ -1,6 +1,6 @@
 """
 TradeSense - AI Analysis Agent
-Uses Gemini 2.0 Flash for stock analysis and trading insights.
+Uses OpenAI or Gemini (see AI_PROVIDER / models in settings) for analysis.
 """
 import logging
 import asyncio
@@ -21,6 +21,20 @@ class AnalysisAgent:
         self._last_gemini_call = 0.0
         self._min_call_interval = 1.0
         self._last_response_cache: dict = {}  # prompt_hash -> response
+        self._active_gemini_model: str | None = None  # set after first successful Gemini call
+
+    def ai_model_display(self) -> str:
+        """Human-readable model id for health/UI (OpenAI from env; Gemini from last success or top candidate)."""
+        prov = (settings.ai_provider or "openai").strip().lower()
+        if prov == "openai":
+            return (settings.openai_model or "gpt-4o").strip() or "OpenAI"
+        if prov == "gemini":
+            if self._active_gemini_model:
+                return self._active_gemini_model
+            if self.GEMINI_MODEL_CANDIDATES:
+                return self.GEMINI_MODEL_CANDIDATES[0]
+            return "Gemini"
+        return (settings.ai_provider or "unknown").strip()
 
     def initialize(self):
         """Initialize the AI provider."""
@@ -267,6 +281,7 @@ class AnalysisAgent:
                 model = self._gemini_genai.GenerativeModel(model_name)
                 response = model.generate_content(prompt)
                 self.gemini_client = model
+                self._active_gemini_model = model_name
                 logger.info(f"✅ Found working Gemini model: {model_name}")
                 return response.text
             except Exception as e:
@@ -289,6 +304,7 @@ class AnalysisAgent:
                     model=model_name,
                     contents=prompt,
                 )
+                self._active_gemini_model = model_name
                 logger.info(f"✅ Found working Gemini model: {model_name}")
                 return response.text
             except Exception as e:

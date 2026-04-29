@@ -17,6 +17,19 @@ const AgentPanel: React.FC = () => {
 
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [aiModelBadge, setAiModelBadge] = useState<string>('');
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getHealth().then((h) => {
+      if (cancelled) return;
+      const label = typeof h.ai_model === 'string' && h.ai_model.trim() ? h.ai_model.trim() : '';
+      setAiModelBadge(label);
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -69,6 +82,10 @@ const AgentPanel: React.FC = () => {
       });
     } finally {
       setAgentLoading(false);
+      void api.getHealth().then((h) => {
+        const label = typeof h.ai_model === 'string' && h.ai_model.trim() ? h.ai_model.trim() : '';
+        setAiModelBadge(label);
+      }).catch(() => {});
     }
   };
 
@@ -116,9 +133,8 @@ const AgentPanel: React.FC = () => {
               borderRadius: 'var(--radius-full)',
               fontWeight: 600,
               marginLeft: '8px',
-              textTransform: 'uppercase'
             }}>
-              {import.meta.env.VITE_AI_PROVIDER === 'openai' ? 'GPT-4o' : 'Gemini 2.0'} {t('powered')}
+              {aiModelBadge ? `${aiModelBadge} · ${t('powered')}` : t('loading')}
             </span>
           </span>
           <div style={{ display: 'flex', gap: '8px' }}>

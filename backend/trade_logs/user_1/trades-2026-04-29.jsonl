@@ -1,2 +1,7 @@
 {"time": "2026-04-29T10:02:11.845162-04:00", "symbol": "NVDA", "qty": 2, "proceeds": 419.6, "cost_basis": 420.48, "pnl": -0.88, "hold_term": "short"}
 {"time": "2026-04-29T10:02:39.859377-04:00", "symbol": "AMZN", "qty": 1, "proceeds": 262.07, "cost_basis": 262.63, "pnl": -0.56, "hold_term": "short"}
+{"time": "2026-04-29T10:08:10.351051-04:00", "symbol": "AAPL", "qty": 1, "proceeds": 269.85, "cost_basis": 269.43, "pnl": 0.42, "hold_term": "short"}
+{"time": "2026-04-29T10:08:33.449176-04:00", "symbol": "OXY", "qty": 7, "proceeds": 414.09, "cost_basis": 414.95, "pnl": -0.86, "hold_term": "short"}
+{"time": "2026-04-29T10:33:29.916496-04:00", "symbol": "XOM", "qty": 2, "proceeds": 304.44, "cost_basis": 304.27, "pnl": 0.17, "hold_term": "short"}
+{"time": "2026-04-29T10:35:49.176531-04:00", "symbol": "SLB", "qty": 8, "proceeds": 448.08, "cost_basis": 449.04, "pnl": -0.96, "hold_term": "short"}
+{"time": "2026-04-29T11:17:56.137750-04:00", "symbol": "OXY", "qty": 7, "proceeds": 415.17, "cost_basis": 414.54, "pnl": 0.63, "hold_term": "short"}

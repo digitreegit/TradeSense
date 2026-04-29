@@ -183,6 +183,7 @@ async def health():
         "alpaca_key_len": len(settings.alpaca_api_key),
         "ai_ready": analysis_agent._initialized,
         "ai_provider": settings.ai_provider,
+        "ai_model": analysis_agent.ai_model_display(),
         "bot_active": default_engine.is_active,
         "mode": settings.trading_mode,
         "scale": resolved_capital_scale(),

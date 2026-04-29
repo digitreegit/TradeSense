@@ -119,6 +119,15 @@ export const api = {
   /** Prefer health path so SPA catch-all in production never returns HTML here */
   getAlpacaUsage: () => request<AlpacaApiUsage>('/health/alpaca-usage'),
 
+  /** `/api/health` — ai_model matches backend analysis_agent */
+  getHealth: () =>
+    request<{
+      ai_provider?: string;
+      ai_model?: string;
+      ai_ready?: boolean;
+      status?: string;
+    }>('/health'),
+
   getStrategies: () =>
     request<{
       auto?: boolean;
