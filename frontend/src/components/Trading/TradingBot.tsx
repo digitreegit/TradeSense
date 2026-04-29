@@ -299,7 +299,7 @@ const TradingBot: React.FC = () => {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
             <span style={{
-              fontSize: '14px',
+              fontSize: '12px',
               fontWeight: 700,
               color: botActive ? 'var(--profit)' : 'var(--text-tertiary)',
               letterSpacing: '0.5px',
@@ -307,8 +307,9 @@ const TradingBot: React.FC = () => {
               {botActive ? `● ${t('running').toUpperCase()}` : `○ ${t('stopped').toUpperCase()}`}
             </span>
             <button
-              className={botActive ? 'btn-stop' : 'btn-start'}
+              className={`${botActive ? 'btn-stop' : 'btn-start'} trading-bot-toggle`}
               onClick={handleToggleBot}
+              style={{ fontSize: '15px' }}
             >
               {botActive ? (
                 <>
@@ -377,7 +378,7 @@ const TradingBot: React.FC = () => {
                   style={{
                     fontSize: '11px',
                     fontWeight: playbookAuto ? 700 : 500,
-                    color: playbookAuto ? 'var(--profit)' : 'var(--text-tertiary)',
+                    color: playbookAuto ? 'var(--text-tertiary)' : 'var(--text-primary)',
                     fontFamily: 'var(--font-sans)',
                     letterSpacing: '0.02em',
                   }}
@@ -445,7 +446,7 @@ const TradingBot: React.FC = () => {
                       </div>
                       <p className="strategy-description">{strategyText.description}</p>
                       <div style={{
-                        marginTop: '6px',
+                        marginTop: '2px',
                         fontSize: '10px',
                         fontFamily: 'var(--font-mono)',
                         color: isActiveNow ? 'var(--profit)' : 'var(--text-muted)',

@@ -349,29 +349,6 @@ const SettingsPage: React.FC = () => {
             <button
               type="button"
               role="radio"
-              aria-checked={language === 'ko'}
-              onClick={() => chooseLanguage('ko')}
-              style={{
-                textAlign: 'left',
-                padding: '12px 14px',
-                borderRadius: '8px',
-                border:
-                  language === 'ko'
-                    ? '2px solid var(--border-accent, var(--info))'
-                    : '2px solid var(--border-secondary)',
-                background: language === 'ko' ? 'var(--state-info-bg)' : 'var(--bg-secondary)',
-                color: 'var(--text-primary)',
-                cursor: 'pointer',
-              }}
-            >
-              <div style={{ fontSize: '14px', fontWeight: 700 }}>한국어</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
-                {t('koHelp')}
-              </div>
-            </button>
-            <button
-              type="button"
-              role="radio"
               aria-checked={language === 'en'}
               onClick={() => chooseLanguage('en')}
               style={{
@@ -390,6 +367,29 @@ const SettingsPage: React.FC = () => {
               <div style={{ fontSize: '14px', fontWeight: 700 }}>English</div>
               <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
                 {t('enHelp')}
+              </div>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={language === 'ko'}
+              onClick={() => chooseLanguage('ko')}
+              style={{
+                textAlign: 'left',
+                padding: '12px 14px',
+                borderRadius: '8px',
+                border:
+                  language === 'ko'
+                    ? '2px solid var(--border-accent, var(--info))'
+                    : '2px solid var(--border-secondary)',
+                background: language === 'ko' ? 'var(--state-info-bg)' : 'var(--bg-secondary)',
+                color: 'var(--text-primary)',
+                cursor: 'pointer',
+              }}
+            >
+              <div style={{ fontSize: '14px', fontWeight: 700 }}>한국어</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                {t('koHelp')}
               </div>
             </button>
           </div>

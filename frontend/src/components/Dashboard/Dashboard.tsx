@@ -163,7 +163,7 @@ const Dashboard: React.FC = () => {
             </p>
 
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', fontSize: '13px', marginTop: '4px' }}>
-              <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
+              <div className="regime-stat-chip">
                 <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{language === 'ko' ? '전략' : 'Strategy'}:</span>
                 <strong style={{ color: 'var(--accent-primary)' }}>
                   {regimeData.playbook_mode && regimeData.active_playbooks?.length
@@ -174,7 +174,7 @@ const Dashboard: React.FC = () => {
                 </strong>
               </div>
 
-               <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
+               <div className="regime-stat-chip">
                 <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{language === 'ko' ? '시장 상태' : 'Market Status'}:</span>
                 <strong style={{ 
                   color: (regimeData.market_level?.toUpperCase() === 'EXCELLENT' || regimeData.risk_level?.toUpperCase() === 'LOW') ? 'var(--profit)' : 
@@ -191,7 +191,7 @@ const Dashboard: React.FC = () => {
                 </strong>
               </div>
 
-              <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
+              <div className="regime-stat-chip">
                 <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{language === 'ko' ? '리스크 설정' : 'Risk Setting'}:</span>
                 <strong style={{ 
                   color: regimeData.risk_level === 'aggressive' ? 'var(--loss)' : 
@@ -201,13 +201,13 @@ const Dashboard: React.FC = () => {
                 </strong>
               </div>
 
-              <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
+              <div className="regime-stat-chip">
                 <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{t('stopLoss')}:</span>
                 <strong style={{ color: 'var(--loss)' }}>{regimeData.stop_loss_percent}%</strong>
               </div>
 
               {(regimeData as any).daily_pnl && (
-                <div style={{ background: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
+                <div className="regime-stat-chip">
                   <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{t('dailyPL')}:</span>
                   <strong style={{ color: String((regimeData as any).daily_pnl).includes('-') ? 'var(--loss)' : 'var(--profit)' }}>
                     {(regimeData as any).daily_pnl}
@@ -261,7 +261,7 @@ const Dashboard: React.FC = () => {
 
             {(regimeData as any).focus_symbols && (
               <div>
-                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '4px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '12px' }}>
                   {language === 'ko' ? '집중 섹터' : 'Focus Sectors'}: <strong style={{ color: 'var(--text-secondary)' }}>{((regimeData as any).focus_sectors || []).join(', ')}</strong>
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
@@ -390,10 +390,17 @@ const Dashboard: React.FC = () => {
             <span>{botActive ? (language === 'ko' ? '활성' : 'ACTIVE') : (language === 'ko' ? '대기' : 'IDLE')}</span>
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '6px' }}>
-            {tradeLogs.length} events logged · Daily Scalping:{' '}
-            <strong style={{ color: 'var(--accent-primary)', fontFamily: 'var(--font-mono)' }}>
-              {Number.isFinite(botDailyTrades) ? botDailyTrades : 0}
-            </strong>
+            {language === 'ko' ? (
+              <>
+                {tradeLogs.length}개 이벤트 기록 ·{' '}
+                {Number.isFinite(botDailyTrades) ? botDailyTrades : 0} 데일리 스캘핑
+              </>
+            ) : (
+              <>
+                {tradeLogs.length} events logged ·{' '}
+                {Number.isFinite(botDailyTrades) ? botDailyTrades : 0} daily scalping
+              </>
+            )}
           </div>
         </div>
       </div>

@@ -195,7 +195,7 @@ html[lang='ko'] {
   --chart-candle-up-line: rgba(68, 151, 130, 0.5);
   --chart-candle-down-line: rgba(223, 72, 76, 0.5);
 
-  --text-primary: #0f172a;
+  --text-primary: #212121;
   --text-secondary: #334155;
   --text-tertiary: #64748b;
   --text-muted: #94a3b8;
@@ -373,6 +373,13 @@ body {
   background: rgba(223, 72, 76, 0.2);
   border-color: #df484c;
   transform: translateY(-1px);
+}
+
+/* Trading bot header: tighter icon/text spacing + horizontal padding */
+.btn-start.trading-bot-toggle,
+.btn-stop.trading-bot-toggle {
+  gap: 4px;
+  padding: 10px 10px;
 }
 
 .sidebar-logo {
@@ -872,6 +879,37 @@ body {
   height: 6px;
 }
 
+.trading-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.24);
+}
+
+.trading-range::-webkit-slider-thumb {
+  margin-top: -5px;
+}
+
+.trading-range::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.24);
+}
+
+/* AI Market Adaptive / regime notification stat chips */
+.regime-stat-chip {
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+}
+
+[data-theme='light'] .regime-stat-chip {
+  background: #f4f4f5;
+  border-color: var(--border-secondary);
+}
+
 /* ============================================
    Watchlist
    ============================================ */
@@ -1156,7 +1194,7 @@ body {
 }
 
 .playbook-switch[aria-checked='true'] {
-  background: var(--profit);
+  background: #3f4652;
 }
 
 [data-theme='light'] .playbook-switch:not([aria-checked='true']) {
@@ -1305,10 +1343,10 @@ body {
   background: var(--bg-card);
   border: 1px solid var(--border-primary);
   border-radius: var(--radius-lg);
-  padding: var(--space-xl);
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: var(--space-md);
+  gap: 6px;
   transition: all var(--transition-base);
   cursor: pointer;
 }
@@ -1333,6 +1371,7 @@ body {
   font-size: 12px;
   color: var(--text-tertiary);
   line-height: 1.5;
+  margin: 0;
 }
 
 .strategy-stats {
@@ -1982,9 +2021,9 @@ body {
    Cursor.com Surface Refresh
    ============================================ */
 :root {
-  --bg-primary: #070707;
-  --bg-secondary: #111111;
-  --bg-tertiary: #191919;
+  --bg-primary: #212121;
+  --bg-secondary: #2b2b2b;
+  --bg-tertiary: #333333;
   --bg-card: rgba(22, 22, 22, 0.78);
   --bg-card-hover: rgba(31, 31, 31, 0.9);
   --bg-glass: rgba(18, 18, 18, 0.68);
@@ -2023,7 +2062,7 @@ body {
   --gradient-loss: linear-gradient(180deg, #df484c 0%, #df484c 100%);
   --gradient-card: linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.025) 100%);
   --gradient-glass: linear-gradient(180deg, rgba(255,255,255,0.09) 0%, rgba(255,255,255,0.025) 100%);
-  --gradient-sidebar: linear-gradient(180deg, rgba(20,20,20,0.96) 0%, rgba(8,8,8,0.96) 100%);
+  --gradient-sidebar: linear-gradient(180deg, rgba(43,43,43,0.96) 0%, rgba(33,33,33,0.96) 100%);
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.32);
   --shadow-md: 0 12px 36px rgba(0, 0, 0, 0.26);
@@ -2039,11 +2078,11 @@ body {
   --radius-xl: 28px;
   --sidebar-width: 282px;
   --header-height: 72px;
-  --header-bg: rgba(7, 7, 7, 0.72);
-  --chart-canvas-bg: #0b0b0b;
+  --header-bg: rgba(33, 33, 33, 0.72);
+  --chart-canvas-bg: #212121;
   --chart-grid: rgba(255, 255, 255, 0.06);
   --chart-axis-label: #7a7a74;
-  --chart-loading-bg: rgba(7, 7, 7, 0.84);
+  --chart-loading-bg: rgba(33, 33, 33, 0.84);
 }
 
 [data-theme="light"] {
@@ -2056,9 +2095,9 @@ body {
   --bg-input: rgba(25, 24, 21, 0.045);
   --bg-overlay: rgba(20, 18, 14, 0.34);
 
-  --accent-primary: #111111;
-  --accent-primary-dim: rgba(17, 17, 17, 0.075);
-  --accent-primary-glow: rgba(17, 17, 17, 0.12);
+  --accent-primary: #212121;
+  --accent-primary-dim: rgba(33, 33, 33, 0.075);
+  --accent-primary-glow: rgba(33, 33, 33, 0.12);
   --accent-secondary: #57534e;
   --accent-secondary-dim: rgba(87, 83, 78, 0.1);
   --accent-tertiary: #292524;
@@ -2074,7 +2113,7 @@ body {
   --warning: #f3af56;
   --info: #4578ed;
 
-  --text-primary: #141412;
+  --text-primary: #212121;
   --text-secondary: #44403c;
   --text-tertiary: #78716c;
   --text-muted: #a8a29e;
@@ -2083,7 +2122,7 @@ body {
   --border-secondary: rgba(20, 20, 18, 0.08);
   --border-accent: rgba(20, 20, 18, 0.28);
 
-  --gradient-primary: linear-gradient(180deg, #1f1f1d 0%, #0f0f0e 100%);
+  --gradient-primary: linear-gradient(180deg, #2a2a2a 0%, #212121 100%);
   --gradient-card: linear-gradient(180deg, rgba(255,255,255,0.76) 0%, rgba(255,253,248,0.38) 100%);
   --gradient-glass: linear-gradient(180deg, rgba(255,255,255,0.86) 0%, rgba(245,242,234,0.54) 100%);
   --gradient-sidebar: linear-gradient(180deg, rgba(255,253,248,0.94) 0%, rgba(242,238,228,0.92) 100%);
@@ -2631,13 +2670,13 @@ body {
    TradingView Market Surface Refresh
    ============================================ */
 :root {
-  --bg-primary: #131722;
+  --bg-primary: #212121;
   --bg-secondary: #1e222d;
   --bg-tertiary: #2a2e39;
   --bg-card: #1e222d;
   --bg-card-hover: #252a35;
   --bg-glass: #1e222d;
-  --bg-input: #131722;
+  --bg-input: #212121;
   --bg-overlay: rgba(0, 0, 0, 0.58);
 
   --accent-primary: #6b92f2;
@@ -2689,7 +2728,7 @@ body {
   --gradient-loss: linear-gradient(180deg, #ef8d90 0%, #e66b6f 100%);
   --gradient-card: linear-gradient(180deg, #1e222d 0%, #1e222d 100%);
   --gradient-glass: linear-gradient(180deg, #1e222d 0%, #1e222d 100%);
-  --gradient-sidebar: linear-gradient(180deg, #131722 0%, #131722 100%);
+  --gradient-sidebar: linear-gradient(180deg, #212121 0%, #212121 100%);
 
   --shadow-sm: none;
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.22);
@@ -2705,11 +2744,11 @@ body {
   --radius-xl: 16px;
   --sidebar-width: 244px;
   --header-height: 56px;
-  --header-bg: #131722;
-  --chart-canvas-bg: #131722;
+  --header-bg: #212121;
+  --chart-canvas-bg: #212121;
   --chart-grid: rgba(42, 46, 57, 0.9);
   --chart-axis-label: #787b86;
-  --chart-loading-bg: rgba(19, 23, 34, 0.9);
+  --chart-loading-bg: rgba(33, 33, 33, 0.9);
 }
 
 [data-theme="light"] {
@@ -2721,7 +2760,7 @@ body {
   --bg-card-hover: #f5f5f5;
   --bg-glass: #ffffff;
   --bg-input: #ffffff;
-  --bg-overlay: rgba(19, 23, 34, 0.35);
+  --bg-overlay: rgba(33, 33, 33, 0.35);
 
   --accent-primary: #3d6ad4;
   --accent-primary-dim: rgba(61, 106, 212, 0.12);
@@ -2758,7 +2797,7 @@ body {
   --chart-candle-up-line: rgba(61, 136, 117, 0.5);
   --chart-candle-down-line: rgba(201, 63, 67, 0.5);
 
-  --text-primary: #131722;
+  --text-primary: #212121;
   --text-secondary: #434651;
   --text-tertiary: #787b86;
   --text-muted: #9598a1;
@@ -2773,9 +2812,9 @@ body {
   --gradient-sidebar: linear-gradient(180deg, #f1f1f1 0%, #f1f1f1 100%);
 
   --shadow-sm: none;
-  --shadow-md: 0 8px 24px rgba(19, 23, 34, 0.08);
-  --shadow-lg: 0 16px 44px rgba(19, 23, 34, 0.1);
-  --shadow-xl: 0 28px 72px rgba(19, 23, 34, 0.14);
+  --shadow-md: 0 8px 24px rgba(33, 33, 33, 0.08);
+  --shadow-lg: 0 16px 44px rgba(33, 33, 33, 0.1);
+  --shadow-xl: 0 28px 72px rgba(33, 33, 33, 0.14);
   --header-bg: #ffffff;
   --chart-canvas-bg: #ffffff;
   --chart-grid: #f0f0f0;
