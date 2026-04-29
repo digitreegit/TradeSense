@@ -5,7 +5,6 @@ import { useI18n } from '../../i18n';
 import { AiAgentIcon } from '../icons/AiAgentIcon';
 import { LiveChartIcon } from '../icons/LiveChartIcon';
 import { PortfolioIcon } from '../icons/PortfolioIcon';
-import { TsLogoMark } from '../icons/TsLogoMark';
 
 // Heroicons v2 Outline SVGs directly as components
 const SquaresIcon = (props: React.ComponentProps<'svg'>) => (
@@ -97,11 +96,18 @@ const Sidebar: React.FC = () => {
     <aside className="sidebar">
       <div className="sidebar-logo">
         <div className="sidebar-logo-icon" aria-hidden title="TradeSense">
-          <TsLogoMark style={{ width: '100%', height: '100%', display: 'block' }} />
+          <img
+            src="/sidebar-logo.svg"
+            alt=""
+            className="sidebar-logo-mark"
+            width={38}
+            height={38}
+            decoding="async"
+          />
         </div>
         <div className="sidebar-logo-text">
-          <h1>TradeSense</h1>
-          <span>{t('marketsAndCharts')}</span>
+          <h1 lang="en">TradeSense</h1>
+          <span lang="en">Markets &amp; charts</span>
         </div>
       </div>
 
