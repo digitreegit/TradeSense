@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
+import type { AppLanguage, RegimeData } from '../../stores/types';
 import { formatCurrency, formatPercent, getChangeClass } from '../../utils/helpers';
 import api from '../../services/api';
 import { useI18n } from '../../i18n';
@@ -37,6 +38,166 @@ const XMarkIcon = (props: React.ComponentProps<'svg'>) => (
   </svg>
 );
 
+function clampMarketScore(raw: unknown): number {
+  const n = typeof raw === 'number' ? raw : Number(raw);
+  if (!Number.isFinite(n)) return 50;
+  return Math.max(0, Math.min(100, n));
+}
+
+function marketBandKey(score: number): string {
+  const s = clampMarketScore(score);
+  if (s >= 80) return 'marketBandExcellent';
+  if (s >= 60) return 'marketBandGood';
+  if (s >= 40) return 'marketBandNeutral';
+  if (s >= 20) return 'marketBandPoor';
+  return 'marketBandDangerous';
+}
+
+function avgQuantScore(regime: { quant_scores?: Record<string, number> } | null | undefined): number | null {
+  const q = regime?.quant_scores;
+  if (!q || typeof q !== 'object') return null;
+  const vals = Object.values(q).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+  if (!vals.length) return null;
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+
+const AI_SCORE_ORDER = ['war', 'earnings', 'fed', 'gold', 'crypto', 'others'] as const;
+
+const AI_DIM_LABEL: Record<string, { ko: string; en: string }> = {
+  war: { ko: '지정학·안보', en: 'Geopolitics' },
+  earnings: { ko: '실적·기업', en: 'Earnings' },
+  fed: { ko: '연준·금리', en: 'Fed / rates' },
+  gold: { ko: '금(위험회피)', en: 'Gold (risk-off cue)' },
+  crypto: { ko: '크립토(위험선호)', en: 'Crypto (risk-on cue)' },
+  others: { ko: '기타 거시', en: 'Other macro' },
+};
+
+function splitReasoningToBullets(text: string, max: number): string[] {
+  const raw = text.trim();
+  if (!raw) return [];
+  const parts = raw
+    .split(/\n+/)
+    .flatMap((line) => line.split(/(?<=[.!?。…])\s+/))
+    .map((s) => s.trim())
+    .filter((s) => s.length > 1);
+  const out = parts.length ? parts : [raw];
+  return out.slice(0, max);
+}
+
+/** Capital scale / daily target lines are user goals, not macro regime rationale. */
+const TRADING_GOAL_NOISE_RES: RegExp[] = [
+  /-scale\s+scalp/i,
+  /\d+k-scale/i,
+  /\$\s*[\d,]+\s*[→\-]\s*\+/i,
+  /\+\s*[\d.]+%\s*\/\s*day/i,
+  /\+\s*1[\s.]*%\s*(per\s*)?day/i,
+  /compounding\s+target/i,
+  /daily\s*\+?\s*[\d.]+%/i,
+  /good\s+faith|\bgfv\b/i,
+  /\$3,?000\b/i,
+  /일일\s*\+?[\d.]+%/,
+  /목표\s*\+?[\d.]+%/,
+  /스캘프\s*목표/,
+];
+
+function isTradingGoalNoiseBullet(s: string): boolean {
+  const t = s.trim();
+  if (!t) return true;
+  return TRADING_GOAL_NOISE_RES.some((re) => re.test(t));
+}
+
+function filterMacroRationaleBullets(items: string[]): string[] {
+  return items.filter((line) => !isTradingGoalNoiseBullet(line));
+}
+
+function normalizeBulletList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const x of raw) {
+    const s = String(x ?? '').trim();
+    if (s.length < 4) continue;
+    if (!out.includes(s)) out.push(s);
+  }
+  return out;
+}
+
+function buildRegimeRationaleBullets(regime: RegimeData | null | undefined, lang: AppLanguage): string[] {
+  if (!regime) return [];
+
+  const primary = normalizeBulletList(lang === 'ko' ? regime.rationale_points_ko : regime.rationale_points_en);
+  const secondary = normalizeBulletList(lang === 'ko' ? regime.rationale_points_en : regime.rationale_points_ko);
+
+  let bullets = filterMacroRationaleBullets([...primary]);
+  if (bullets.length < 3) {
+    for (const s of filterMacroRationaleBullets(secondary)) {
+      if (bullets.includes(s)) continue;
+      bullets.push(s);
+      if (bullets.length >= 6) break;
+    }
+  }
+  if (bullets.length > 0) {
+    return bullets.slice(0, 6);
+  }
+
+  const legacy: string[] = [];
+  const reasoning = String(regime.reasoning || '').trim();
+  legacy.push(
+    ...filterMacroRationaleBullets(splitReasoningToBullets(reasoning, 3)),
+  );
+
+  const ms = regime.market_scores;
+  if (ms && typeof ms === 'object') {
+    for (const key of AI_SCORE_ORDER) {
+      const v = ms[key];
+      if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+      const label = AI_DIM_LABEL[key]?.[lang === 'ko' ? 'ko' : 'en'] ?? key;
+      legacy.push(`${label}: ${Math.round(v)}/100`);
+    }
+  }
+
+  const qAvg = avgQuantScore(regime);
+  if (qAvg != null) {
+    legacy.push(
+      lang === 'ko'
+        ? `양적 매크로(ETF) 보조 평균 ≈ ${qAvg.toFixed(1)}`
+        : `Quant macro (ETF) average ≈ ${qAvg.toFixed(1)}`,
+    );
+  }
+
+  if (regime.sector_tilt) {
+    legacy.push(
+      lang === 'ko' ? `섹터 기울기: ${regime.sector_tilt}` : `Sector tilt: ${regime.sector_tilt}`,
+    );
+  }
+
+  const ns = regime.news_score;
+  if (typeof ns === 'number' && Number.isFinite(ns) && Math.abs(ns) >= 0.25) {
+    const tone =
+      lang === 'ko'
+        ? ns <= -0.35
+          ? '뉴스 톤: 공포·피로(페이드 후보)'
+          : ns >= 0.35
+            ? '뉴스 톤: 상대적으로 안정'
+            : `뉴스 톤: ${ns.toFixed(2)}`
+        : ns <= -0.35
+          ? 'News tone: panic / exhaustion (fade candidate)'
+          : ns >= 0.35
+            ? 'News tone: relatively constructive'
+            : `News tone: ${ns.toFixed(2)}`;
+    legacy.push(tone);
+  }
+
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const b of legacy) {
+    if (seen.has(b)) continue;
+    seen.add(b);
+    out.push(b);
+    if (out.length >= 10) break;
+  }
+  return out;
+}
+
 const Dashboard: React.FC = () => {
   const { language, t } = useI18n();
   const {
@@ -69,6 +230,12 @@ const Dashboard: React.FC = () => {
     const upper = ids.map((s) => s.toUpperCase());
     return `${mode} · ${upper.join(' + ') || '—'}`;
   }, [playbookAuto, activePlaybooks, manualPlaybooks]);
+
+  const compositeMarketScore = regimeData ? clampMarketScore(regimeData.market_score) : 50;
+  const regimeRationaleBullets = useMemo(
+    () => buildRegimeRationaleBullets(regimeData, language),
+    [regimeData, language],
+  );
 
   const totalPL = account.equity - account.initial_capital;
   const totalPLPct = ((account.equity - account.initial_capital) / account.initial_capital) * 100;
@@ -141,79 +308,151 @@ const Dashboard: React.FC = () => {
               <XMarkIcon style={{ width: 18, height: 18 }} />
             </button>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text-primary)' }}>
-              <BoltIcon style={{ width: 20, height: 20 }} />
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>
-                {language === 'ko' ? 'AI 시장 적응 시스템' : 'AI Market Adaptive System'}
-              </h3>
-              <span
-                style={{
-                  fontSize: '12px',
-                  marginLeft: 'auto',
-                  marginRight: '32px',
-                  color: 'var(--text-tertiary)',
-                }}
-              >
+            <div className="regime-notification-title-row">
+              <div className="regime-notification-title-main">
+                <BoltIcon style={{ width: 20, height: 20, flexShrink: 0 }} aria-hidden />
+                <h3 className="regime-notification-heading">
+                  {language === 'ko' ? 'AI 시장 적응 시스템' : 'AI Market Adaptive System'}
+                </h3>
+              </div>
+              <span className="regime-notification-updated">
                 {language === 'ko' ? '최근 업데이트' : 'Last Updated'}: {regimeData.timestamp}
               </span>
             </div>
 
-            <p style={{ margin: 0, fontSize: '14px', lineHeight: 1.5, color: 'var(--text-secondary)' }}>
-              <strong>{language === 'ko' ? '판단 근거' : 'Reasoning'}:</strong> {regimeData.reasoning}
-            </p>
-
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', fontSize: '13px', marginTop: '4px' }}>
-              <div className="regime-stat-chip">
-                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{language === 'ko' ? '전략' : 'Strategy'}:</span>
-                <strong style={{ color: 'var(--accent-primary)' }}>
-                  {regimeData.playbook_mode && regimeData.active_playbooks?.length
-                    ? `${regimeData.playbook_mode.toUpperCase()} · ${regimeData.active_playbooks
-                        .map((s) => s.toUpperCase())
-                        .join(' + ')}`
-                    : strategyBanner}
-                </strong>
+            <div className="regime-notification-stats">
+              <div className="regime-stat-chip regime-stat-chip--market-score">
+                <div className="regime-market-score-split">
+                  <div className="regime-market-score-col regime-market-score-col--primary">
+                    <div className="regime-market-score-head">
+                      <div className="regime-market-status-inline">
+                        <span className="regime-market-status-label">
+                          {language === 'ko' ? '시장 상태' : 'Market Status'}:
+                        </span>
+                        <strong
+                          className="regime-market-level-pill"
+                          style={{
+                            color:
+                              (regimeData.market_level?.toUpperCase() === 'EXCELLENT' ||
+                                regimeData.market_level?.toUpperCase() === 'GOOD')
+                                ? 'var(--profit)'
+                                : regimeData.market_level?.toUpperCase() === 'NORMAL'
+                                  ? 'var(--warning)'
+                                  : regimeData.market_level?.toUpperCase() === 'BAD' ||
+                                      regimeData.market_level?.toUpperCase() === 'DANGEROUS'
+                                    ? 'var(--loss)'
+                                    : 'var(--text-secondary)',
+                          }}
+                        >
+                          {(regimeData.market_level || 'NORMAL').toUpperCase()}
+                        </strong>
+                      </div>
+                    </div>
+                    <div className="regime-market-score-main-row">
+                      <span className="regime-market-score-number">
+                        {compositeMarketScore % 1 === 0
+                          ? compositeMarketScore.toFixed(0)
+                          : compositeMarketScore.toFixed(1)}
+                        <span className="regime-market-score-denom">/ 100</span>
+                      </span>
+                      <span
+                        className="regime-market-band-label"
+                        style={{
+                          color:
+                            compositeMarketScore >= 70
+                              ? 'var(--profit)'
+                              : compositeMarketScore >= 40
+                                ? 'var(--warning)'
+                                : 'var(--loss)',
+                        }}
+                      >
+                        {t(marketBandKey(compositeMarketScore))}
+                      </span>
+                    </div>
+                    <div className="regime-market-score-meter" aria-hidden="true">
+                      <div
+                        className="regime-market-score-meter-fill"
+                        style={{
+                          width: `${compositeMarketScore}%`,
+                          background:
+                            compositeMarketScore >= 70
+                              ? 'var(--profit)'
+                              : compositeMarketScore >= 40
+                                ? 'var(--warning)'
+                                : 'var(--loss)',
+                        }}
+                      />
+                    </div>
+                    <p className="regime-market-score-hint">{t('marketScorePercentileHint')}</p>
+                  </div>
+                  <div className="regime-market-score-divider" aria-hidden="true" />
+                  <div className="regime-market-score-col regime-market-score-col--rationale">
+                    <div className="regime-rationale-title">{t('marketRationaleTitle')}</div>
+                    {regimeRationaleBullets.length > 0 ? (
+                      <ul className="regime-rationale-list">
+                        {regimeRationaleBullets.map((line, idx) => (
+                          <li key={`${idx}-${line.slice(0, 24)}`}>{line}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="regime-rationale-fallback">{t('marketRationaleFallback')}</p>
+                    )}
+                  </div>
+                </div>
               </div>
 
-               <div className="regime-stat-chip">
-                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{language === 'ko' ? '시장 상태' : 'Market Status'}:</span>
-                <strong style={{ 
-                  color: (regimeData.market_level?.toUpperCase() === 'EXCELLENT' || regimeData.risk_level?.toUpperCase() === 'LOW') ? 'var(--profit)' : 
-                         (regimeData.market_level?.toUpperCase() === 'GOOD') ? 'var(--profit)' :
-                         (regimeData.market_level?.toUpperCase() === 'NORMAL' || regimeData.risk_level?.toUpperCase() === 'MODERATE') ? 'var(--warning)' :
-                         (regimeData.market_level?.toUpperCase() === 'BAD') ? 'var(--warning)' :
-                         (regimeData.market_level?.toUpperCase() === 'DANGEROUS' || regimeData.risk_level?.toUpperCase() === 'AGGRESSIVE') ? 'var(--loss)' : 'var(--on-accent)',
-                  padding: '2px 8px',
-                  borderRadius: '4px',
-                  background: 'var(--surface-hover-soft)',
-                  fontSize: '14px'
-                }}>
-                  {(regimeData.market_level || 'NORMAL').toUpperCase()} ({(regimeData.market_score || 50)})
-                </strong>
-              </div>
-
-              <div className="regime-stat-chip">
-                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{language === 'ko' ? '리스크 설정' : 'Risk Setting'}:</span>
-                <strong style={{ 
-                  color: regimeData.risk_level === 'aggressive' ? 'var(--loss)' : 
-                         regimeData.risk_level === 'moderate' ? 'var(--warning)' : 'var(--profit)' 
-                }}>
-                  {regimeData.risk_level?.toUpperCase() || 'MODERATE'}
-                </strong>
-              </div>
-
-              <div className="regime-stat-chip">
-                <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{t('stopLoss')}:</span>
-                <strong style={{ color: 'var(--loss)' }}>{regimeData.stop_loss_percent}%</strong>
-              </div>
-
-              {(regimeData as any).daily_pnl && (
-                <div className="regime-stat-chip">
-                  <span style={{ color: 'var(--text-tertiary)', marginRight: '8px' }}>{t('dailyPL')}:</span>
-                  <strong style={{ color: String((regimeData as any).daily_pnl).includes('-') ? 'var(--loss)' : 'var(--profit)' }}>
-                    {(regimeData as any).daily_pnl}
+              <div className="regime-stat-chips-row">
+                <div className="regime-stat-chip regime-stat-chip--compact">
+                  <span className="regime-stat-chip-label">{language === 'ko' ? '전략' : 'Strategy'}</span>
+                  <strong className="regime-stat-chip-value regime-stat-chip-value--accent regime-stat-chip-value--strategy">
+                    {regimeData.playbook_mode && regimeData.active_playbooks?.length
+                      ? `${regimeData.playbook_mode.toUpperCase()} · ${regimeData.active_playbooks
+                          .map((s) => s.toUpperCase())
+                          .join(' + ')}`
+                      : strategyBanner}
                   </strong>
                 </div>
-              )}
+
+                <div className="regime-stat-chip regime-stat-chip--compact">
+                  <span className="regime-stat-chip-label">{language === 'ko' ? '리스크 설정' : 'Risk Setting'}</span>
+                  <strong
+                    className="regime-stat-chip-value"
+                    style={{
+                      color:
+                        regimeData.risk_level === 'aggressive'
+                          ? 'var(--loss)'
+                          : regimeData.risk_level === 'moderate'
+                            ? 'var(--warning)'
+                            : 'var(--profit)',
+                    }}
+                  >
+                    {regimeData.risk_level?.toUpperCase() || 'MODERATE'}
+                  </strong>
+                </div>
+
+                <div className="regime-stat-chip regime-stat-chip--compact">
+                  <span className="regime-stat-chip-label">{t('stopLoss')}</span>
+                  <strong className="regime-stat-chip-value" style={{ color: 'var(--loss)' }}>
+                    {regimeData.stop_loss_percent}%
+                  </strong>
+                </div>
+
+                {(regimeData as any).daily_pnl && (
+                  <div className="regime-stat-chip regime-stat-chip--compact">
+                    <span className="regime-stat-chip-label">{t('dailyPL')}</span>
+                    <strong
+                      className="regime-stat-chip-value"
+                      style={{
+                        color: String((regimeData as any).daily_pnl).includes('-')
+                          ? 'var(--loss)'
+                          : 'var(--profit)',
+                      }}
+                    >
+                      {(regimeData as any).daily_pnl}
+                    </strong>
+                  </div>
+                )}
+              </div>
             </div>
 
             {(((regimeData as any).market_scores) || ((regimeData as any).focus_symbols)) && (
@@ -268,13 +507,13 @@ const Dashboard: React.FC = () => {
                   {((regimeData as any).focus_symbols || []).map((sym: string) => (
                     <span key={sym} style={{
                       padding: '3px 10px',
-                      background: 'var(--state-info-bg)',
-                      border: '1px solid var(--state-info-border)',
+                      background: 'var(--bg-tertiary)',
+                      border: '1px solid var(--border-secondary)',
                       borderRadius: 'var(--radius-full)',
                       fontSize: '12px',
                       fontWeight: 600,
                       fontFamily: 'var(--font-mono)',
-                      color: 'var(--accent-primary)',
+                      color: 'var(--text-primary)',
                     }}>{sym}</span>
                   ))}
                 </div>

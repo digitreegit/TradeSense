@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import { formatCurrency, formatPercent } from '../../utils/helpers';
 import api from '../../services/api';
@@ -77,6 +77,194 @@ const ErrorIcon = (props: React.ComponentProps<'svg'>) => (
   </svg>
 );
 
+const RISK_PREFS_STORAGE_KEY = 'tradesense-risk-prefs';
+
+type RiskLevelId = 'conservative' | 'moderate' | 'aggressive';
+
+function presetNumbersForLevel(level: RiskLevelId) {
+  if (level === 'conservative') {
+    return { maxPositionSize: 10, stopLossPercent: 0.2, takeProfitPercent: 0.4 };
+  }
+  if (level === 'moderate') {
+    return { maxPositionSize: 15, stopLossPercent: 0.3, takeProfitPercent: 0.8 };
+  }
+  return { maxPositionSize: 20, stopLossPercent: 0.5, takeProfitPercent: 1.5 };
+}
+
+const DEFAULT_RISK_LEVEL: RiskLevelId = 'moderate';
+const DEFAULT_RISK_NUMBERS = presetNumbersForLevel('moderate');
+
+type LevelNumbers = {
+  maxPositionSize: number;
+  stopLossPercent: number;
+  takeProfitPercent: number;
+};
+
+type RiskSnapshot = {
+  riskLevel: RiskLevelId;
+  maxPositionSize: number;
+  stopLossPercent: number;
+  takeProfitPercent: number;
+};
+
+type RiskPrefsStoredV2 = {
+  v: 2;
+  lastRiskLevel: RiskLevelId;
+  byLevel: Record<RiskLevelId, LevelNumbers>;
+};
+
+function defaultPrefsByLevel(): Record<RiskLevelId, LevelNumbers> {
+  return {
+    conservative: { ...presetNumbersForLevel('conservative') },
+    moderate: { ...presetNumbersForLevel('moderate') },
+    aggressive: { ...presetNumbersForLevel('aggressive') },
+  };
+}
+
+function clonePrefsByLevel(p: Record<RiskLevelId, LevelNumbers>): Record<RiskLevelId, LevelNumbers> {
+  return {
+    conservative: { ...p.conservative },
+    moderate: { ...p.moderate },
+    aggressive: { ...p.aggressive },
+  };
+}
+
+function normalizeLevelNumbers(l: LevelNumbers): LevelNumbers {
+  return {
+    maxPositionSize: Math.round(l.maxPositionSize),
+    stopLossPercent: Math.round(l.stopLossPercent * 100) / 100,
+    takeProfitPercent: Math.round(l.takeProfitPercent * 100) / 100,
+  };
+}
+
+function normalizeAllLevels(p: Record<RiskLevelId, LevelNumbers>): Record<RiskLevelId, LevelNumbers> {
+  return {
+    conservative: normalizeLevelNumbers(p.conservative),
+    moderate: normalizeLevelNumbers(p.moderate),
+    aggressive: normalizeLevelNumbers(p.aggressive),
+  };
+}
+
+function levelNumbersEqual(a: LevelNumbers, b: LevelNumbers): boolean {
+  const x = normalizeLevelNumbers(a);
+  const y = normalizeLevelNumbers(b);
+  return (
+    x.maxPositionSize === y.maxPositionSize &&
+    Math.abs(x.stopLossPercent - y.stopLossPercent) < 1e-5 &&
+    Math.abs(x.takeProfitPercent - y.takeProfitPercent) < 1e-5
+  );
+}
+
+function prefsByLevelEqual(a: Record<RiskLevelId, LevelNumbers>, b: Record<RiskLevelId, LevelNumbers>): boolean {
+  return (['conservative', 'moderate', 'aggressive'] as const).every((k) => levelNumbersEqual(a[k], b[k]));
+}
+
+function normalizeRiskSnapshot(s: RiskSnapshot): RiskSnapshot {
+  const n = normalizeLevelNumbers(s);
+  return { riskLevel: s.riskLevel, ...n };
+}
+
+function toRiskSnapshot(level: RiskLevelId, nums: LevelNumbers): RiskSnapshot {
+  return normalizeRiskSnapshot({ riskLevel: level, ...nums });
+}
+
+function parseLevelBucket(raw: unknown): LevelNumbers | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  const maxRaw = o.maxPositionSize ?? o.max_position;
+  const slRaw = o.stopLossPercent ?? o.stop_loss;
+  const tpRaw = o.takeProfitPercent ?? o.take_profit;
+  if (
+    typeof maxRaw !== 'number' ||
+    maxRaw < 5 ||
+    maxRaw > 25 ||
+    typeof slRaw !== 'number' ||
+    slRaw < 0.1 ||
+    slRaw > 2.0 ||
+    typeof tpRaw !== 'number' ||
+    tpRaw < 0.2 ||
+    tpRaw > 5.0
+  ) {
+    return null;
+  }
+  return normalizeLevelNumbers({
+    maxPositionSize: Math.round(maxRaw),
+    stopLossPercent: slRaw,
+    takeProfitPercent: tpRaw,
+  });
+}
+
+function readStoredRiskPrefs(): { lastRiskLevel: RiskLevelId; byLevel: Record<RiskLevelId, LevelNumbers> } {
+  const byLevel = defaultPrefsByLevel();
+  try {
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+      return { lastRiskLevel: DEFAULT_RISK_LEVEL, byLevel };
+    }
+    const raw = localStorage.getItem(RISK_PREFS_STORAGE_KEY);
+    if (!raw) return { lastRiskLevel: DEFAULT_RISK_LEVEL, byLevel };
+    const p = JSON.parse(raw) as Record<string, unknown>;
+
+    if (p.v === 2 && p.byLevel && typeof p.byLevel === 'object') {
+      const bl = p.byLevel as Record<string, unknown>;
+      for (const lvl of ['conservative', 'moderate', 'aggressive'] as const) {
+        const parsed = parseLevelBucket(bl[lvl]);
+        if (parsed) byLevel[lvl] = parsed;
+      }
+      const lr = p.lastRiskLevel ?? p.riskLevel;
+      const lastRiskLevel: RiskLevelId =
+        lr === 'conservative' || lr === 'moderate' || lr === 'aggressive' ? lr : DEFAULT_RISK_LEVEL;
+      return { lastRiskLevel, byLevel: normalizeAllLevels(byLevel) };
+    }
+
+    const snap: RiskSnapshot = {
+      riskLevel: DEFAULT_RISK_LEVEL,
+      maxPositionSize: DEFAULT_RISK_NUMBERS.maxPositionSize,
+      stopLossPercent: DEFAULT_RISK_NUMBERS.stopLossPercent,
+      takeProfitPercent: DEFAULT_RISK_NUMBERS.takeProfitPercent,
+    };
+    const lvl = p.riskLevel ?? p.risk_level;
+    if (lvl === 'conservative' || lvl === 'moderate' || lvl === 'aggressive') {
+      snap.riskLevel = lvl;
+    }
+    const maxRaw = p.maxPositionSize ?? p.max_position;
+    if (typeof maxRaw === 'number' && maxRaw >= 5 && maxRaw <= 25) {
+      snap.maxPositionSize = Math.round(maxRaw);
+    }
+    const slRaw = p.stopLossPercent ?? p.stop_loss;
+    if (typeof slRaw === 'number' && slRaw >= 0.1 && slRaw <= 2.0) {
+      snap.stopLossPercent = slRaw;
+    }
+    const tpRaw = p.takeProfitPercent ?? p.take_profit;
+    if (typeof tpRaw === 'number' && tpRaw >= 0.2 && tpRaw <= 5.0) {
+      snap.takeProfitPercent = tpRaw;
+    }
+    const n = normalizeRiskSnapshot(snap);
+    byLevel[n.riskLevel] = {
+      maxPositionSize: n.maxPositionSize,
+      stopLossPercent: n.stopLossPercent,
+      takeProfitPercent: n.takeProfitPercent,
+    };
+    return { lastRiskLevel: n.riskLevel, byLevel: normalizeAllLevels(byLevel) };
+  } catch {
+    return { lastRiskLevel: DEFAULT_RISK_LEVEL, byLevel: normalizeAllLevels(byLevel) };
+  }
+}
+
+function writeRiskPrefsToStorage(
+  byLevel: Record<RiskLevelId, LevelNumbers>,
+  lastRiskLevel: RiskLevelId,
+): void {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+    throw new Error('localStorage unavailable');
+  }
+  const payload: RiskPrefsStoredV2 = {
+    v: 2,
+    lastRiskLevel,
+    byLevel: normalizeAllLevels(byLevel),
+  };
+  localStorage.setItem(RISK_PREFS_STORAGE_KEY, JSON.stringify(payload));
+}
+
 const TradingBot: React.FC = () => {
   const {
     botActive,
@@ -125,10 +313,39 @@ const TradingBot: React.FC = () => {
     pushPlaybookConfig({ manual: next });
   };
 
-  const [riskLevel, setRiskLevel] = useState<'conservative' | 'moderate' | 'aggressive'>('moderate');
-  const [maxPositionSize, setMaxPositionSize] = useState(15);
-  const [stopLossPercent, setStopLossPercent] = useState(0.3);
-  const [takeProfitPercent, setTakeProfitPercent] = useState(0.8);
+  const initialPrefs = useMemo(() => readStoredRiskPrefs(), []);
+
+  const [prefsByLevel, setPrefsByLevel] = useState<Record<RiskLevelId, LevelNumbers>>(() =>
+    clonePrefsByLevel(initialPrefs.byLevel),
+  );
+  const [baselineByLevel, setBaselineByLevel] = useState<Record<RiskLevelId, LevelNumbers>>(() =>
+    clonePrefsByLevel(initialPrefs.byLevel),
+  );
+  const [riskLevel, setRiskLevel] = useState<RiskLevelId>(() => initialPrefs.lastRiskLevel);
+  const [riskPrefsMsg, setRiskPrefsMsg] = useState<string | null>(null);
+  const [savingRiskPrefs, setSavingRiskPrefs] = useState(false);
+  /**
+   * Sliders only. Once true, Save+Reset stay enabled until Reset restores factory presets
+   * (then cleared). Save does not clear this, so after saving with no pending edits both stay on.
+   */
+  const [riskSlidersTouched, setRiskSlidersTouched] = useState(false);
+
+  const levelNums = prefsByLevel[riskLevel];
+
+  const factoryPrefs = useMemo(() => normalizeAllLevels(defaultPrefsByLevel()), []);
+
+  const riskSettingsDirty = useMemo(
+    () => !prefsByLevelEqual(prefsByLevel, baselineByLevel),
+    [prefsByLevel, baselineByLevel],
+  );
+
+  const updateCurrentLevelNums = (patch: Partial<LevelNumbers>) => {
+    setRiskSlidersTouched(true);
+    setPrefsByLevel((prev) => ({
+      ...prev,
+      [riskLevel]: normalizeLevelNumbers({ ...prev[riskLevel], ...patch }),
+    }));
+  };
 
   const [sessionStats, setSessionStats] = useState({
     total_trades: 0,
@@ -242,13 +459,94 @@ const TradingBot: React.FC = () => {
     return () => clearInterval(interval);
   }, [pollBotStatus]);
 
+  const flashRiskMsg = (msg: string) => {
+    setRiskPrefsMsg(msg);
+    window.setTimeout(() => setRiskPrefsMsg(null), 4000);
+  };
+
+  const handleSaveRiskSettings = async () => {
+    if (!riskSlidersTouched) return;
+    if (!riskSettingsDirty) return;
+    setSavingRiskPrefs(true);
+    const normalized = normalizeAllLevels(prefsByLevel);
+    try {
+      writeRiskPrefsToStorage(normalized, riskLevel);
+      setPrefsByLevel(normalized);
+      setBaselineByLevel(clonePrefsByLevel(normalized));
+      flashRiskMsg(t('riskSettingsSaved'));
+      if (botActive) {
+        try {
+          const snap = toRiskSnapshot(riskLevel, normalized[riskLevel]);
+          await api.startBot('scalp', {
+            stop_loss: snap.stopLossPercent,
+            take_profit: snap.takeProfitPercent,
+            max_position: snap.maxPositionSize,
+            risk_level: snap.riskLevel,
+          });
+          setTimeout(pollBotStatus, 400);
+        } catch (err) {
+          console.error('Apply risk settings to bot failed:', err);
+          flashRiskMsg(
+            language === 'ko'
+              ? '설정은 저장됐지만 봇에 반영하지 못했습니다.'
+              : 'Saved locally; could not apply to running bot.',
+          );
+        }
+      }
+    } catch (err) {
+      console.error('Persist risk settings failed:', err);
+      flashRiskMsg(language === 'ko' ? '저장에 실패했습니다.' : 'Save failed.');
+    } finally {
+      setSavingRiskPrefs(false);
+    }
+  };
+
+  const handleResetRiskSettings = async () => {
+    if (!riskSlidersTouched) return;
+    setSavingRiskPrefs(true);
+    const defaults = clonePrefsByLevel(factoryPrefs);
+    try {
+      writeRiskPrefsToStorage(defaults, DEFAULT_RISK_LEVEL);
+      setPrefsByLevel(defaults);
+      setBaselineByLevel(clonePrefsByLevel(defaults));
+      setRiskLevel(DEFAULT_RISK_LEVEL);
+      setRiskSlidersTouched(false);
+      flashRiskMsg(t('riskSettingsReset'));
+      if (botActive) {
+        try {
+          await api.startBot('scalp', {
+            stop_loss: DEFAULT_RISK_NUMBERS.stopLossPercent,
+            take_profit: DEFAULT_RISK_NUMBERS.takeProfitPercent,
+            max_position: DEFAULT_RISK_NUMBERS.maxPositionSize,
+            risk_level: DEFAULT_RISK_LEVEL,
+          });
+          setTimeout(pollBotStatus, 400);
+        } catch (err) {
+          console.error('Apply default risk to bot failed:', err);
+          flashRiskMsg(
+            language === 'ko'
+              ? '기본값은 저장됐지만 봇에 반영하지 못했습니다.'
+              : 'Defaults saved locally; could not apply to running bot.',
+          );
+        }
+      }
+    } catch (err) {
+      console.error('Reset risk settings failed:', err);
+      flashRiskMsg(language === 'ko' ? '초기화에 실패했습니다.' : 'Reset failed.');
+    } finally {
+      setSavingRiskPrefs(false);
+    }
+  };
+
   const handleToggleBot = async () => {
     try {
       if (!botActive) {
+        const n = prefsByLevel[riskLevel];
         await api.startBot('scalp', {
-          stop_loss: stopLossPercent,
-          take_profit: takeProfitPercent,
-          max_position: maxPositionSize,
+          stop_loss: n.stopLossPercent,
+          take_profit: n.takeProfitPercent,
+          max_position: n.maxPositionSize,
+          risk_level: riskLevel,
         });
         setBotActive(true);
       } else {
@@ -274,7 +572,7 @@ const TradingBot: React.FC = () => {
   };
 
   return (
-    <div className="page-enter">
+    <div className="page-enter trading-page">
       {/* Bot Control Header */}
       <div className="card" style={{ marginBottom: 'var(--space-xl)' }}>
         <div style={{
@@ -284,18 +582,10 @@ const TradingBot: React.FC = () => {
           padding: 'var(--space-xl)',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <div style={{
-              width: 56,
-              height: 56,
-              borderRadius: 'var(--radius-lg)',
-              background: botActive ? 'var(--profit-dim)' : 'var(--bg-secondary)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'all var(--transition-base)',
-              boxShadow: botActive ? 'var(--shadow-glow-green)' : 'none',
-              color: botActive ? 'var(--profit)' : 'var(--text-tertiary)',
-            }}>
+            <div
+              className={`trading-bot-header-mark${botActive ? ' trading-bot-header-mark--active' : ''}`}
+              aria-hidden
+            >
               <BoltIcon style={{ width: '32px', height: '32px' }} />
             </div>
             <div>
@@ -338,8 +628,8 @@ const TradingBot: React.FC = () => {
         </div>
       </div>
 
-      <div className="dashboard-grid">
-        <div className="dashboard-left">
+      <div className="dashboard-grid trading-dashboard-grid">
+        <div className="dashboard-left trading-dashboard-left">
           {/* Strategy Selection */}
           <div className="card">
             <div className="card-header">
@@ -350,13 +640,13 @@ const TradingBot: React.FC = () => {
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '10px',
+                  gap: '6px',
                   opacity: savingPlaybooks ? 0.65 : 1,
                 }}
               >
                 <span
                   style={{
-                    fontSize: '11px',
+                    fontSize: '10px',
                     fontWeight: playbookAuto ? 500 : 700,
                     color: playbookAuto ? 'var(--text-tertiary)' : 'var(--text-primary)',
                     fontFamily: 'var(--font-sans)',
@@ -387,7 +677,7 @@ const TradingBot: React.FC = () => {
                 </button>
                 <span
                   style={{
-                    fontSize: '11px',
+                    fontSize: '10px',
                     fontWeight: playbookAuto ? 700 : 500,
                     color: playbookAuto ? 'var(--text-tertiary)' : 'var(--text-primary)',
                     fontFamily: 'var(--font-sans)',
@@ -474,7 +764,7 @@ const TradingBot: React.FC = () => {
           </div>
 
           {/* Activity Log */}
-          <div className="card">
+          <div className="card trading-activity-log-card">
             <div className="card-header">
               <span className="card-title">
                 <ListIcon className="card-icon" /> {t('activityLog')}
@@ -487,7 +777,7 @@ const TradingBot: React.FC = () => {
                 {tradeLogs.length} {language === 'ko' ? '개 이벤트' : 'events'}
               </span>
             </div>
-            <div className="bot-log" style={{ maxHeight: '400px' }}>
+            <div className="bot-log trading-bot-log" style={{ maxHeight: '400px' }}>
               {[...tradeLogs].reverse().map((log, i) => (
                 <div key={i} className="bot-log-entry">
                   <span className="bot-log-time">{log.time}</span>
@@ -503,7 +793,7 @@ const TradingBot: React.FC = () => {
         </div>
 
         {/* Right Column - Settings */}
-        <div className="dashboard-right">
+        <div className="dashboard-right trading-dashboard-right">
           <div className="card">
             <div className="card-header">
               <span className="card-title">
@@ -526,24 +816,10 @@ const TradingBot: React.FC = () => {
                 <div style={{ display: 'flex', gap: '4px' }}>
                   {(['conservative', 'moderate', 'aggressive'] as const).map((level) => (
                     <button
+                      type="button"
                       key={level}
                       className={`btn btn-sm ${riskLevel === level ? 'btn-primary' : 'btn-secondary'}`}
-                      onClick={() => {
-                        setRiskLevel(level);
-                        if (level === 'conservative') {
-                          setMaxPositionSize(10);
-                          setStopLossPercent(0.2);
-                          setTakeProfitPercent(0.4);
-                        } else if (level === 'moderate') {
-                          setMaxPositionSize(15);
-                          setStopLossPercent(0.3);
-                          setTakeProfitPercent(0.8);
-                        } else if (level === 'aggressive') {
-                          setMaxPositionSize(20);
-                          setStopLossPercent(0.5);
-                          setTakeProfitPercent(1.5);
-                        }
-                      }}
+                      onClick={() => setRiskLevel(level)}
                       style={{ flex: 1, textTransform: 'capitalize' }}
                     >
                       {language === 'ko'
@@ -564,7 +840,7 @@ const TradingBot: React.FC = () => {
                   display: 'block',
                   marginBottom: '4px',
                 }}>
-                  {t('maxPositionSize')}: {maxPositionSize}% ({formatCurrency(account.equity * maxPositionSize / 100)})
+                  {t('maxPositionSize')}: {levelNums.maxPositionSize}% ({formatCurrency(account.equity * levelNums.maxPositionSize / 100)})
                 </label>
                 <input
                   className="trading-range"
@@ -572,8 +848,8 @@ const TradingBot: React.FC = () => {
                   min={5}
                   max={25}
                   step={1}
-                  value={maxPositionSize}
-                  onChange={(e) => setMaxPositionSize(parseInt(e.target.value))}
+                  value={levelNums.maxPositionSize}
+                  onChange={(e) => updateCurrentLevelNums({ maxPositionSize: parseInt(e.target.value, 10) })}
                   style={
                     {
                       width: '100%',
@@ -593,7 +869,7 @@ const TradingBot: React.FC = () => {
                   display: 'block',
                   marginBottom: '4px',
                 }}>
-                  {t('stopLoss')}: -{stopLossPercent}%
+                  {t('stopLoss')}: -{levelNums.stopLossPercent}%
                 </label>
                 <input
                   className="trading-range"
@@ -601,8 +877,8 @@ const TradingBot: React.FC = () => {
                   min={0.1}
                   max={2.0}
                   step={0.05}
-                  value={stopLossPercent}
-                  onChange={(e) => setStopLossPercent(parseFloat(e.target.value))}
+                  value={levelNums.stopLossPercent}
+                  onChange={(e) => updateCurrentLevelNums({ stopLossPercent: parseFloat(e.target.value) })}
                   style={
                     {
                       width: '100%',
@@ -622,7 +898,7 @@ const TradingBot: React.FC = () => {
                   display: 'block',
                   marginBottom: '4px',
                 }}>
-                  {t('takeProfit')}: +{takeProfitPercent}%
+                  {t('takeProfit')}: +{levelNums.takeProfitPercent}%
                 </label>
                 <input
                   className="trading-range"
@@ -630,8 +906,8 @@ const TradingBot: React.FC = () => {
                   min={0.2}
                   max={5.0}
                   step={0.05}
-                  value={takeProfitPercent}
-                  onChange={(e) => setTakeProfitPercent(parseFloat(e.target.value))}
+                  value={levelNums.takeProfitPercent}
+                  onChange={(e) => updateCurrentLevelNums({ takeProfitPercent: parseFloat(e.target.value) })}
                   style={
                     {
                       width: '100%',
@@ -641,14 +917,65 @@ const TradingBot: React.FC = () => {
                 />
               </div>
 
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '8px',
+                  marginTop: '12px',
+                  alignItems: 'center',
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-xs btn-risk-save"
+                  onClick={handleSaveRiskSettings}
+                  disabled={savingRiskPrefs || !riskSlidersTouched}
+                >
+                  {savingRiskPrefs ? t('saving') : t('saveRiskSettings')}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-xs"
+                  onClick={handleResetRiskSettings}
+                  disabled={savingRiskPrefs || !riskSlidersTouched}
+                >
+                  {t('resetRiskDefaults')}
+                </button>
+              </div>
+              <p
+                style={{
+                  fontSize: '11px',
+                  color: 'var(--text-muted)',
+                  margin: '6px 0 0 0',
+                  lineHeight: 1.45,
+                }}
+              >
+                {t('riskSettingsSaveHint')}
+              </p>
+              {riskPrefsMsg && (
+                <p
+                  style={{
+                    fontSize: '12px',
+                    color: 'var(--profit)',
+                    margin: '8px 0 0 0',
+                  }}
+                >
+                  {riskPrefsMsg}
+                </p>
+              )}
+
               {/* Summary */}
-              <div style={{
-                padding: '16px',
-                background: 'var(--bg-secondary)',
-                borderRadius: 'var(--radius-md)',
-                fontSize: '12px',
-                lineHeight: 1.8,
-              }}>
+              <div
+                className="trading-config-summary"
+                style={{
+                  padding: '16px 16px 16px 0',
+                  background: 'var(--bg-secondary)',
+                  borderRadius: 'var(--radius-md)',
+                  fontSize: '12px',
+                  lineHeight: 1.8,
+                }}
+              >
                   <div style={{ fontWeight: 600, marginBottom: '8px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <ListIcon style={{ width: '16px', height: '16px' }} /> {language === 'ko' ? '설정 요약' : 'Configuration Summary'}
                   </div>
@@ -657,23 +984,23 @@ const TradingBot: React.FC = () => {
                   • {language === 'ko' ? '전략' : 'Strategy'}: {playbookAuto
                     ? `AUTO · ${activePlaybooks.join(', ') || 'idle'}`
                     : `MANUAL · ${manualPlaybooks.join(', ') || 'none'}`}<br/>
-                  • {language === 'ko' ? '거래당 최대' : 'Max per trade'}: {formatCurrency(account.equity * maxPositionSize / 100)}<br/>
-                  • {t('stopLoss')}: {formatPercent(-stopLossPercent)}<br/>
-                  • {t('takeProfit')}: {formatPercent(takeProfitPercent)}<br/>
-                  • {language === 'ko' ? '손익비' : 'Risk/Reward'}: 1:{(takeProfitPercent / stopLossPercent).toFixed(1)}
+                  • {language === 'ko' ? '거래당 최대' : 'Max per trade'}: {formatCurrency(account.equity * levelNums.maxPositionSize / 100)}<br/>
+                  • {t('stopLoss')}: {formatPercent(-levelNums.stopLossPercent)}<br/>
+                  • {t('takeProfit')}: {formatPercent(levelNums.takeProfitPercent)}<br/>
+                  • {language === 'ko' ? '손익비' : 'Risk/Reward'}: 1:{(levelNums.takeProfitPercent / levelNums.stopLossPercent).toFixed(1)}
                 </div>
               </div>
             </div>
           </div>
 
           {/* Quick Stats */}
-          <div className="card">
+          <div className="card trading-session-stats-card">
             <div className="card-header">
               <span className="card-title">
                 <ChartBarIcon className="card-icon" /> {t('sessionStats')}
               </span>
             </div>
-            <div style={{ padding: 'var(--space-xl)' }}>
+            <div className="trading-session-stats-inner" style={{ padding: 'var(--space-sm) var(--space-xl) var(--space-md)' }}>
               {[
                 { label: t('totalTrades'), value: sessionStats.total_trades.toString(), color: 'var(--text-primary)' },
                 { label: t('winRate'), value: `${sessionStats.win_rate.toFixed(1)}%`, color: sessionStats.win_rate >= 50 ? 'var(--profit)' : 'var(--text-tertiary)' },

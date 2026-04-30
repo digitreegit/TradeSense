@@ -69,7 +69,32 @@ function formatUsageLine(u: AlpacaApiUsage | null): string | null {
   return 'REST OK · no quota headers';
 }
 
-const Sidebar: React.FC = () => {
+/** Logo block: desktop sidebar header or mobile top-left brand. */
+export function SidebarLogoBlock({ compact }: { compact?: boolean }) {
+  return (
+    <div className={`sidebar-logo${compact ? ' sidebar-logo--compact' : ''}`}>
+      <div className="sidebar-logo-icon" aria-hidden title="TradeSense">
+        <img
+          src="/sidebar-logo.svg"
+          alt=""
+          className="sidebar-logo-mark"
+          width={38}
+          height={38}
+          decoding="async"
+        />
+      </div>
+      {!compact && (
+        <div className="sidebar-logo-text">
+          <h1 lang="en">TradeSense</h1>
+          <span lang="en">Markets &amp; charts</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Shared nav + Alpaca status (desktop sidebar + mobile drawer). */
+export function SidebarNavAndFooter({ onNavigate }: { onNavigate?: () => void }) {
   const { t } = useI18n();
   const {
     currentPage,
@@ -92,26 +117,14 @@ const Sidebar: React.FC = () => {
 
   let currentSection = '';
 
-  return (
-    <aside className="sidebar">
-      <div className="sidebar-logo">
-        <div className="sidebar-logo-icon" aria-hidden title="TradeSense">
-          <img
-            src="/sidebar-logo.svg"
-            alt=""
-            className="sidebar-logo-mark"
-            width={38}
-            height={38}
-            decoding="async"
-          />
-        </div>
-        <div className="sidebar-logo-text">
-          <h1 lang="en">TradeSense</h1>
-          <span lang="en">Markets &amp; charts</span>
-        </div>
-      </div>
+  const go = (id: PageId) => {
+    setCurrentPage(id);
+    onNavigate?.();
+  };
 
-      <nav className="sidebar-nav">
+  return (
+    <>
+      <nav className="sidebar-nav" aria-label="Primary navigation">
         {navItems.map((item) => {
           const showSection = item.section && item.section !== currentSection;
           if (item.section) currentSection = item.section;
@@ -122,40 +135,54 @@ const Sidebar: React.FC = () => {
             <React.Fragment key={item.id}>
               {showSection && (
                 <div className="sidebar-section-label">
-                  {item.section === 'OVERVIEW' ? t('overview') :
-                    item.section === 'MARKET' ? t('market') :
-                      item.section === 'INTELLIGENCE' ? t('intelligence') :
-                        item.section === 'ACCOUNT' ? t('accountSection') :
-                          item.section}
+                  {item.section === 'OVERVIEW'
+                    ? t('overview')
+                    : item.section === 'MARKET'
+                      ? t('market')
+                      : item.section === 'INTELLIGENCE'
+                        ? t('intelligence')
+                        : item.section === 'ACCOUNT'
+                          ? t('accountSection')
+                          : item.section}
                 </div>
               )}
               <button
+                type="button"
                 className={`sidebar-item ${currentPage === item.id ? 'active' : ''}`}
-                onClick={() => setCurrentPage(item.id)}
+                onClick={() => go(item.id)}
               >
                 <span className="icon">
                   <IconComponent className="w-5 h-5" />
                 </span>
                 <span>
-                  {item.id === 'dashboard' ? t('dashboard') :
-                    item.id === 'chart' ? t('liveChart') :
-                      item.id === 'agent' ? t('aiAgent') :
-                        item.id === 'trading' ? t('tradingBot') :
-                          item.id === 'portfolio' ? t('portfolio') :
-                            item.id === 'history' ? t('tradeHistory') :
-                              item.id === 'settings' ? t('settings') :
-                                item.label}
+                  {item.id === 'dashboard'
+                    ? t('dashboard')
+                    : item.id === 'chart'
+                      ? t('liveChart')
+                      : item.id === 'agent'
+                        ? t('aiAgent')
+                        : item.id === 'trading'
+                          ? t('tradingBot')
+                          : item.id === 'portfolio'
+                            ? t('portfolio')
+                            : item.id === 'history'
+                              ? t('tradeHistory')
+                              : item.id === 'settings'
+                                ? t('settings')
+                                : item.label}
                 </span>
                 {item.id === 'trading' && botActive && (
-                  <span style={{
-                    marginLeft: 'auto',
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    background: 'var(--profit)',
-                    boxShadow: '0 0 8px var(--profit-glow)',
-                    animation: 'pulse 2s ease-in-out infinite',
-                  }} />
+                  <span
+                    style={{
+                      marginLeft: 'auto',
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      background: 'var(--profit)',
+                      boxShadow: '0 0 8px var(--profit-glow)',
+                      animation: 'pulse 2s ease-in-out infinite',
+                    }}
+                  />
                 )}
               </button>
             </React.Fragment>
@@ -166,17 +193,11 @@ const Sidebar: React.FC = () => {
       <div className="sidebar-footer">
         <div className={`sidebar-status ${showConnected ? '' : 'disconnected'}`}>
           <span className="status-dot" />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+          <div className="sidebar-status-body">
             <span>{statusLabel}</span>
             {showConnected && usageLine && (
               <span
-                style={{
-                  fontSize: '10px',
-                  lineHeight: 1.35,
-                  color: 'var(--text-secondary)',
-                  fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-                  wordBreak: 'break-word',
-                }}
+                className="sidebar-status-meta"
                 title={
                   [
                     alpacaUsage?.note,
@@ -193,25 +214,31 @@ const Sidebar: React.FC = () => {
               >
                 {usageLine}
                 {alpacaUsage?.ok &&
-                  alpacaUsage.reset_in_seconds != null &&
-                  alpacaUsage.reset_in_seconds > 0 &&
-                  alpacaUsage.remaining != null &&
-                  alpacaUsage.limit != null
+                alpacaUsage.reset_in_seconds != null &&
+                alpacaUsage.reset_in_seconds > 0 &&
+                alpacaUsage.remaining != null &&
+                alpacaUsage.limit != null
                   ? ` · reset ~${alpacaUsage.reset_in_seconds}s`
                   : ''}
               </span>
             )}
             {showConnected && alpacaUsage && !alpacaUsage.ok && (
-              <span
-                style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}
-                title={alpacaUsage.error}
-              >
+              <span className="sidebar-status-meta sidebar-status-meta--error" title={alpacaUsage.error}>
                 API quota: error (hover)
               </span>
             )}
           </div>
         </div>
       </div>
+    </>
+  );
+}
+
+const Sidebar: React.FC = () => {
+  return (
+    <aside className="sidebar sidebar--desktop" aria-label="Main navigation">
+      <SidebarLogoBlock />
+      <SidebarNavAndFooter />
     </aside>
   );
 };

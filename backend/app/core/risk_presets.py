@@ -4,11 +4,11 @@ Risk preset table for cash-account scalping.
 Three scales are supported:
 
 - ``"3k"``  — **T+1 cash rotation** at small equity: low ``settled_cash_trade_cap``,
-  fewer concurrent slots, modest daily trade counts (realistic before 10k).
-- ``"10k"`` — bridge scale: slightly higher cap and throughput vs 3k without
-  starving settled headroom under T+1.
-- ``"30k"`` — larger book: higher cap and rotation budget; still bounded so
-  ``ComplianceService`` pending sale proceeds model stays realistic.
+  fewer concurrent slots, modest daily trade counts; ``min_notional_*`` about USD 125–265
+  so clips stay meaningful vs fees without exceeding typical max-position USD.
+- ``"10k"`` — bridge scale: ``min_notional_*`` about USD 340–760 (roughly 2.5–3× 3k tier).
+- ``"30k"`` — larger book: ``min_notional_*`` about USD 920–1.9k (roughly 6–7× 3k moderate slow),
+  aligned with 6–8% of ~30k max-position clips and sell-side fee economics.
 
 All three assume a **cash account** (no margin, no shorting). The PDT
 (Pattern Day Trader) rule only applies to *margin* accounts — a cash
@@ -51,9 +51,11 @@ class RiskPreset:
     # Macro guards
     vix_halt_level: float = 22.0             # halt new entries if VIX above this
     blackout_window_minutes: int = 30        # ± minutes around macro events
-    # Sizing floors (USD notional) — symbol-type aware; engine may multiply
-    min_notional_slow: float = 180.0
-    min_notional_fast: float = 300.0
+    # Sizing floors (USD notional) — slow = liquid large-caps; fast = tight-spread names
+    # Tuned per ``scale`` (~$3k / $10k / $30k): higher notionals on larger books so
+    # regulatory sell fees + spread don’t dominate; still ≤ typical max_position $ clip.
+    min_notional_slow: float = 165.0
+    min_notional_fast: float = 285.0
     # Max fraction of *settled* cash (post T+1 haircut in compliance) per entry
     settled_cash_trade_cap: float = 0.60
     # Preferred TIF for marketable limit entries: "ioc" | "fok" | "day"
@@ -67,7 +69,7 @@ class RiskPreset:
         return asdict(self)
 
 
-# ─── $3,000 cash-scalp (legacy) ────────────────────────────────────────
+# ─── ~$3,000 nominal — smallest clips; floors ~5–10% of book so entries stay meaningful
 _PRESETS_3K: Dict[RiskLevel, RiskPreset] = {
     "conservative": RiskPreset(
         level="conservative",
@@ -85,8 +87,8 @@ _PRESETS_3K: Dict[RiskLevel, RiskPreset] = {
         universe_size=6,
         vix_halt_level=18.0,
         blackout_window_minutes=9999,
-        min_notional_slow=180.0,
-        min_notional_fast=300.0,
+        min_notional_slow=125.0,
+        min_notional_fast=215.0,
         settled_cash_trade_cap=0.36,
         default_tif="ioc",
     ),
@@ -106,8 +108,8 @@ _PRESETS_3K: Dict[RiskLevel, RiskPreset] = {
         universe_size=8,
         vix_halt_level=22.0,
         blackout_window_minutes=30,
-        min_notional_slow=180.0,
-        min_notional_fast=300.0,
+        min_notional_slow=155.0,
+        min_notional_fast=265.0,
         settled_cash_trade_cap=0.40,
         default_tif="ioc",
     ),
@@ -127,25 +129,15 @@ _PRESETS_3K: Dict[RiskLevel, RiskPreset] = {
         universe_size=16,
         vix_halt_level=28.0,
         blackout_window_minutes=5,
-        min_notional_slow=180.0,
-        min_notional_fast=300.0,
+        min_notional_slow=145.0,
+        min_notional_fast=255.0,
         settled_cash_trade_cap=0.46,
         default_tif="ioc",
     ),
 }
 
 
-# ─── $10,000 bridge scale ──────────────────────────────────────────────
-# Sits between 3k and 30k. Design rationale:
-# - Still cash-only (no margin, no shorting) → PDT rule doesn't apply.
-# - Enough settled cash that 4–8 concurrent rotations are realistic
-#   without starving GFV room, so we bump slot count and trade cap
-#   materially vs 3k.
-# - Per-trade min notional is raised modestly so SEC fee + TAF don't
-#   disproportionately eat profits at small-share scalps.
-# - Default entry TIF is IOC marketable-limit (global override via
-#   DEFAULT_ORDER_TIF); exits use EXIT_ORDER_TIF (default DAY).
-# - Settled-cash cap between the two neighbours (~0.50).
+# ─── ~$10,000 nominal — ~2.6× 3k floors; keeps typical clip under max_position % of $10k
 _PRESETS_10K: Dict[RiskLevel, RiskPreset] = {
     "conservative": RiskPreset(
         level="conservative",
@@ -163,8 +155,8 @@ _PRESETS_10K: Dict[RiskLevel, RiskPreset] = {
         universe_size=8,
         vix_halt_level=19.0,
         blackout_window_minutes=60,
-        min_notional_slow=350.0,
-        min_notional_fast=600.0,
+        min_notional_slow=340.0,
+        min_notional_fast=560.0,
         settled_cash_trade_cap=0.44,
         default_tif="ioc",
     ),
@@ -184,8 +176,8 @@ _PRESETS_10K: Dict[RiskLevel, RiskPreset] = {
         universe_size=14,
         vix_halt_level=23.0,
         blackout_window_minutes=25,
-        min_notional_slow=450.0,
-        min_notional_fast=800.0,
+        min_notional_slow=400.0,
+        min_notional_fast=660.0,
         settled_cash_trade_cap=0.52,
         default_tif="ioc",
     ),
@@ -205,15 +197,15 @@ _PRESETS_10K: Dict[RiskLevel, RiskPreset] = {
         universe_size=24,
         vix_halt_level=28.0,
         blackout_window_minutes=5,
-        min_notional_slow=500.0,
-        min_notional_fast=1000.0,
+        min_notional_slow=460.0,
+        min_notional_fast=760.0,
         settled_cash_trade_cap=0.54,
         default_tif="ioc",
     ),
 }
 
 
-# ─── $30,000 HFT paper test ────────────────────────────────────────────
+# ─── ~$30,000 nominal — ~10× 3k moderate slow anchor; sized vs 6–8% max clip ($1.8k–$2.4k)
 _PRESETS_30K: Dict[RiskLevel, RiskPreset] = {
     "conservative": RiskPreset(
         level="conservative",
@@ -231,8 +223,8 @@ _PRESETS_30K: Dict[RiskLevel, RiskPreset] = {
         universe_size=12,
         vix_halt_level=20.0,
         blackout_window_minutes=45,
-        min_notional_slow=600.0,
-        min_notional_fast=1000.0,
+        min_notional_slow=920.0,
+        min_notional_fast=1480.0,
         settled_cash_trade_cap=0.44,
         default_tif="ioc",
     ),
@@ -252,8 +244,8 @@ _PRESETS_30K: Dict[RiskLevel, RiskPreset] = {
         universe_size=18,
         vix_halt_level=24.0,
         blackout_window_minutes=20,
-        min_notional_slow=800.0,
-        min_notional_fast=1500.0,
+        min_notional_slow=1050.0,
+        min_notional_fast=1720.0,
         settled_cash_trade_cap=0.52,
         default_tif="ioc",
     ),
@@ -273,8 +265,8 @@ _PRESETS_30K: Dict[RiskLevel, RiskPreset] = {
         universe_size=30,
         vix_halt_level=28.0,
         blackout_window_minutes=5,
-        min_notional_slow=900.0,
-        min_notional_fast=1800.0,
+        min_notional_slow=1180.0,
+        min_notional_fast=1920.0,
         settled_cash_trade_cap=0.56,
         default_tif="ioc",
     ),

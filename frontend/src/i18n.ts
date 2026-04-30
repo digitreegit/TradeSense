@@ -158,10 +158,27 @@ const ko: Record<string, string> = {
   maxPositionSize: '최대 포지션 크기',
   stopLoss: '손절',
   takeProfit: '익절',
+  saveRiskSettings: '저장',
+  resetRiskDefaults: '리셋',
+  riskSettingsSaved: '리스크 설정을 저장했습니다.',
+  riskSettingsReset: '리스크 기본 프리셋으로 되돌렸습니다.',
+  riskSettingsSaveHint: '이 브라우저에 저장됩니다. 봇 실행 중이면 엔진 설정도 갱신됩니다.',
   sessionStats: '세션 통계',
   totalTrades: '총 거래',
   winningTrades: '수익 거래',
   losingTrades: '손실 거래',
+  marketScorePercentileHint:
+    '높을수록 단기 리스크온(롱)에 유리합니다. (수익률 %와 다른 순위 지표입니다.)',
+  marketBandExcellent: '매우 유리',
+  marketBandGood: '유리',
+  marketBandNeutral: '중립',
+  marketBandPoor: '불리',
+  marketBandDangerous: '매우 불리',
+  marketScoreBreakdownAi: 'AI·뉴스',
+  marketScoreBreakdownQuant: '양적 매크로',
+  marketRationaleTitle: '판단 근거',
+  marketRationaleFallback:
+    '요약 문구가 없습니다. 왼쪽 점수는 뉴스·매크로(양적) 신호를 섞어 산출됩니다.',
 };
 
 /** English UI strings — mirrors `ko` keys used by `t()` */
@@ -328,10 +345,27 @@ const en: Record<string, string> = {
   maxPositionSize: 'Max position size',
   stopLoss: 'Stop loss',
   takeProfit: 'Take profit',
+  saveRiskSettings: 'Save',
+  resetRiskDefaults: 'Reset',
+  riskSettingsSaved: 'Risk settings saved.',
+  riskSettingsReset: 'Restored default risk presets.',
+  riskSettingsSaveHint: 'Stored in this browser. If the bot is running, engine risk is updated too.',
   sessionStats: 'Session stats',
   totalTrades: 'Total trades',
   winningTrades: 'Winning trades',
   losingTrades: 'Losing trades',
+  marketScorePercentileHint:
+    'Higher is better for risk-on scalping. (Ranking score, not % return.)',
+  marketBandExcellent: 'Very favorable',
+  marketBandGood: 'Favorable',
+  marketBandNeutral: 'Neutral',
+  marketBandPoor: 'Unfavorable',
+  marketBandDangerous: 'Very unfavorable',
+  marketScoreBreakdownAi: 'AI / news',
+  marketScoreBreakdownQuant: 'Quant macro',
+  marketRationaleTitle: 'Why this read',
+  marketRationaleFallback:
+    'No summary yet. The score blends news + quant macro inputs from the engine.',
 };
 
 export function translate(language: AppLanguage, key: string): string {

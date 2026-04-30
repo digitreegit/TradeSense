@@ -204,11 +204,8 @@ class TradingEngine:
 
         self.regime_data: dict = {
             "strategy": "scalp",
-            "reasoning": (
-                f"{self._scale}-scale scalp — "
-                f"${self._initial_capital:,.0f} → "
-                f"+{self._preset.daily_target_percent}%/day"
-            ),
+            # Not market rationale — UI "판단 근거" uses news bullets; avoid echoing capital / daily target here.
+            "reasoning": "",
             "risk_level": self._preset.level,
             "market_score": 50.0,
             "market_level": "NORMAL",
@@ -227,6 +224,8 @@ class TradingEngine:
             "allow_extended_hours": getattr(settings, "allow_extended_hours", False),
             "timestamp": datetime.now().strftime("%b %d, %Y, %-I:%M%p"),
             "entry_vol_regime": {},
+            "rationale_points_en": [],
+            "rationale_points_ko": [],
         }
 
         # Session stats
@@ -1008,6 +1007,23 @@ class TradingEngine:
 
     # ─── Regime checks ────────────────────────────────────────
 
+    def _adaptive_news_symbols(self) -> list:
+        """News basket for the LLM: current focus plus macro/sector proxies."""
+        macro = [
+            "SPY", "QQQ", "IWM", "DIA",  # equity beta / breadth
+            "TLT", "UUP", "GLD", "VIXY",  # rates, USD, gold, volatility
+            "XLE", "XLK", "XLF", "XLV", "XLP", "XLU",  # sector rotation
+            "USO", "BITO",  # oil / crypto risk appetite
+        ]
+        seen = set()
+        out = []
+        for sym in list(self.focus_symbols or []) + list(self.SCALP_UNIVERSE) + macro:
+            sym = str(sym or "").strip().upper()
+            if sym and sym not in seen:
+                out.append(sym)
+                seen.add(sym)
+        return out[:40]
+
     def _apply_preset_from_score(self, score: float, source: str):
         new_preset = preset_for_score(score, scale=self._scale)
         if new_preset.level != self._preset.level:
@@ -1053,40 +1069,73 @@ class TradingEngine:
     async def _ai_regime_check(self):
         try:
             from app.services.analysis_agent import analysis_agent
-            news = self._alpaca.get_latest_news(
-                ["AAPL", "NVDA", "SPY", "QQQ", "GLD", "USO"], limit=10
-            )
+            news_symbols = self._adaptive_news_symbols()
+            news = self._alpaca.get_latest_news(news_symbols, limit=20)
             if news:
                 regime = await analysis_agent.determine_market_regime(news)
                 self.last_regime_reason = regime["reasoning"]
 
                 old_strat = self.active_strategy
-                old_risk = settings.risk_level
+                old_risk = self._preset.level
+                old_symbols = list(self.focus_symbols)
 
-                new_symbols = regime.get("focus_symbols", self.focus_symbols)
-                new_sectors = regime.get("focus_sectors", self.focus_sectors)
+                new_symbols = [
+                    str(s).strip().upper()
+                    for s in regime.get("focus_symbols", self.focus_symbols)
+                    if str(s or "").strip()
+                ]
+                new_sectors = [
+                    str(s).strip()
+                    for s in regime.get("focus_sectors", self.focus_sectors)
+                    if str(s or "").strip()
+                ]
                 if new_symbols != self.focus_symbols:
                     self._log("info", f"🔄 AI Focus Shift: {', '.join(new_sectors)} → {', '.join(new_symbols[:5])}...")
                     self.focus_symbols = new_symbols
                     self.focus_sectors = new_sectors
 
-                ai_score = float(regime.get("market_score", 50.0))
+                ai_score_raw = float(regime.get("market_score", 50.0))
+                ai_risk_level = str(regime.get("risk_level", "moderate") or "moderate").lower()
+                ai_risk_score = {
+                    "conservative": 28.0,
+                    "moderate": 50.0,
+                    "aggressive": 76.0,
+                }.get(ai_risk_level, 50.0)
+                ai_score = 0.75 * ai_score_raw + 0.25 * ai_risk_score
                 quant_score = float(self.regime_data.get("market_score", 50.0))
                 blended = 0.6 * quant_score + 0.4 * ai_score
+                news_score = float(regime.get("news_score", 0.0) or 0.0)
 
                 self.regime_data.update(
                     {
                         "reasoning": regime.get("reasoning", ""),
+                        "rationale_points_en": list(regime.get("rationale_points_en") or []),
+                        "rationale_points_ko": list(regime.get("rationale_points_ko") or []),
                         "prev_strategy": old_strat,
                         "prev_risk_level": old_risk,
                         "ai_market_score": round(ai_score, 1),
+                        "ai_raw_market_score": round(ai_score_raw, 1),
                         "market_scores": regime.get("market_scores", {}),
+                        "news_score": round(news_score, 2),
+                        "news_headline_count": len(news),
+                        "news_symbols": news_symbols[:20],
+                        "ai_risk_level": ai_risk_level,
+                        "focus_symbols": self.focus_symbols,
+                        "focus_sectors": self.focus_sectors,
                         "daily_pnl": self.regime_data.get("daily_pnl", "$0.00"),
                         "account_type": settings.account_type,
                         "timestamp": datetime.now().strftime("%b %d, %Y, %-I:%M%p"),
                     }
                 )
                 self._apply_preset_from_score(blended, source="ai+quant")
+                self._sync_regime_playbook_display()
+
+                if news_score <= -0.6:
+                    self._log(
+                        "info",
+                        f"📰 News fade armed: score={news_score:+.2f} "
+                        f"| focus={', '.join(self.focus_symbols[:5])}",
+                    )
 
                 if old_risk != self._preset.level:
                     from app.services.notification_service import notification_service
@@ -1096,6 +1145,12 @@ class TradingEngine:
                         "INFO",
                         to_email=self.owner_email,
                         user_id=self._notify_user_id,
+                    )
+                elif old_symbols != self.focus_symbols:
+                    self._log(
+                        "info",
+                        f"🎯 AI universe updated: {', '.join(old_symbols[:5])} → "
+                        f"{', '.join(self.focus_symbols[:5])}",
                     )
 
         except Exception as e:
@@ -1223,9 +1278,9 @@ class TradingEngine:
         slots = preset.max_concurrent_positions - (len(current_symbols) + len(set(pending_buys)))
         if slots <= 0:
             return
-        # At 30k scale we need more headroom so a single scan-cash snapshot
-        # isn't misleading; use a proportional floor.
-        min_cash_floor = 100 if self._scale == "3k" else 500
+        # Settled cash must clear a scale-aware floor before new entries (T+1 realism).
+        _settled_floors_usd = {"3k": 100, "10k": 280, "30k": 750}
+        min_cash_floor = _settled_floors_usd.get(self._scale, 100)
         if settled < min_cash_floor:
             self._log("info", f"💤 Settled cash too low: ${settled:,.2f}")
             return

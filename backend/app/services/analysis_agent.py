@@ -2,8 +2,11 @@
 TradeSense - AI Analysis Agent
 Uses OpenAI or Gemini (see AI_PROVIDER / models in settings) for analysis.
 """
-import logging
 import asyncio
+import json
+import logging
+import re
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -436,20 +439,153 @@ The AI API is not connected — this is a template response.
         "market_score": 50.0,
         "market_level": "NORMAL",
         "market_scores": {"war": 50, "earnings": 50, "fed": 50, "gold": 50, "crypto": 50, "others": 50},
+        "news_score": 0.0,
+        "rationale_points_en": [],
+        "rationale_points_ko": [],
         "max_position_percent": 15,
         "stop_loss_percent": 0.3,
         "focus_sectors": ["tech_software", "tech_ai"],
         "focus_symbols": ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AMD", "TSLA"],
     }
 
+    @staticmethod
+    def _clamp_float(value, default: float, lo: float, hi: float) -> float:
+        try:
+            n = float(value)
+        except (TypeError, ValueError):
+            return default
+        return max(lo, min(hi, n))
+
+    @staticmethod
+    def _normalize_risk_level(raw: str) -> str:
+        value = str(raw or "").strip().lower()
+        aliases = {
+            "low": "conservative",
+            "safe": "conservative",
+            "defensive": "conservative",
+            "normal": "moderate",
+            "medium": "moderate",
+            "balanced": "moderate",
+            "high": "aggressive",
+            "risk-on": "aggressive",
+            "risk_on": "aggressive",
+        }
+        value = aliases.get(value, value)
+        return value if value in {"conservative", "moderate", "aggressive"} else "moderate"
+
+    def _sanitize_focus(self, data: dict) -> tuple[list[str], list[str]]:
+        all_valid = set()
+        for syms in self.SECTOR_UNIVERSE.values():
+            all_valid.update(syms)
+
+        focus_sectors = []
+        for sector in data.get("focus_sectors", []):
+            sector = str(sector or "").strip()
+            if sector in self.SECTOR_UNIVERSE and sector not in focus_sectors:
+                focus_sectors.append(sector)
+        if not focus_sectors:
+            focus_sectors = list(self.DEFAULT_REGIME["focus_sectors"])
+
+        focus_symbols = []
+        for sym in data.get("focus_symbols", []):
+            sym = str(sym or "").strip().upper()
+            if sym in all_valid and sym not in focus_symbols:
+                focus_symbols.append(sym)
+
+        for sector in focus_sectors:
+            for sym in self.SECTOR_UNIVERSE[sector]:
+                if sym not in focus_symbols:
+                    focus_symbols.append(sym)
+
+        for sym in self.DEFAULT_REGIME["focus_symbols"]:
+            if sym not in focus_symbols:
+                focus_symbols.append(sym)
+
+        return focus_symbols[:12], focus_sectors[:3]
+
+    @staticmethod
+    def _market_level_for_score(score: float) -> str:
+        if score >= 80:
+            return "EXCELLENT"
+        if score >= 60:
+            return "GOOD"
+        if score >= 40:
+            return "NORMAL"
+        if score >= 20:
+            return "BAD"
+        return "DANGEROUS"
+
+    @staticmethod
+    def _is_trading_goal_noise_bullet(s: str) -> bool:
+        """Strip lines that echo capital scale / daily targets — not market regime evidence."""
+        t = (s or "").lower()
+        if not t.strip():
+            return True
+        markers = (
+            "3k-scale",
+            "10k-scale",
+            "30k-scale",
+            "-scale scalp",
+            "scale scalp",
+            "+1%/day",
+            "+1.0%/day",
+            "compounding target",
+            "daily +1",
+            "micro-scalp",
+            "$3,000",
+            "$3000",
+            "3,000 cash",
+            "good faith",
+            "gfv",
+            "일일 +1",
+            "목표 +1",
+            "스캘프 목표",
+        )
+        if any(m in t for m in markers):
+            return True
+        if re.search(r"\d+k-scale", t):
+            return True
+        if re.search(r"\$\s*[\d,]+\s*[→\-]\s*\+", t):
+            return True
+        if re.search(r"\+\s*[\d.]+\s*%\s*/\s*day", t):
+            return True
+        return False
+
+    @classmethod
+    def _sanitize_rationale_bullets(cls, raw, max_n: int = 6) -> list:
+        if not isinstance(raw, list):
+            return []
+        out: list = []
+        for x in raw:
+            s = str(x or "").strip()
+            if not s or len(s) < 4:
+                continue
+            if cls._is_trading_goal_noise_bullet(s):
+                continue
+            if s not in out:
+                out.append(s)
+            if len(out) >= max_n:
+                break
+        return out
+
     async def determine_market_regime(self, news: list[dict]) -> dict:
         """Analyze news and quantify 6 key indicators into a market score."""
         if not self.is_ready or not news:
             return dict(self.DEFAULT_REGIME)
 
-        news_text = "\n".join([f"- {n['headline']}" for n in news[:15]])
+        news_lines = []
+        for n in news[:20]:
+            headline = str(n.get("headline") or "").strip()
+            summary = str(n.get("summary") or "").strip()
+            source = str(n.get("source") or "").strip()
+            if not headline:
+                continue
+            detail = f" — {summary[:220]}" if summary else ""
+            src = f" ({source})" if source else ""
+            news_lines.append(f"- {headline}{src}{detail}")
+        news_text = "\n".join(news_lines)
         
-        prompt = f"""You are a senior macro quant strategist. Read the news below, quantify current market risk across six dimensions (0–100 each; higher = more favorable/safer for risk-on equities), and propose an optimal tactical tilt.
+        prompt = f"""You are a senior macro quant strategist assessing US equities from headlines. Read the news below, quantify current market risk across six dimensions (0–100 each; higher = more favorable/safer for risk-on equities), and propose an optimal tactical tilt.
 
 Dimensions (0–100 each):
 1. Geopolitical: peaceful/stable = 100, war/crisis = 0
@@ -463,17 +599,23 @@ Sector playbook:
 - War / geopolitical stress → tilt defense, energy_oil, gold_safe
 - Fed easing → tilt tech_software, tech_cloud, ev_auto
 - Positive earnings theme → tilt that sector
+- Panic / overreaction headlines with no systemic risk → negative news_score so the news-fade playbook can buy exhaustion
+- Systemic crisis / broad risk-off → low market_score, conservative risk, and defensive symbols
 
 Available sectors: {list(self.SECTOR_UNIVERSE.keys())}
 
 News headlines:
 {news_text}
 
+Also include human-readable **causal bullets** tied to the headlines (not just abstract scores):
+- "rationale_points_en": 3–5 short strings in English. Each bullet names a **concrete** market theme implied by the news (e.g. Mideast conflict / Iran tensions, crude oil supply & price regime, Fed rate path, dollar, major earnings, systemic risk-off). Say briefly whether it supports or caps risk-on equities.
+- "rationale_points_ko": the **same ideas** in natural Korean (3–5 bullets). Example style: "미·이란 긴장 장기화로 지정학 프리미엄이 유지되며 에너지 비용 부담이 커짐", "국제 유가가 고보합이어서 인플레·마진 압박 우려", "연준의 금리 인하 기대가 자산가격에 일부 완충" 등.
+
 Reply with ONLY valid JSON in this exact shape:
 {{
     "strategy": "momentum" or "mean-reversion",
-    "reasoning": "one-sentence rationale in English",
-    "risk_level": "low" / "moderate" / "aggressive",
+    "reasoning": "one-sentence executive summary in English",
+    "risk_level": "conservative" / "moderate" / "aggressive",
     "market_scores": {{
         "war": <number>,
         "earnings": <number>,
@@ -482,6 +624,9 @@ Reply with ONLY valid JSON in this exact shape:
         "crypto": <number>,
         "others": <number>
     }},
+    "news_score": <number from -1.0 to 1.0; negative = panic/exhaustion fade candidate, positive = constructive momentum>,
+    "rationale_points_en": ["...", "...", "..."],
+    "rationale_points_ko": ["...", "...", "..."],
     "max_position_percent": <10-25>,
     "stop_loss_percent": <0.2-1.0>,
     "focus_sectors": ["sector1", "sector2"],
@@ -494,44 +639,39 @@ Reply with ONLY valid JSON in this exact shape:
             else:
                 response_text = await self._query_gemini(prompt)
 
-            import json
-            import re
             match = re.search(r'\{.*\}', response_text, re.DOTALL)
             if match:
                 data = json.loads(match.group(0))
-                
-                # Cleanup symbols and sectors
-                all_valid = set()
-                for syms in self.SECTOR_UNIVERSE.values():
-                    all_valid.update(syms)
-                
-                focus_symbols = [s for s in data.get("focus_symbols", []) if s in all_valid]
-                if len(focus_symbols) < 4:
-                    focus_symbols = list(self.DEFAULT_REGIME["focus_symbols"])
-                    
-                focus_sectors = [s for s in data.get("focus_sectors", []) if s in self.SECTOR_UNIVERSE]
-                if not focus_sectors:
-                    focus_sectors = list(self.DEFAULT_REGIME["focus_sectors"])
+                focus_symbols, focus_sectors = self._sanitize_focus(data)
 
                 # Calculate Aggregate Market Score (Quantify!)
-                scores = data.get("market_scores", self.DEFAULT_REGIME["market_scores"])
+                raw_scores = data.get("market_scores", self.DEFAULT_REGIME["market_scores"])
+                if not isinstance(raw_scores, dict):
+                    raw_scores = self.DEFAULT_REGIME["market_scores"]
+                scores = {
+                    key: round(self._clamp_float(raw_scores.get(key), 50.0, 0.0, 100.0), 1)
+                    for key in self.DEFAULT_REGIME["market_scores"]
+                }
                 avg_score = sum(scores.values()) / len(scores)
+                level = self._market_level_for_score(avg_score)
 
-                if avg_score >= 80: level = "EXCELLENT"
-                elif avg_score >= 60: level = "GOOD"
-                elif avg_score >= 40: level = "NORMAL"
-                elif avg_score >= 20: level = "BAD"
-                else: level = "DANGEROUS"
+                r_en = self._sanitize_rationale_bullets(
+                    data.get("rationale_points_en") or data.get("rationale_points")
+                )
+                r_ko = self._sanitize_rationale_bullets(data.get("rationale_points_ko"))
 
                 return {
                     "strategy": data.get("strategy", "momentum"),
                     "reasoning": data.get("reasoning", "Operating tactically per current market conditions."),
-                    "risk_level": data.get("risk_level", "moderate"),
+                    "risk_level": self._normalize_risk_level(data.get("risk_level", "moderate")),
                     "market_score": round(avg_score, 1),
                     "market_level": level,
                     "market_scores": scores,
-                    "max_position_percent": data.get("max_position_percent", 15),
-                    "stop_loss_percent": data.get("stop_loss_percent", 0.3),
+                    "news_score": round(self._clamp_float(data.get("news_score"), 0.0, -1.0, 1.0), 2),
+                    "rationale_points_en": r_en,
+                    "rationale_points_ko": r_ko,
+                    "max_position_percent": self._clamp_float(data.get("max_position_percent"), 15.0, 5.0, 25.0),
+                    "stop_loss_percent": self._clamp_float(data.get("stop_loss_percent"), 0.3, 0.1, 1.5),
                     "focus_sectors": focus_sectors,
                     "focus_symbols": focus_symbols,
                 }

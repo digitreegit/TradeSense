@@ -95,6 +95,14 @@ class Settings(BaseSettings):
 
     # Backtest: inject measured round-trip latency (ms) from prod / health probes — aligns fills with live
     backtest_latency_rtt_ms: float = float(os.getenv("BACKTEST_LATENCY_RTT_MS", "0"))
+    # US regulatory sell-side costs (Alpaca passes through; update from SEC/FINRA notices)
+    # Section 31: USD per $1M of sale proceeds (0 when SEC sets rate to zero mid-year)
+    backtest_sec_fee_per_million_usd: float = float(os.getenv("BACKTEST_SEC_FEE_PER_MILLION_USD", "20.60"))
+    # FINRA TAF: per share sold, min/max per transaction (approximate; FINRA adjusts periodically)
+    backtest_finra_taf_per_share: float = float(os.getenv("BACKTEST_FINRA_TAF_PER_SHARE", "0.000145"))
+    backtest_finra_taf_min_usd: float = float(os.getenv("BACKTEST_FINRA_TAF_MIN_USD", "0.01"))
+    backtest_finra_taf_max_usd: float = float(os.getenv("BACKTEST_FINRA_TAF_MAX_USD", "7.27"))
+    backtest_regulatory_fees_enabled: bool = os.getenv("BACKTEST_REGULATORY_FEES_ENABLED", "true").lower() != "false"
 
     # AI
     ai_provider: str = os.getenv("AI_PROVIDER", "openai")

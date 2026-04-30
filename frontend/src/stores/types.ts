@@ -108,6 +108,7 @@ export interface RegimeData {
   market_level?: string;
   market_score?: number;
   ai_market_score?: number;
+  ai_raw_market_score?: number;
   market_scores?: Record<string, number>;
   /** Quantitative regime sub-scores (vix/bonds/dxy/gold/energy/crypto/spy) */
   quant_scores?: Record<string, number>;
@@ -117,6 +118,12 @@ export interface RegimeData {
   blackout?: boolean;
   blackout_reason?: string;
   news_score?: number;
+  news_headline_count?: number;
+  news_symbols?: string[];
+  ai_risk_level?: string;
+  /** LLM causal bullets (news themes → score), bilingual from Gemini */
+  rationale_points_en?: string[];
+  rationale_points_ko?: string[];
   /** Currently enabled playbooks in engine (AUTO or MANUAL routing) */
   active_playbooks?: string[];
   playbook_mode?: 'auto' | 'manual';

@@ -277,7 +277,7 @@ const SettingsPage: React.FC = () => {
   };
 
   return (
-    <div className="page-enter" style={{ width: 'min(66.667vw, 920px)', maxWidth: 'calc(100vw - 32px)', margin: '0 auto', padding: 'var(--space-xl)' }}>
+    <div className="page-enter settings-page">
       <div className="card" style={{ padding: 'var(--space-xl)' }}>
         <h2 style={{ fontSize: '18px', marginBottom: '8px' }}>{t('Settings')}</h2>
         <p style={{ fontSize: '13px', color: 'var(--text-tertiary)', marginBottom: '20px', lineHeight: 1.5 }}>

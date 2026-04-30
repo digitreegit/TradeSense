@@ -60,28 +60,27 @@ const Header: React.FC = () => {
         <h2 className="header-title">{titles[currentPage] || t('dashboard')}</h2>
       </div>
       <div className="header-right">
-        <div className="market-status">
-          <span className={`dot ${isMarketOpen() || marketOpen ? 'open' : 'closed'}`} />
-          <span>{isMarketOpen() || marketOpen ? t('marketOpen') : t('marketClosed')}</span>
-        </div>
-        <div className="header-badge paper" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <DocumentCheckIcon style={{ width: '14px', height: '14px' }} />
-          {t('paperTrading')}
-        </div>
-        <div style={{
-          fontSize: '12px',
-          color: 'var(--text-secondary)',
-          fontFamily: 'var(--font-mono)',
-        }}>
-          {time.toLocaleTimeString(language === 'ko' ? 'ko-KR' : 'en-US', {
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: language !== 'ko',
-          })}
+        <div className="header-session-meta">
+          <div className="market-status">
+            <span className={`dot ${isMarketOpen() || marketOpen ? 'open' : 'closed'}`} />
+            <span>{isMarketOpen() || marketOpen ? t('marketOpen') : t('marketClosed')}</span>
+          </div>
+          <div className="header-badge paper" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <DocumentCheckIcon style={{ width: '14px', height: '14px' }} />
+            {t('paperTrading')}
+          </div>
+          <div className="header-clock">
+            {time.toLocaleTimeString(language === 'ko' ? 'ko-KR' : 'en-US', {
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+              hour12: language !== 'ko',
+            })}
+          </div>
         </div>
         <button
           type="button"
+          className="header-theme-toggle"
           onClick={() => setColorTheme(colorTheme === 'dark' ? 'light' : 'dark')}
           title={
             language === 'ko'
@@ -122,7 +121,9 @@ const Header: React.FC = () => {
             <MoonIcon style={{ width: 22, height: 22 }} aria-hidden />
           )}
         </button>
-        <UserMenu />
+        <div className="header-user-menu">
+          <UserMenu />
+        </div>
       </div>
     </header>
   );

@@ -16,6 +16,10 @@ on in-sample only, evaluated on OOS to reduce single-window overfit.
 
 **Latency:** ``latency_rtt_ms`` (or env ``BACKTEST_LATENCY_RTT_MS``) defers fills until the first
 trade at or after ``signal_time + RTT`` — inject production-measured RTT for live-parity.
+
+**Regulatory (sell side):** Section 31 fee on sale proceeds and FINRA TAF per share on sells —
+Alpaca has no equity commission but these pass through; see ``BACKTEST_SEC_FEE_PER_MILLION_USD``,
+``BACKTEST_FINRA_TAF_*``, ``BACKTEST_REGULATORY_FEES_ENABLED``.
 """
 from __future__ import annotations
 
@@ -293,6 +297,24 @@ def _resolve_latency_ms(explicit: Optional[float]) -> float:
     return float(getattr(settings, "backtest_latency_rtt_ms", 0.0) or 0.0)
 
 
+def _regulatory_sell_fees_usd(sale_proceeds: float, qty: int) -> Tuple[float, float, float]:
+    """US sell-side regulatory costs: (total, sec_fee, finra_taf)."""
+    if qty <= 0 or sale_proceeds <= 0:
+        return 0.0, 0.0, 0.0
+    if not getattr(settings, "backtest_regulatory_fees_enabled", True):
+        return 0.0, 0.0, 0.0
+    sec_per_mil = max(0.0, float(getattr(settings, "backtest_sec_fee_per_million_usd", 0.0) or 0.0))
+    sec = sale_proceeds * (sec_per_mil / 1_000_000.0)
+    taf_ps = max(0.0, float(getattr(settings, "backtest_finra_taf_per_share", 0.0) or 0.0))
+    taf_min = max(0.0, float(getattr(settings, "backtest_finra_taf_min_usd", 0.0) or 0.0))
+    taf_max = max(taf_min, float(getattr(settings, "backtest_finra_taf_max_usd", 0.0) or 0.0))
+    n = abs(int(qty))
+    taf_raw = n * taf_ps
+    taf = max(taf_min, min(taf_max, taf_raw))
+    total = sec + taf
+    return float(total), float(sec), float(taf)
+
+
 def run_bar_backtest(
     bars: List[Dict[str, Any]],
     *,
@@ -321,8 +343,30 @@ def run_bar_backtest(
     equity_peak = cash
     max_dd = 0.0
     equity_curve: List[Dict[str, Any]] = []
+    total_reg_fees = 0.0
 
     orders_at: DefaultDict[int, List[Tuple[str, Any]]] = defaultdict(list)
+
+    def record_sell_fill(qty: int, px: float, time_val: Any, reason: str) -> None:
+        nonlocal cash, total_reg_fees
+        if qty <= 0:
+            return
+        proceeds = float(qty) * float(px)
+        fees, sec_c, taf_c = _regulatory_sell_fees_usd(proceeds, qty)
+        total_reg_fees += fees
+        cash += proceeds - fees
+        fills.append(
+            {
+                "side": "sell",
+                "qty": qty,
+                "price": round(px, 4),
+                "time": time_val,
+                "reason": reason,
+                "reg_fees_usd": round(fees, 4),
+                "sec_fee_usd": round(sec_c, 4),
+                "finra_taf_usd": round(taf_c, 4),
+            }
+        )
 
     def has_pending_sell_from(idx: int) -> bool:
         for j, batch in orders_at.items():
@@ -352,16 +396,8 @@ def run_bar_backtest(
             close = float(bars[i]["close"])
             if kind == "sell" and pos_qty > 0:
                 px = close * (1.0 - slip)
-                cash += pos_qty * px
-                fills.append(
-                    {
-                        "side": "sell",
-                        "qty": pos_qty,
-                        "price": round(px, 4),
-                        "time": bars[i]["time"],
-                        "reason": meta.get("reason", "sell"),
-                    }
-                )
+                q = pos_qty
+                record_sell_fill(q, px, bars[i]["time"], str(meta.get("reason", "sell")))
                 pos_qty = 0
                 entry_px = 0.0
             elif kind == "buy" and pos_qty == 0:
@@ -434,10 +470,7 @@ def run_bar_backtest(
     if pos_qty > 0:
         li = n - 1
         px = float(bars[li]["close"]) * (1.0 - slip)
-        cash += pos_qty * px
-        fills.append(
-            {"side": "sell", "qty": pos_qty, "price": round(px, 4), "time": bars[li]["time"], "reason": "eod_flush"}
-        )
+        record_sell_fill(pos_qty, px, bars[li]["time"], "eod_flush")
         pos_qty = 0
 
     final_eq = cash
@@ -455,6 +488,7 @@ def run_bar_backtest(
         "equity_curve_tail": equity_curve[-500:],
         "latency_bars": lag,
         "entry_score_threshold": entry_score_threshold,
+        "regulatory_fees_total_usd": round(total_reg_fees, 4),
     }
 
 
@@ -563,12 +597,18 @@ def run_walk_forward_backtest(
         for f in folds
         if f.get("oos") and f["oos"].get("ok")
     ]
+    oos_reg_fees = [
+        float(f["oos"].get("regulatory_fees_total_usd", 0) or 0)
+        for f in folds
+        if f.get("oos") and f["oos"].get("ok")
+    ]
     agg: Dict[str, Any] = {
         "n_folds": len(folds),
         "oos_return_mean": round(statistics.mean(oos_returns), 4) if oos_returns else None,
         "oos_return_stdev": round(statistics.stdev(oos_returns), 4) if len(oos_returns) > 1 else None,
         "oos_return_min": round(min(oos_returns), 4) if oos_returns else None,
         "oos_return_max": round(max(oos_returns), 4) if oos_returns else None,
+        "oos_regulatory_fees_total_usd": round(sum(oos_reg_fees), 4) if oos_reg_fees else None,
     }
 
     return {
@@ -680,6 +720,7 @@ def run_tick_backtest(alpaca: Any, params: TickBacktestParams) -> Dict[str, Any]
     equity_curve: List[Dict[str, Any]] = []
     pending_buys: deque[_PendingBuy] = deque()
     pending_sells: deque[_PendingSell] = deque()
+    total_reg_fees = 0.0
 
     def mark_equity(bar_time: int, px: float) -> None:
         nonlocal equity_peak, max_dd, equity_curve
@@ -692,7 +733,7 @@ def run_tick_backtest(alpaca: Any, params: TickBacktestParams) -> Dict[str, Any]
             equity_curve = equity_curve[-2500:]
 
     def process_pending(tk: Tick) -> None:
-        nonlocal cash, pos_qty, entry_px
+        nonlocal cash, pos_qty, entry_px, total_reg_fees
         eps = 1e-12
         while pending_sells and tk.ts + eps >= pending_sells[0].due_ts:
             ps = pending_sells.popleft()
@@ -702,7 +743,10 @@ def run_tick_backtest(alpaca: Any, params: TickBacktestParams) -> Dict[str, Any]
             q = pos_qty if ps.qty < 0 else min(ps.qty, pos_qty)
             if q <= 0:
                 continue
-            cash += q * px
+            proceeds = q * px
+            fees, sec_c, taf_c = _regulatory_sell_fees_usd(proceeds, q)
+            total_reg_fees += fees
+            cash += proceeds - fees
             fills.append(
                 {
                     "side": "sell",
@@ -710,6 +754,9 @@ def run_tick_backtest(alpaca: Any, params: TickBacktestParams) -> Dict[str, Any]
                     "price": round(px, 4),
                     "time": int(tk.ts),
                     "reason": ps.reason,
+                    "reg_fees_usd": round(fees, 4),
+                    "sec_fee_usd": round(sec_c, 4),
+                    "finra_taf_usd": round(taf_c, 4),
                 }
             )
             pos_qty -= q
@@ -795,9 +842,21 @@ def run_tick_backtest(alpaca: Any, params: TickBacktestParams) -> Dict[str, Any]
         close = float(last_bar["close"])
         if pos_qty > 0:
             px = close * (1.0 - slip)
-            cash += pos_qty * px
+            proceeds = pos_qty * px
+            fees, sec_c, taf_c = _regulatory_sell_fees_usd(proceeds, pos_qty)
+            total_reg_fees += fees
+            cash += proceeds - fees
             fills.append(
-                {"side": "sell", "qty": pos_qty, "price": round(px, 4), "time": last_bar["time"], "reason": "eod_flush"}
+                {
+                    "side": "sell",
+                    "qty": pos_qty,
+                    "price": round(px, 4),
+                    "time": last_bar["time"],
+                    "reason": "eod_flush",
+                    "reg_fees_usd": round(fees, 4),
+                    "sec_fee_usd": round(sec_c, 4),
+                    "finra_taf_usd": round(taf_c, 4),
+                }
             )
             pos_qty = 0
         mark_equity(int(last_bar["time"]), close)
@@ -822,4 +881,5 @@ def run_tick_backtest(alpaca: Any, params: TickBacktestParams) -> Dict[str, Any]
         "playbooks": enabled,
         "warnings": warnings,
         "latency_rtt_ms": lat_ms,
+        "regulatory_fees_total_usd": round(total_reg_fees, 4),
     }
