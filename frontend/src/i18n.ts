@@ -74,6 +74,12 @@ const ko: Record<string, string> = {
   buyingPower: '매수 가능 금액',
   portfolioValue: '포트폴리오 가치',
   liveBalancesError: '실전 잔고를 불러오지 못했습니다. 실전 Alpaca 키인지 확인하세요.',
+  liveBalancesNotConnected:
+    '실전 Alpaca 잔고를 여기서 불러올 수 없습니다. 실전 API 키가 저장되어 있고 연결이 되었는지 확인하세요. 모의용 키로는 실전 잔고가 표시되지 않습니다.',
+  liveBalancesFetchError:
+    'Alpaca 실전 계정 조회 중 오류가 났습니다. 키와 네트워크를 확인한 뒤 다시 시도하세요.',
+  liveBalancesZeroHint:
+    'Alpaca에서 받은 값이 모두 $0입니다. 아직 입금하지 않았다면 실제 잔고가 0일 수 있습니다. Alpaca 대시보드에서 확인하세요.',
   capitalScale: '자본 규모 (모의 전용)',
   capitalScaleHelp: '모의투자 모드에서 활성 리스크 프리셋 테이블을 바꿉니다. 현금 계좌에는 PDT 규정이 적용되지 않습니다.',
   telegramAlerts: '텔레그램 알림',
@@ -260,6 +266,12 @@ const en: Record<string, string> = {
   buyingPower: 'Buying power',
   portfolioValue: 'Portfolio value',
   liveBalancesError: 'Could not load live balances. Confirm your live Alpaca keys.',
+  liveBalancesNotConnected:
+    'Live Alpaca balances are not available here. Confirm live API keys are saved and the connection works—paper keys will not show live funds.',
+  liveBalancesFetchError:
+    'Alpaca returned an error while reading your live account. Check keys and network, then retry.',
+  liveBalancesZeroHint:
+    'All values are $0 from Alpaca. If you have not funded the account yet, that may match reality—verify on your Alpaca dashboard.',
   capitalScale: 'Capital scale (paper only)',
   capitalScaleHelp:
     'In paper mode, switches the active risk preset table. Cash accounts are not subject to PDT.',

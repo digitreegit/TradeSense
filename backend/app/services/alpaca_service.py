@@ -119,11 +119,33 @@ class AlpacaService:
             return float(self.initial_capital_override)
         return float(settings.initial_capital)
 
+    def _live_balances_unavailable(self, reason: str = "not_connected") -> dict:
+        """Never use paper demo balances for live mode when broker data is missing."""
+        return {
+            "equity": 0.0,
+            "cash": 0.0,
+            "buying_power": 0.0,
+            "portfolio_value": 0.0,
+            "profit_loss": 0.0,
+            "profit_loss_pct": 0.0,
+            "daily_profit_loss": 0.0,
+            "daily_profit_loss_pct": 0.0,
+            "day_trade_count": 0,
+            "initial_capital": 0.0,
+            "win_rate": 0.0,
+            "avg_win": 0.0,
+            "avg_loss": 0.0,
+            "profit_factor": 0.0,
+            "sharpe_ratio": 0.0,
+            "live_balances_unavailable": True,
+            "live_balances_reason": reason,
+        }
+
     # ─── Account ───────────────────────────────────────────────
     def get_account(self) -> dict:
         """Get account information with performance metrics."""
         if not self.is_ready:
-            return self._demo_account()
+            return self._demo_account() if self.paper_trading else self._live_balances_unavailable("not_connected")
 
         try:
             import numpy as np
@@ -350,6 +372,8 @@ class AlpacaService:
 
         except Exception as e:
             logger.error(f"Error getting account: {e}")
+            if not self.paper_trading:
+                return self._live_balances_unavailable("fetch_error")
             return self._demo_account()
 
     # ─── Positions ─────────────────────────────────────────────

@@ -65,6 +65,7 @@ const SettingsPage: React.FC = () => {
   const [modeLoading, setModeLoading] = useState(false);
   const [liveSummary, setLiveSummary] = useState<LiveSummary | null>(null);
   const [liveLoading, setLiveLoading] = useState(false);
+  const [liveBalanceIssue, setLiveBalanceIssue] = useState<'fetch_error' | 'not_connected' | null>(null);
 
   const [notifyTg, setNotifyTg] = useState(false);
   const [tgChatId, setTgChatId] = useState('');
@@ -114,6 +115,7 @@ const SettingsPage: React.FC = () => {
   useEffect(() => {
     if (!authEmail || !authAlpacaConfigured || authAlpacaPaperTrading) {
       setLiveSummary(null);
+      setLiveBalanceIssue(null);
       return;
     }
     let cancelled = false;
@@ -122,6 +124,12 @@ const SettingsPage: React.FC = () => {
       try {
         const acc = await api.getAccount();
         if (cancelled || !acc || 'detail' in acc) return;
+        if (acc.live_balances_unavailable === true) {
+          setLiveSummary(null);
+          setLiveBalanceIssue(acc.live_balances_reason === 'fetch_error' ? 'fetch_error' : 'not_connected');
+          return;
+        }
+        setLiveBalanceIssue(null);
         setLiveSummary({
           equity: Number(acc.equity) || 0,
           cash: Number(acc.cash) || 0,
@@ -129,7 +137,10 @@ const SettingsPage: React.FC = () => {
           portfolio_value: Number(acc.portfolio_value) || 0,
         });
       } catch {
-        if (!cancelled) setLiveSummary(null);
+        if (!cancelled) {
+          setLiveSummary(null);
+          setLiveBalanceIssue('fetch_error');
+        }
       } finally {
         if (!cancelled) setLiveLoading(false);
       }
@@ -458,9 +469,9 @@ const SettingsPage: React.FC = () => {
                 padding: '12px 14px',
                 borderRadius: '8px',
                 border: !authAlpacaPaperTrading
-                  ? '2px solid var(--border-accent, var(--loss))'
+                  ? '2px solid color-mix(in srgb, var(--profit) 72%, var(--border-secondary))'
                   : '2px solid var(--border-secondary)',
-                background: !authAlpacaPaperTrading ? 'var(--state-danger-bg)' : 'var(--bg-secondary)',
+                background: !authAlpacaPaperTrading ? 'var(--profit-dim)' : 'var(--bg-secondary)',
                 color: 'var(--text-primary)',
                 cursor: modeLoading || !authAlpacaConfigured ? 'not-allowed' : 'pointer',
               }}
@@ -541,34 +552,48 @@ const SettingsPage: React.FC = () => {
             >
               {t('liveAccount')}
             </label>
-            {liveLoading && !liveSummary ? (
+            {liveLoading && !liveSummary && !liveBalanceIssue ? (
               <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '8px' }}>{t('loadingBalances')}</p>
+            ) : liveBalanceIssue ? (
+              <p style={{ fontSize: '12px', color: 'var(--loss)', marginTop: '8px', lineHeight: 1.5 }}>
+                {liveBalanceIssue === 'fetch_error' ? t('liveBalancesFetchError') : t('liveBalancesNotConnected')}
+              </p>
             ) : liveSummary ? (
-              <ul
-                style={{
-                  listStyle: 'none',
-                  padding: 0,
-                  margin: '10px 0 0',
-                  fontSize: '13px',
-                  lineHeight: 1.7,
-                  color: 'var(--text-secondary)',
-                }}
-              >
-                <li>
-                  <strong style={{ color: 'var(--text-primary)' }}>{t('equity')}</strong> {fmtUsd(liveSummary.equity)}
-                </li>
-                <li>
-                  <strong style={{ color: 'var(--text-primary)' }}>{t('cash')}</strong> {fmtUsd(liveSummary.cash)}
-                </li>
-                <li>
-                  <strong style={{ color: 'var(--text-primary)' }}>{t('buyingPower')}</strong>{' '}
-                  {fmtUsd(liveSummary.buying_power)}
-                </li>
-                <li>
-                  <strong style={{ color: 'var(--text-primary)' }}>{t('portfolioValue')}</strong>{' '}
-                  {fmtUsd(liveSummary.portfolio_value)}
-                </li>
-              </ul>
+              <>
+                <ul
+                  style={{
+                    listStyle: 'none',
+                    padding: 0,
+                    margin: '10px 0 0',
+                    fontSize: '13px',
+                    lineHeight: 1.7,
+                    color: 'var(--text-secondary)',
+                  }}
+                >
+                  <li>
+                    <strong style={{ color: 'var(--text-primary)' }}>{t('equity')}</strong> {fmtUsd(liveSummary.equity)}
+                  </li>
+                  <li>
+                    <strong style={{ color: 'var(--text-primary)' }}>{t('cash')}</strong> {fmtUsd(liveSummary.cash)}
+                  </li>
+                  <li>
+                    <strong style={{ color: 'var(--text-primary)' }}>{t('buyingPower')}</strong>{' '}
+                    {fmtUsd(liveSummary.buying_power)}
+                  </li>
+                  <li>
+                    <strong style={{ color: 'var(--text-primary)' }}>{t('portfolioValue')}</strong>{' '}
+                    {fmtUsd(liveSummary.portfolio_value)}
+                  </li>
+                </ul>
+                {liveSummary.equity === 0 &&
+                  liveSummary.cash === 0 &&
+                  liveSummary.buying_power === 0 &&
+                  liveSummary.portfolio_value === 0 && (
+                    <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '10px', lineHeight: 1.45 }}>
+                      {t('liveBalancesZeroHint')}
+                    </p>
+                  )}
+              </>
             ) : (
               <p style={{ fontSize: '12px', color: 'var(--loss)', marginTop: '8px' }}>
                 {t('liveBalancesError')}
