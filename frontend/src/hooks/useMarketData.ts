@@ -106,6 +106,7 @@ export function useMarketData() {
     try {
       const account = await api.getAccount();
       if (account && !('detail' in account)) {
+        const liveBalancesUnavailable = account.live_balances_unavailable === true;
         const next: AccountInfo = {
           equity: Number(account.equity) || 0,
           cash: Number(account.cash) || 0,
@@ -124,7 +125,7 @@ export function useMarketData() {
           sharpe_ratio: Number(account.sharpe_ratio) || 0,
         };
         setAccount(next);
-        setConnected(true);
+        setConnected(!liveBalancesUnavailable);
       }
     } catch {
       setConnected(false);
