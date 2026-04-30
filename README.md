@@ -17,18 +17,24 @@ TradeSense is a web platform for AI-assisted US equity analysis and automated qu
 - **AI**: OpenAI GPT-4o / Google Gemini
 - **State**: Zustand
 
+**Setup checklist, env variables, and recent fixes:** see [`DEVELOPMENT.md`](./DEVELOPMENT.md).
+
 ---
 
 ## 🚀 Quick Start
 
 ### 1. Environment
 ```bash
-# Create .env (repo root or backend/ — both are supported)
-cp .env.example backend/.env
+# Recommended: one .env at repo root (Vite reads it via frontend/vite.config.ts envDir; backend also loads root .env)
+cp .env.example .env
+
+# Alternative: backend-only copy still works
+# cp .env.example backend/.env
 
 # Edit keys:
 # - ALPACA_API_KEY / ALPACA_SECRET_KEY
 # - OPENAI_API_KEY and/or GOOGLE_API_KEY
+# - VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY (+ SUPABASE_* for the API) — see DEVELOPMENT.md
 ```
 
 ### 2. Backend
