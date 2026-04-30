@@ -9,14 +9,15 @@
 | 날짜 (대략) | 내용 |
 |-------------|------|
 | 2026-04 | **라이브 잔고 불가 ↔ 사이드바 “연결됨” 불일치 수정** — PR #11 (`cursor/fix-live-connection-status-144a`) 내용을 이 브랜치에 **머지**함. `/api/account`가 `live_balances_unavailable: true`를 주면 `useMarketData`가 전역 `connected`를 `false`로 둠 (`frontend/src/hooks/useMarketData.ts`). |
-| 2026-04 | **Vite가 repo 루트 `.env`를 읽도록 설정** — `frontend/vite.config.ts`의 `envDir`를 상위 디렉터리(레포 루트)로 지정. 루트 `.env` 하나에 `VITE_*`와 `SUPABASE_*`를 같이 둘 수 있음. |
+| 2026-04 | **Vite `VITE_*` 이중 로드** — `frontend/vite.config.ts`에서 `loadEnv`로 **레포 루트 + `frontend/`** 둘 다 읽고 합침(같은 키면 `frontend/` 우선). 루트에만 두거나 `frontend/.env`에만 둬도 동작함. |
 | 2026-04 | **`frontend/.gitignore` / `.env.example`** — 로컬 시크릿은 커밋하지 않도록 명시, 예시 파일에 주석 보강. |
 
 ---
 
-## 환경 변수 (권장: **레포 루트** `.env`)
+## 환경 변수 (`VITE_*`는 루트 또는 `frontend/`)
 
-1. 루트 `.env.example`을 복사해 **프로젝트 루트**에 `.env` 생성.
+1. 보통은 루트 `.env.example` → **프로젝트 루트** `.env` 한 번에 맞춤.  
+   (`VITE_*`만 예전처럼 **`frontend/.env`**에만 있어도 됨 — 빌드가 양쪽을 합칩니다.)
 2. **프론트 (브라우저)**  
    - `VITE_SUPABASE_URL`  
    - `VITE_SUPABASE_ANON_KEY`  
@@ -32,10 +33,10 @@
 - `.env`는 Git에 없음 → **반드시 로컬에서 `.env.example` → `.env` 복사 후 값 채우기.**  
 - 그렇지 않으면 프론트에서 `supabase-url is required` 같은 오류가 날 수 있음.
 
-### 예전에만 `frontend/.env`를 쓰던 경우
+### `frontend/.env`만 쓰는 경우
 
-- 지금은 Vite가 **루트**에서만 `.env`를 읽습니다.  
-- 내용을 **루트 `.env`로 옮기거나**, 루트 `.env`에 `VITE_*` 두 줄을 추가하세요.
+- 괜찮습니다. 루트 `.env`가 없어도 `VITE_*`는 `frontend/.env`에서 로드됩니다.  
+- 루트에도 같은 키가 있으면 **`frontend/.env` 값이 우선**합니다.
 
 ---
 
