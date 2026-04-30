@@ -5,7 +5,7 @@ __pycache__/
 venv/
 .venv/
 
-# Environment
+# Environment (applies under any path, e.g. frontend/.env)
 .env
 *.env.local
 
