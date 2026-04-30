@@ -2,3 +2,11 @@
 {"time": "2026-04-30T10:50:59.168039-04:00", "symbol": "NVDA", "qty": 9, "proceeds": 1812.78, "cost_basis": 1847.27, "pnl": -34.49, "hold_term": "short", "fifo_slices": 0}
 {"time": "2026-04-30T10:50:59.209374-04:00", "symbol": "TSLA", "qty": 5, "proceeds": 1870.78, "cost_basis": 1852.06, "pnl": 18.72, "hold_term": "short", "fifo_slices": 0}
 {"time": "2026-04-30T10:51:00.315504-04:00", "symbol": "MSFT", "qty": 4, "proceeds": 1618.98, "cost_basis": 1625.93, "pnl": -6.95, "hold_term": "short", "fifo_slices": 0}
+{"time": "2026-04-30T15:03:19.225377-04:00", "symbol": "XLE", "qty": 5, "proceeds": 297.25, "cost_basis": 297.45, "pnl": -0.2, "hold_term": "short", "fifo_slices": 0}
+{"time": "2026-04-30T15:03:19.262883-04:00", "symbol": "XLK", "qty": 1, "proceeds": 159.37, "cost_basis": 159.39, "pnl": -0.02, "hold_term": "short", "fifo_slices": 0}
+{"time": "2026-04-30T15:05:58.006204-04:00", "symbol": "AAPL", "qty": 1, "proceeds": 273.82, "cost_basis": 273.63, "pnl": 0.19, "hold_term": "short", "fifo_slices": 0}
+{"time": "2026-04-30T15:05:58.048500-04:00", "symbol": "AMZN", "qty": 1, "proceeds": 264.12, "cost_basis": 264.23, "pnl": -0.11, "hold_term": "short", "fifo_slices": 0}
+{"time": "2026-04-30T15:05:58.078853-04:00", "symbol": "NVDA", "qty": 1, "proceeds": 201.16, "cost_basis": 201.51, "pnl": -0.35, "hold_term": "short", "fifo_slices": 0}
+{"time": "2026-04-30T15:05:58.106368-04:00", "symbol": "XLK", "qty": 1, "proceeds": 159.32, "cost_basis": 159.32, "pnl": 0.0, "hold_term": "short", "fifo_slices": 0}
+{"time": "2026-04-30T15:17:45.605064-04:00", "symbol": "XOM", "qty": 1, "proceeds": 154.57, "cost_basis": 154.53, "pnl": 0.04, "hold_term": "short", "fifo_slices": 0}
+{"time": "2026-04-30T15:17:58.221186-04:00", "symbol": "XLE", "qty": 5, "proceeds": 297.25, "cost_basis": 297.2, "pnl": 0.05, "hold_term": "short", "fifo_slices": 0}

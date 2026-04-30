@@ -81,7 +81,10 @@ const UserMenu: React.FC = () => {
               marginBottom: '4px',
             }}
           >
-            {authEmail}
+            <div style={{ fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
+              {t('userMenuSignInAs')}
+            </div>
+            <div style={{ color: 'var(--text-primary)', wordBreak: 'break-all' }}>{authEmail}</div>
           </div>
           <button
             type="button"

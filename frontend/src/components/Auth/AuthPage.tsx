@@ -97,6 +97,16 @@ const AuthPage: React.FC = () => {
         </section>
 
         <section className="auth-panel" aria-label="Sign in">
+          <div className="auth-panel-logo-wrap">
+            <img
+              src="/logo-ts.svg"
+              alt="TradeSense"
+              width={150}
+              height={150}
+              className="auth-panel-logo"
+              decoding="async"
+            />
+          </div>
           <h2 className="auth-panel-title">{t('openTradeSense')}</h2>
           <p className="auth-subtitle">{t('signInWithGoogle')}</p>
 

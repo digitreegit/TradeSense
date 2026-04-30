@@ -1,6 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import { generateId } from '../../utils/helpers';
+import { buildAgentWelcomeMessage } from '../../utils/agentWelcome';
+import { renderLineWithBold } from '../../utils/renderAgentBold';
 import api from '../../services/api';
 import { useI18n } from '../../i18n';
 import { AiAgentIcon } from '../icons/AiAgentIcon';
@@ -12,8 +14,33 @@ const AgentPanel: React.FC = () => {
     agentLoading,
     setAgentLoading,
     selectedSymbol,
+    account,
+    authAlpacaConfigured,
+    authAlpacaPaperTrading,
+    agentDailyTargetPct,
+    agentDailyLossLimitPct,
+    agentPaperCapitalUsd,
+    setAgentTradingGoals,
   } = useAppStore();
   const { language, t } = useI18n();
+
+  const isPaper = !authAlpacaConfigured || authAlpacaPaperTrading;
+  const introCapitalUsd = useMemo(
+    () => (isPaper ? (agentPaperCapitalUsd ?? account.initial_capital) : account.equity),
+    [isPaper, agentPaperCapitalUsd, account.initial_capital, account.equity],
+  );
+
+  const [draftPaperUsd, setDraftPaperUsd] = useState('');
+  const [draftDailyPct, setDraftDailyPct] = useState('');
+  const [draftLossPct, setDraftLossPct] = useState('');
+
+  useEffect(() => {
+    setDraftPaperUsd(
+      String(agentPaperCapitalUsd ?? Math.round(account.initial_capital * 100) / 100),
+    );
+    setDraftDailyPct(String(agentDailyTargetPct));
+    setDraftLossPct(String(agentDailyLossLimitPct));
+  }, [agentPaperCapitalUsd, account.initial_capital, agentDailyTargetPct, agentDailyLossLimitPct]);
 
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -97,21 +124,50 @@ const AgentPanel: React.FC = () => {
     { label: t('riskReport'), msg: language === 'ko' ? '리스크 보고서를 보여줘' : 'Show a risk report' },
   ];
 
-  const getDisplayContent = (content: string) => {
-    if (language !== 'ko') return content;
-    if (content.includes("I'm the TradeSense v3 micro-scalping agent")) {
-      return [
-        '안녕하세요. 저는 TradeSense v3 마이크로 스캘핑 에이전트입니다. ⚡️',
-        '',
-        '**$3,000 현금 계좌** 기준으로 복리 **일 +1%**를 목표로 합니다.',
-        '',
-        '활성 플레이북 아이디어:',
-        '• RSI 과매도 반등 스캘핑 (5분봉)',
-        '• VWAP 지지 / 저항 돌파',
-        '• AI 기반 섹터 로테이션 (유료 티어)',
-      ].join('\n');
+  const getMessageBody = (msg: { id: string; content: string }) => {
+    if (msg.id === 'welcome') {
+      return buildAgentWelcomeMessage({
+        language: language === 'ko' ? 'ko' : 'en',
+        isPaper,
+        capitalUsd: introCapitalUsd,
+        dailyPct: agentDailyTargetPct,
+        dailyLossLimitPct: agentDailyLossLimitPct,
+      });
     }
-    return content;
+    return msg.content;
+  };
+
+  const commitPaperUsd = () => {
+    const n = parseFloat(draftPaperUsd.replace(/,/g, ''));
+    if (!Number.isFinite(n) || n < 1) {
+      setDraftPaperUsd(String(agentPaperCapitalUsd ?? account.initial_capital));
+      return;
+    }
+    const capped = Math.min(1e9, n);
+    const initial = account.initial_capital;
+    if (Math.abs(capped - initial) < 0.005) {
+      setAgentTradingGoals({ paperCapitalUsd: null });
+    } else {
+      setAgentTradingGoals({ paperCapitalUsd: capped });
+    }
+  };
+
+  const commitDailyPct = () => {
+    const n = parseFloat(draftDailyPct.replace(/,/g, ''));
+    if (Number.isFinite(n) && n > 0) {
+      setAgentTradingGoals({ dailyPct: n });
+    } else {
+      setDraftDailyPct(String(agentDailyTargetPct));
+    }
+  };
+
+  const commitLossPct = () => {
+    const n = parseFloat(draftLossPct.replace(/,/g, ''));
+    if (Number.isFinite(n) && n > 0) {
+      setAgentTradingGoals({ dailyLossLimitPct: n });
+    } else {
+      setDraftLossPct(String(agentDailyLossLimitPct));
+    }
   };
 
   return (
@@ -152,8 +208,118 @@ const AgentPanel: React.FC = () => {
           </div>
         </div>
 
+        <div
+          className="agent-goals-bar"
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: '12px',
+            padding: '10px 20px',
+            borderBottom: '1px solid var(--border-secondary)',
+            fontSize: '12px',
+            color: 'var(--text-secondary)',
+          }}
+        >
+          <span style={{ fontWeight: 650, color: 'var(--text-primary)' }}>{t('agentGoalsTitle')}</span>
+          {isPaper ? (
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              {t('agentGoalPaperUsd')}
+              <input
+                type="number"
+                min={1}
+                step="any"
+                value={draftPaperUsd}
+                onChange={(e) => setDraftPaperUsd(e.target.value)}
+                onBlur={commitPaperUsd}
+                onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLInputElement).blur()}
+                style={{
+                  width: '100px',
+                  padding: '4px 8px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border-primary)',
+                  background: 'var(--bg-input)',
+                  color: 'var(--text-primary)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '12px',
+                }}
+              />
+            </label>
+          ) : (
+            <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
+              {t('agentGoalLiveEquity')}:{' '}
+              {new Intl.NumberFormat('en-US', {
+                style: 'currency',
+                currency: 'USD',
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              }).format(account.equity)}
+            </span>
+          )}
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            {t('agentGoalDailyPct')}
+            <input
+              type="number"
+              min={0.01}
+              step="any"
+              value={draftDailyPct}
+              onChange={(e) => setDraftDailyPct(e.target.value)}
+              onBlur={commitDailyPct}
+              onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLInputElement).blur()}
+              style={{
+                width: '72px',
+                padding: '4px 8px',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-primary)',
+                background: 'var(--bg-input)',
+                color: 'var(--text-primary)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '12px',
+              }}
+            />
+          </label>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            {t('agentGoalLossLimitPct')}
+            <input
+              type="number"
+              min={0.01}
+              step="any"
+              value={draftLossPct}
+              onChange={(e) => setDraftLossPct(e.target.value)}
+              onBlur={commitLossPct}
+              onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLInputElement).blur()}
+              style={{
+                width: '72px',
+                padding: '4px 8px',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-primary)',
+                background: 'var(--bg-input)',
+                color: 'var(--text-primary)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '12px',
+              }}
+            />
+          </label>
+          {isPaper && agentPaperCapitalUsd !== null && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => {
+                setAgentTradingGoals({ paperCapitalUsd: null });
+              }}
+            >
+              {t('agentGoalResetToInitial')}
+            </button>
+          )}
+          <span style={{ flex: '1 1 160px', opacity: 0.85, lineHeight: 1.35 }}>
+            {isPaper ? t('agentGoalsHelpPaper') : t('agentGoalsHelpLive')}
+          </span>
+        </div>
+
         <div className="agent-messages" style={{ flex: 1, minHeight: 0 }}>
-          {agentMessages.map((msg) => (
+          {agentMessages.map((msg) => {
+            const body = getMessageBody(msg);
+            return (
             <div key={msg.id} className={`agent-message ${msg.role}`}>
               <div className={`agent-avatar ${msg.role}`}>
                 {msg.role === 'ai' ? (
@@ -163,15 +329,16 @@ const AgentPanel: React.FC = () => {
                 )}
               </div>
               <div className="agent-bubble">
-                {getDisplayContent(msg.content).split('\n').map((line, i) => (
+                {body.split('\n').map((line, i) => (
                   <React.Fragment key={i}>
-                    {line}
-                    {i < getDisplayContent(msg.content).split('\n').length - 1 && <br />}
+                    {renderLineWithBold(line, i)}
+                    {i < body.split('\n').length - 1 && <br />}
                   </React.Fragment>
                 ))}
               </div>
             </div>
-          ))}
+            );
+          })}
 
           {agentLoading && (
             <div className="agent-message ai">

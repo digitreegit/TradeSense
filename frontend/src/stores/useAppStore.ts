@@ -40,6 +40,54 @@ function applyLanguageToDocument(language: AppLanguage): void {
   document.documentElement.lang = language === 'ko' ? 'ko' : 'en';
 }
 
+const AGENT_GOALS_STORAGE_KEY = 'tradesense-agent-goals-v1';
+
+function readStoredAgentGoals(): {
+  dailyPct: number;
+  dailyLossLimitPct: number;
+  paperCapitalUsd: number | null;
+} {
+  try {
+    const raw = localStorage.getItem(AGENT_GOALS_STORAGE_KEY);
+    if (!raw) return { dailyPct: 2, dailyLossLimitPct: 1, paperCapitalUsd: null };
+    const j = JSON.parse(raw) as {
+      dailyPct?: unknown;
+      dailyLossLimitPct?: unknown;
+      paperCapitalUsd?: unknown;
+    };
+    const dailyPct =
+      typeof j.dailyPct === 'number' && j.dailyPct > 0 && j.dailyPct <= 100 ? j.dailyPct : 2;
+    const dailyLossLimitPct =
+      typeof j.dailyLossLimitPct === 'number' &&
+      j.dailyLossLimitPct > 0 &&
+      j.dailyLossLimitPct <= 100
+        ? j.dailyLossLimitPct
+        : 1;
+    const paperCapitalUsd =
+      typeof j.paperCapitalUsd === 'number' && j.paperCapitalUsd > 0 ? j.paperCapitalUsd : null;
+    return { dailyPct, dailyLossLimitPct, paperCapitalUsd };
+  } catch {
+    return { dailyPct: 2, dailyLossLimitPct: 1, paperCapitalUsd: null };
+  }
+}
+
+function persistAgentGoals(
+  dailyPct: number,
+  paperCapitalUsd: number | null,
+  dailyLossLimitPct: number,
+): void {
+  try {
+    localStorage.setItem(
+      AGENT_GOALS_STORAGE_KEY,
+      JSON.stringify({ dailyPct, paperCapitalUsd, dailyLossLimitPct }),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+const initialAgentGoals = readStoredAgentGoals();
+
 interface AppState {
   // Navigation
   currentPage: PageId;
@@ -77,6 +125,17 @@ interface AppState {
   addAgentMessage: (msg: AgentMessage) => void;
   agentLoading: boolean;
   setAgentLoading: (loading: boolean) => void;
+  /** Daily % gain target (default strategy). */
+  agentDailyTargetPct: number;
+  /** Daily % loss guard (default strategy). */
+  agentDailyLossLimitPct: number;
+  /** Paper: headline USD for the agent intro; null = fall back to `account.initial_capital`. */
+  agentPaperCapitalUsd: number | null;
+  setAgentTradingGoals: (next: {
+    dailyPct?: number;
+    dailyLossLimitPct?: number;
+    paperCapitalUsd?: number | null;
+  }) => void;
 
   // Strategies
   strategies: Strategy[];
@@ -223,7 +282,12 @@ export const useAppStore = create<AppState>((set) => ({
   botDailyTrades: 0,
   setBotDailyTrades: (count) => set({ botDailyTrades: Math.max(0, Number(count) || 0) }),
   tradeLogs: [
-    { time: new Date().toLocaleTimeString(), type: 'info', message: 'TradeSense v3 — Cash Account Scalp Engine Initialized ($3,000)' },
+    {
+      time: new Date().toLocaleTimeString(),
+      type: 'info',
+      message:
+        'TradeSense v3 — Scalp engine initialized (default: +2% / day target, −1% / day loss guard)',
+    },
     { time: new Date().toLocaleTimeString(), type: 'info', message: 'PDT-Exempt mode active. GFV monitoring enabled.' },
     { time: new Date().toLocaleTimeString(), type: 'signal', message: 'Scanning 5-Min bars for AI Scalp opportunities...' },
   ],
@@ -235,9 +299,9 @@ export const useAppStore = create<AppState>((set) => ({
   // AI Agent
   agentMessages: [
     {
-      id: '1',
+      id: 'welcome',
       role: 'ai',
-      content: 'Hi — I\'m the TradeSense v3 micro-scalping agent. ⚡️\n\n**$3,000 cash account** — targeting **+1% per day** compounded.\n\nActive playbook ideas:\n• RSI oversold bounce scalps (5-min)\n• VWAP support / resistance breaks\n• AI-driven sector rotation (paid tier)',
+      content: '',
       timestamp: new Date().toISOString(),
     },
   ],
@@ -246,13 +310,51 @@ export const useAppStore = create<AppState>((set) => ({
   })),
   agentLoading: false,
   setAgentLoading: (loading) => set({ agentLoading: loading }),
+  agentDailyTargetPct: initialAgentGoals.dailyPct,
+  agentDailyLossLimitPct: initialAgentGoals.dailyLossLimitPct,
+  agentPaperCapitalUsd: initialAgentGoals.paperCapitalUsd,
+  setAgentTradingGoals: (next) =>
+    set((state) => {
+      let dailyPct = state.agentDailyTargetPct;
+      if (next.dailyPct !== undefined) {
+        const n = Number(next.dailyPct);
+        if (Number.isFinite(n)) {
+          dailyPct = Math.min(100, Math.max(0.01, n));
+        }
+      }
+      let dailyLossLimitPct = state.agentDailyLossLimitPct;
+      if (next.dailyLossLimitPct !== undefined) {
+        const n = Number(next.dailyLossLimitPct);
+        if (Number.isFinite(n)) {
+          dailyLossLimitPct = Math.min(100, Math.max(0.01, n));
+        }
+      }
+      let paperCapitalUsd = state.agentPaperCapitalUsd;
+      if (next.paperCapitalUsd !== undefined) {
+        if (next.paperCapitalUsd === null) {
+          paperCapitalUsd = null;
+        } else {
+          const n = Number(next.paperCapitalUsd);
+          if (Number.isFinite(n) && n >= 1) {
+            paperCapitalUsd = Math.min(1e9, n);
+          }
+        }
+      }
+      persistAgentGoals(dailyPct, paperCapitalUsd, dailyLossLimitPct);
+      return {
+        agentDailyTargetPct: dailyPct,
+        agentDailyLossLimitPct: dailyLossLimitPct,
+        agentPaperCapitalUsd: paperCapitalUsd,
+      };
+    }),
 
   // Strategies
   strategies: [
     {
       id: 'scalp',
       name: 'Micro-Scalping v3',
-      description: 'Fast intraday scalps on 5-min bars using RSI/VWAP. Targets ~1% per day.',
+      description:
+        'Fast intraday scalps on 5-min bars using RSI/VWAP. Default: ~+2% / day target, ~−1% / day loss guard.',
       active: true,
       winRate: 0,
       trades: 0,

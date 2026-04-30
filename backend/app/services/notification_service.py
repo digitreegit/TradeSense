@@ -1,4 +1,6 @@
+import html
 import logging
+import re
 from typing import Any, Optional
 
 import httpx
@@ -7,9 +9,52 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Strip pictograph-style icons from Telegram copy (alerts use emoji in titles elsewhere).
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F600-\U0001F64F"  # emoticons
+    "\U0001F300-\U0001F5FF"  # symbols & pictographs
+    "\U0001F680-\U0001F6FF"  # transport & map
+    "\U0001F700-\U0001F77F"
+    "\U0001F780-\U0001F7FF"
+    "\U0001F800-\U0001F8FF"
+    "\U0001F900-\U0001FAFF"
+    "\U0001FA70-\U0001FAFF"
+    "\U00002600-\U000026FF"  # misc symbols
+    "\U00002700-\U000027BF"  # dingbats
+    "]+",
+    flags=re.UNICODE,
+)
 
-def _telegram_text(title: str, message: str, level: str) -> str:
-    return f"[{level}] {title}\n\n{message}"
+
+def _strip_telegram_icons(text: str) -> str:
+    if not text:
+        return text
+    cleaned = _EMOJI_RE.sub("", text)
+    return re.sub(r"[ \t]{2,}", " ", cleaned).strip()
+
+
+def _markdown_bold_to_telegram_html(text: str) -> str:
+    """Turn ``**segments**`` into <b>; escape the rest for Telegram HTML parse_mode."""
+    parts = re.split(r"(\*\*[^*]+\*\*)", text)
+    out: list[str] = []
+    for part in parts:
+        if part.startswith("**") and part.endswith("**") and len(part) >= 4:
+            inner = html.escape(part[2:-2], quote=True)
+            out.append(f"<b>{inner}</b>")
+        else:
+            out.append(html.escape(part, quote=True))
+    return "".join(out)
+
+
+def _telegram_html_body(title: str, message: str, level: str, *, max_len: int = 4096) -> str:
+    title_t = _strip_telegram_icons(title)
+    message_t = _strip_telegram_icons(message)
+    raw = f"[{level}] {title_t}\n\n{message_t}"
+    html_body = _markdown_bold_to_telegram_html(raw)
+    if len(html_body) > max_len:
+        html_body = html_body[: max_len - 4] + "…"
+    return html_body
 
 
 def _load_user_notify_row(user_id: int) -> Optional[dict[str, Any]]:
@@ -130,15 +175,18 @@ class NotificationService:
         if not chat_id:
             return
 
-        body = _telegram_text(title, message, level)
-        if len(body) > 4000:
-            body = body[:3990] + "\n…"
+        body = _telegram_html_body(title, message, level)
 
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         try:
             r = httpx.post(
                 url,
-                json={"chat_id": chat_id, "text": body},
+                json={
+                    "chat_id": chat_id,
+                    "text": body,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                },
                 timeout=15.0,
             )
             if r.status_code >= 400:
@@ -183,15 +231,18 @@ class NotificationService:
 
         title = "TradeSense test"
         message = "If you see this, Telegram alerts are configured correctly."
-        body = _telegram_text(title, message, "INFO")
-        if len(body) > 4000:
-            body = body[:3990] + "\n…"
+        body = _telegram_html_body(title, message, "INFO")
 
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         try:
             r = httpx.post(
                 url,
-                json={"chat_id": chat_id, "text": body},
+                json={
+                    "chat_id": chat_id,
+                    "text": body,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                },
                 timeout=15.0,
             )
             data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
