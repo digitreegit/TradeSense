@@ -574,7 +574,12 @@ const TradingBot: React.FC = () => {
                   step={1}
                   value={maxPositionSize}
                   onChange={(e) => setMaxPositionSize(parseInt(e.target.value))}
-                  style={{ width: '100%', accentColor: 'var(--accent-primary)' }}
+                  style={
+                    {
+                      width: '100%',
+                      ['--trading-range-thumb' as string]: 'var(--accent-primary)',
+                    } as React.CSSProperties
+                  }
                 />
               </div>
 
@@ -598,7 +603,12 @@ const TradingBot: React.FC = () => {
                   step={0.05}
                   value={stopLossPercent}
                   onChange={(e) => setStopLossPercent(parseFloat(e.target.value))}
-                  style={{ width: '100%', accentColor: 'var(--loss)' }}
+                  style={
+                    {
+                      width: '100%',
+                      ['--trading-range-thumb' as string]: 'var(--loss)',
+                    } as React.CSSProperties
+                  }
                 />
               </div>
 
@@ -622,7 +632,12 @@ const TradingBot: React.FC = () => {
                   step={0.05}
                   value={takeProfitPercent}
                   onChange={(e) => setTakeProfitPercent(parseFloat(e.target.value))}
-                  style={{ width: '100%', accentColor: 'var(--profit)' }}
+                  style={
+                    {
+                      width: '100%',
+                      ['--trading-range-thumb' as string]: 'var(--profit)',
+                    } as React.CSSProperties
+                  }
                 />
               </div>
 

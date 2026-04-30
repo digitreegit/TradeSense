@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     account_type: str = os.getenv("ACCOUNT_TYPE", "cash")
     scan_interval_seconds: float = float(os.getenv("SCAN_INTERVAL_SECONDS", "1"))
 
+    # Global killswitch: consecutive Alpaca REST failures trip circuit breaker (see trading_engine)
+    killswitch_api_consecutive_failures: int = int(os.getenv("KILLSWITCH_API_CONSECUTIVE_FAILURES", "5"))
+
     # Capital scale: "3k" | "10k" | "30k" | "auto"
     # "auto" picks based on ``initial_capital``:
     #   <$6,500 → 3k ; <$20,000 → 10k ; otherwise 30k

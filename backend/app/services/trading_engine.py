@@ -183,6 +183,10 @@ class TradingEngine:
         self._daily_target_reached: bool = False
         self._daily_loss_limit_hit: bool = False
         self._day_start_equity: float = self._initial_capital
+        # Circuit breaker: halts auto-start and trading until new session day or manual start()
+        self._killswitch_halt: bool = False
+        self._killswitch_reason: str = ""
+        self._consecutive_api_failures: int = 0
 
         # Per-position peaks for trailing stop high-water mark
         self._position_peaks: dict = {}
@@ -385,6 +389,11 @@ class TradingEngine:
         max_position: Optional[float] = None,
         risk_level: Optional[str] = None,
     ):
+        self._killswitch_halt = False
+        self._killswitch_reason = ""
+        self._consecutive_api_failures = 0
+        self.regime_data["killswitch_halt"] = False
+        self.regime_data["killswitch_reason"] = ""
         self.active = True
         self.active_strategy = strategy
         self.regime_data["timestamp"] = datetime.now().strftime("%b %d, %Y, %-I:%M%p")
@@ -432,6 +441,31 @@ class TradingEngine:
         self.active = False
         self._log("info", "Trading engine stopped")
         logger.info("Trading engine stopped")
+
+    def _trip_killswitch(self, code: str, detail: str = "") -> None:
+        """Halt trading for the session: no auto-start until new ET day or manual ``start()``."""
+        if self._killswitch_halt:
+            return
+        self._killswitch_halt = True
+        self.active = False
+        self.active_strategy = None
+        msg = f"{code}" + (f" — {detail}" if detail else "")
+        self._killswitch_reason = msg
+        self.regime_data["killswitch_halt"] = True
+        self.regime_data["killswitch_reason"] = msg
+        self._log("error", f"🛑 KILLSWITCH ({code}): {detail or 'trading halted'}")
+        try:
+            from app.services.notification_service import notification_service
+
+            notification_service.send_alert(
+                "🛑 Killswitch — trading stopped",
+                msg,
+                "CRITICAL",
+                to_email=self.owner_email,
+                user_id=self._notify_user_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("killswitch notification failed: %s", exc)
 
     @property
     def is_active(self) -> bool:
@@ -554,7 +588,7 @@ class TradingEngine:
 
         if not is_weekend:
             if market_time >= sess_start and market_time < sess_end:
-                if not self.active:
+                if not self.active and not self._killswitch_halt:
                     from app.services.notification_service import notification_service
                     self.active = True
                     self.active_strategy = "scalp"
@@ -659,6 +693,18 @@ class TradingEngine:
             account = self._alpaca.get_account()
             positions = self._alpaca.get_positions()
             pending = self._alpaca.get_orders(status="open")
+        except Exception as e:
+            self._consecutive_api_failures += 1
+            thr = max(1, int(getattr(settings, "killswitch_api_consecutive_failures", 5)))
+            n = self._consecutive_api_failures
+            self._log("error", f"Alpaca API failure #{n}/{thr}: {e}")
+            if n >= thr:
+                self._trip_killswitch("api_circuit_breaker", f"{n} consecutive failures: {e}")
+            return
+
+        self._consecutive_api_failures = 0
+
+        try:
             equity = account["equity"]
             cash = account["cash"]
 
@@ -676,14 +722,13 @@ class TradingEngine:
 
             if daily_pnl_pct <= -self._preset.daily_loss_limit_percent:
                 self._daily_loss_limit_hit = True
-                from app.services.notification_service import notification_service
-                self._log("info", f"⛔ DAILY LOSS LIMIT: {daily_pnl_pct:.2f}% — stopping trades for today")
-                notification_service.send_alert(
-                    "⛔ Daily loss limit hit",
-                    f"P&L: ${self._daily_pnl:+,.2f} ({daily_pnl_pct:+.2f}%)\nNo more trades today.",
-                    "CRITICAL",
-                    to_email=self.owner_email,
-                    user_id=self._notify_user_id,
+                self._log(
+                    "info",
+                    f"⛔ DAILY LOSS LIMIT: {daily_pnl_pct:.2f}% — killswitch (limit -{self._preset.daily_loss_limit_percent}%)",
+                )
+                self._trip_killswitch(
+                    "daily_loss_limit",
+                    f"P&L {daily_pnl_pct:+.2f}% (${self._daily_pnl:+,.2f}) vs -{self._preset.daily_loss_limit_percent}%",
                 )
                 return
 
@@ -924,6 +969,11 @@ class TradingEngine:
         self._daily_trades = 0
         self._daily_target_reached = False
         self._daily_loss_limit_hit = False
+        self._killswitch_halt = False
+        self._killswitch_reason = ""
+        self._consecutive_api_failures = 0
+        self.regime_data["killswitch_halt"] = False
+        self.regime_data["killswitch_reason"] = ""
         self._position_peaks.clear()
         self._pending_reconcile.clear()
         self.session_stats["slippage_bps_sum"] = 0.0
@@ -1439,4 +1489,7 @@ class TradingEngine:
             "preset": self._preset.level,
             "capital_scale": self._scale,
             "compliance": self._compliance.status(),
+            "killswitch_halt": self._killswitch_halt,
+            "killswitch_reason": self._killswitch_reason or None,
+            "consecutive_api_failures": self._consecutive_api_failures,
         }
