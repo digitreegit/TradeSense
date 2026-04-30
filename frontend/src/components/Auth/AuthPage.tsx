@@ -101,8 +101,8 @@ const AuthPage: React.FC = () => {
             <img
               src="/logo-ts.svg"
               alt="TradeSense"
-              width={150}
-              height={150}
+              width={120}
+              height={120}
               className="auth-panel-logo"
               decoding="async"
             />

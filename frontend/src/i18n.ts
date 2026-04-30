@@ -37,7 +37,7 @@ const ko: Record<string, string> = {
   longShortSetups: '롱 / 숏 셋업',
   openTradeSense: 'TradeSense 열기',
   signInWithGoogle: 'Google로 계속하려면 로그인하세요.',
-  invitationCode: '초대 코드',
+  invitationCode: '초대 전용',
   invitationCodePlaceholder: '초대 코드를 입력하세요',
   invitationInvalid: '유효하지 않은 초대 코드입니다.',
   invitationVerifyFailed:
@@ -236,7 +236,7 @@ const en: Record<string, string> = {
   longShortSetups: 'Long / short setups',
   openTradeSense: 'Open TradeSense',
   signInWithGoogle: 'Sign in to continue with Google.',
-  invitationCode: 'Invitation code',
+  invitationCode: 'Invitation only',
   invitationCodePlaceholder: 'Enter your invitation code',
   invitationInvalid: 'Invalid invitation code.',
   invitationVerifyFailed:

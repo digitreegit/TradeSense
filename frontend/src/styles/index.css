@@ -3304,15 +3304,16 @@ body {
   margin: 0;
   padding: 0;
   line-height: 0;
+  align-self: flex-start;
 }
 
 .auth-panel-logo {
-  width: 150px;
-  height: 150px;
+  width: 120px;
+  height: 120px;
   display: block;
   margin: 0;
   padding: 0;
-  border-radius: 38px;
+  border-radius: 30px;
   box-shadow: var(--shadow-sm);
 }
 
