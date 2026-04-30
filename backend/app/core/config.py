@@ -85,6 +85,14 @@ class Settings(BaseSettings):
     ml_drift_warn_z: float = float(os.getenv("ML_DRIFT_WARN_Z", "2.2"))
     ml_drift_alert_z: float = float(os.getenv("ML_DRIFT_ALERT_Z", "3.0"))
 
+    # Tick backtester (CSV under repo ``data/backtest``, Polygon optional)
+    backtest_data_dir: str = os.getenv("BACKTEST_DATA_DIR", str(_repo_root / "data" / "backtest"))
+    tick_backtest_max_ticks: int = int(os.getenv("TICK_BACKTEST_MAX_TICKS", "250000"))
+    polygon_api_key: str = os.getenv("POLYGON_API_KEY", "")
+
+    # Backtest: inject measured round-trip latency (ms) from prod / health probes — aligns fills with live
+    backtest_latency_rtt_ms: float = float(os.getenv("BACKTEST_LATENCY_RTT_MS", "0"))
+
     # AI
     ai_provider: str = os.getenv("AI_PROVIDER", "openai")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")

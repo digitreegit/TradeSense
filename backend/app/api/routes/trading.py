@@ -1,11 +1,18 @@
 """TradeSense - Trading API Routes"""
+from typing import Any, Dict, List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from typing import List, Optional
+from pydantic import BaseModel, Field
 
 from app.api.deps import get_current_engine, get_current_user_id
 from app.core.config import settings
 from app.services import ml_signal_service
+from app.services.tick_backtest_service import (
+    TickBacktestParams,
+    WalkForwardParams,
+    run_tick_backtest,
+    run_walk_forward_backtest,
+)
 from app.services.user_runtime import get_or_create_engine
 
 router = APIRouter(prefix="/trading", tags=["trading"])
@@ -186,6 +193,161 @@ async def get_ml_signal_status(engine=Depends(get_current_engine)):
         "global": ml_signal_service.get_status_dict(),
         "regime_snapshot": engine.regime_data.get("ml_signal"),
     }
+
+
+class TickBacktestRequest(BaseModel):
+    symbol: str
+    start: str  # ISO-8601 date or datetime
+    end: str
+    source: str = "alpaca_trades"  # alpaca_trades | csv | polygon | databento
+    csv_filename: Optional[str] = None
+    initial_cash: float = 100_000.0
+    bar_seconds: int = 300
+    entry_score_threshold: int = 50
+    stop_loss_pct: float = 0.3
+    take_profit_pct: float = 0.8
+    slippage_bps: float = 8.0
+    playbooks: Optional[List[str]] = None
+    max_ticks: int = 250_000
+    latency_rtt_ms: Optional[float] = None
+
+
+class WalkForwardBacktestRequest(BaseModel):
+    symbol: str
+    start: str
+    end: str
+    source: str = "alpaca_trades"
+    csv_filename: Optional[str] = None
+    initial_cash: float = 100_000.0
+    bar_seconds: int = 300
+    entry_score_threshold: int = 50
+    stop_loss_pct: float = 0.3
+    take_profit_pct: float = 0.8
+    slippage_bps: float = 8.0
+    playbooks: Optional[List[str]] = None
+    max_ticks: int = 250_000
+    latency_rtt_ms: Optional[float] = None
+    in_sample_bars: int = 120
+    out_sample_bars: int = 60
+    step_bars: int = 60
+    optimize_entry_threshold: bool = False
+    threshold_grid: Optional[List[int]] = None
+
+
+@router.post("/backtest/tick")
+async def backtest_tick(req: TickBacktestRequest, engine=Depends(get_current_engine)):
+    """
+    Event-driven tick → bar aggregation → playbook long-only simulation.
+    Polygon/Databento: polygon needs ``POLYGON_API_KEY``; databento returns ``not_configured``.
+    """
+    params = TickBacktestParams(
+        symbol=req.symbol,
+        start=req.start,
+        end=req.end,
+        source=req.source,
+        csv_filename=req.csv_filename,
+        initial_cash=req.initial_cash,
+        bar_seconds=req.bar_seconds,
+        entry_score_threshold=req.entry_score_threshold,
+        stop_loss_pct=req.stop_loss_pct,
+        take_profit_pct=req.take_profit_pct,
+        slippage_bps=req.slippage_bps,
+        playbooks=req.playbooks,
+        max_ticks=req.max_ticks,
+        latency_rtt_ms=req.latency_rtt_ms,
+    )
+    return run_tick_backtest(engine._alpaca, params)
+
+
+@router.post("/backtest/walkforward")
+async def backtest_walkforward(req: WalkForwardBacktestRequest, engine=Depends(get_current_engine)):
+    """Rolling IS/OOS windows; optional in-sample-only entry threshold grid search."""
+    grid = req.threshold_grid if req.threshold_grid is not None else [40, 50, 60]
+    params = TickBacktestParams(
+        symbol=req.symbol,
+        start=req.start,
+        end=req.end,
+        source=req.source,
+        csv_filename=req.csv_filename,
+        initial_cash=req.initial_cash,
+        bar_seconds=req.bar_seconds,
+        entry_score_threshold=req.entry_score_threshold,
+        stop_loss_pct=req.stop_loss_pct,
+        take_profit_pct=req.take_profit_pct,
+        slippage_bps=req.slippage_bps,
+        playbooks=req.playbooks,
+        max_ticks=req.max_ticks,
+        latency_rtt_ms=req.latency_rtt_ms,
+    )
+    wf = WalkForwardParams(
+        in_sample_bars=req.in_sample_bars,
+        out_sample_bars=req.out_sample_bars,
+        step_bars=req.step_bars,
+        optimize_entry_threshold=req.optimize_entry_threshold,
+        threshold_grid=grid,
+    )
+    return run_walk_forward_backtest(engine._alpaca, params, wf)
+
+
+@router.get("/backtest/sources")
+async def backtest_tick_sources():
+    """Available tick loaders for ``/backtest/tick``."""
+    return {
+        "sources": [
+            {
+                "id": "alpaca_trades",
+                "description": "Historical trades via Alpaca Data API (keys + feed from env)",
+            },
+            {
+                "id": "csv",
+                "description": "Local CSV under BACKTEST_DATA_DIR: timestamp, price, size",
+            },
+            {
+                "id": "polygon",
+                "description": "Polygon.io v3 trades (POLYGON_API_KEY)",
+            },
+            {
+                "id": "databento",
+                "description": "Not bundled — use CSV export or Alpaca/Polygon",
+            },
+        ],
+        "note": "vectorbt not used; simulator is custom event loop for tick fidelity.",
+    }
+
+
+class BacktestCompatBody(BaseModel):
+    strategy: str = "scalp"
+    params: Dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/backtest")
+async def backtest_compat(body: BacktestCompatBody, engine=Depends(get_current_engine)):
+    """Backward-compatible body: forwards to tick engine when params include symbol/start/end."""
+    p = body.params
+    if p.get("symbol") and p.get("start") and p.get("end"):
+        req = TickBacktestRequest.model_validate(
+            {
+                "symbol": p["symbol"],
+                "start": str(p["start"]),
+                "end": str(p["end"]),
+                "source": p.get("source", "alpaca_trades"),
+                "csv_filename": p.get("csv_filename"),
+                "initial_cash": float(p.get("initial_cash", 100_000)),
+                "bar_seconds": int(p.get("bar_seconds", 300)),
+                "entry_score_threshold": int(p.get("entry_score_threshold", 50)),
+                "stop_loss_pct": float(p.get("stop_loss_pct", 0.3)),
+                "take_profit_pct": float(p.get("take_profit_pct", 0.8)),
+                "slippage_bps": float(p.get("slippage_bps", 8)),
+                "playbooks": p.get("playbooks"),
+                "max_ticks": int(p.get("max_ticks", 250_000)),
+                "latency_rtt_ms": p.get("latency_rtt_ms"),
+            }
+        )
+        return await backtest_tick(req, engine)
+    raise HTTPException(
+        status_code=400,
+        detail="params must include symbol, start, end (optional source, bar_seconds, …) for tick backtest",
+    )
 
 
 class CapitalScaleRequest(BaseModel):

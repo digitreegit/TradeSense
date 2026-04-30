@@ -219,6 +219,20 @@ export const api = {
       body: JSON.stringify({ strategy, params }),
     }),
 
+  /** Tick-level event simulator (Alpaca trades / CSV / Polygon) */
+  backtestTick: (body: Record<string, unknown>) =>
+    request<unknown>('/trading/backtest/tick', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  /** Walk-forward IS/OOS folds; optional in-sample threshold tuning */
+  backtestWalkForward: (body: Record<string, unknown>) =>
+    request<unknown>('/trading/backtest/walkforward', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
   validateInvitation: (code: string) =>
     request<{ valid: boolean }>('/auth/validate-invitation', {
       method: 'POST',
