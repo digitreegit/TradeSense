@@ -1458,7 +1458,7 @@ html[data-theme='light'] .trading-range::-moz-range-track {
 
 .regime-market-score-number {
   font-size: 26px;
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
   color: var(--text-primary);
