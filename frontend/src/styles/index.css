@@ -3224,7 +3224,7 @@ body {
   position: relative;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: center;
   min-height: 520px;
   padding: 30px;
   border-radius: 24px;
@@ -3317,30 +3317,6 @@ body {
   box-shadow: var(--shadow-sm);
 }
 
-.auth-agent-card {
-  margin-top: 30px;
-  padding: 16px;
-  border: 1px solid var(--border-secondary);
-  border-radius: 20px;
-  background: var(--bg-card);
-  box-shadow: var(--shadow-sm);
-}
-
-.auth-agent-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border-secondary);
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
-.auth-agent-row:last-child {
-  border-bottom: 0;
-}
-
 .auth-google-btn {
   margin-top: 18px;
 }
@@ -3382,10 +3358,6 @@ body {
     margin-top: 8px;
     font-size: 12px;
     line-height: 1.35;
-  }
-
-  .auth-agent-card {
-    display: none;
   }
 
   .auth-panel {
@@ -4056,7 +4028,7 @@ body {
   position: relative;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: center;
   min-height: 560px;
   padding: 44px;
   border: 1px solid var(--border-primary);
@@ -4132,36 +4104,6 @@ body {
   letter-spacing: -0.025em;
 }
 
-.auth-agent-card {
-  margin-top: 32px;
-  padding: 0;
-  border: 1px solid var(--border-primary);
-  border-radius: 12px;
-  background: var(--bg-secondary);
-  box-shadow: none;
-}
-
-.auth-agent-row {
-  display: grid;
-  grid-template-columns: 150px 1fr;
-  align-items: center;
-  gap: 14px;
-  min-height: 44px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--border-primary);
-  color: var(--text-tertiary);
-  font-size: 13px;
-}
-
-.auth-agent-row strong {
-  color: var(--text-primary);
-  font-weight: 700;
-}
-
-.auth-agent-row:last-child {
-  border-bottom: 0;
-}
-
 @media (max-width: 1200px) {
   .dashboard-grid {
     grid-template-columns: 1fr;
@@ -4197,10 +4139,6 @@ body {
   .auth-subtitle {
     margin-top: 10px;
     font-size: 14px;
-  }
-
-  .auth-agent-card {
-    display: none;
   }
 }
 

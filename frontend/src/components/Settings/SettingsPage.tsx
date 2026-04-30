@@ -37,6 +37,10 @@ type LiveSummary = {
   portfolio_value: number;
 };
 
+function isCapitalScale(s: unknown): s is CapitalScale {
+  return s === '3k' || s === '10k' || s === '30k';
+}
+
 const fmtUsd = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(n);
 
@@ -59,7 +63,7 @@ const SettingsPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
-  const [scale, setScale] = useState<CapitalScale | null>(null);
+  const [scale, setScale] = useState<CapitalScale>('3k');
   const [scaleLoading, setScaleLoading] = useState(false);
   const [scaleMsg, setScaleMsg] = useState<string | null>(null);
   const [modeLoading, setModeLoading] = useState(false);
@@ -84,7 +88,7 @@ const SettingsPage: React.FC = () => {
     api
       .getCapitalScale()
       .then((info) => {
-        if (!cancelled) setScale(info.scale);
+        if (!cancelled && isCapitalScale(info?.scale)) setScale(info.scale);
       })
       .catch(() => {
         /* non-fatal */
@@ -166,6 +170,9 @@ const SettingsPage: React.FC = () => {
       const info = await api.setTradingMode(paper);
       if (authEmail) {
         setAuthProfile(authEmail, true, Boolean(info.paper_trading));
+      }
+      if (isCapitalScale(info.scale)) {
+        setScale(info.scale);
       }
       setScaleMsg(
         info.paper_trading

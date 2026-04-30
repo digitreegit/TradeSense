@@ -79,21 +79,6 @@ const AuthPage: React.FC = () => {
               {t('authSubtitle')}
             </p>
           </div>
-
-          <div className="auth-agent-card" aria-hidden="true">
-            <div className="auth-agent-row">
-              <span>{t('marketSummary')}</span>
-              <strong>{t('sectorPerformance')}</strong>
-            </div>
-            <div className="auth-agent-row">
-              <span>{t('mostActive')}</span>
-              <strong>NVDA · TSLA · AMD</strong>
-            </div>
-            <div className="auth-agent-row">
-              <span>{t('ideas')}</span>
-              <strong>{t('longShortSetups')}</strong>
-            </div>
-          </div>
         </section>
 
         <section className="auth-panel" aria-label="Sign in">

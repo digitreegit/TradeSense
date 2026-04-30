@@ -29,7 +29,7 @@ const ko: Record<string, string> = {
   disconnected: '연결 끊김',
   usStocks: '미국 주식',
   authTitle: '시장 요약, 실시간 시세, AI 거래 아이디어.',
-  authSubtitle: '포트폴리오를 추적하고, 활발한 종목을 스캔하고, TradingView 스타일 워크스페이스에서 자동 전략을 실행하세요.',
+  authSubtitle: '포트폴리오를 추적하고, 활발한 종목을 스캔하고, 모던 워크스페이스에서 자동 전략을 실행하세요.',
   marketSummary: '시장 요약',
   sectorPerformance: '섹터 성과',
   mostActive: '거래량 상위',
@@ -228,7 +228,7 @@ const en: Record<string, string> = {
   usStocks: 'US stocks',
   authTitle: 'Market summary, live quotes, AI trade ideas.',
   authSubtitle:
-    'Track your portfolio, scan movers, and run automated strategies in a TradingView-style workspace.',
+    'Track your portfolio, scan movers, and run automated strategies in a modern workspace.',
   marketSummary: 'Market summary',
   sectorPerformance: 'Sector performance',
   mostActive: 'Most active',
