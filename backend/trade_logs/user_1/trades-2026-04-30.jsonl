@@ -1,0 +1,4 @@
+{"time": "2026-04-30T10:50:59.015410-04:00", "symbol": "AAPL", "qty": 7, "proceeds": 1895.64, "cost_basis": 1900.71, "pnl": -5.07, "hold_term": "short", "fifo_slices": 0}
+{"time": "2026-04-30T10:50:59.168039-04:00", "symbol": "NVDA", "qty": 9, "proceeds": 1812.78, "cost_basis": 1847.27, "pnl": -34.49, "hold_term": "short", "fifo_slices": 0}
+{"time": "2026-04-30T10:50:59.209374-04:00", "symbol": "TSLA", "qty": 5, "proceeds": 1870.78, "cost_basis": 1852.06, "pnl": 18.72, "hold_term": "short", "fifo_slices": 0}
+{"time": "2026-04-30T10:51:00.315504-04:00", "symbol": "MSFT", "qty": 4, "proceeds": 1618.98, "cost_basis": 1625.93, "pnl": -6.95, "hold_term": "short", "fifo_slices": 0}
