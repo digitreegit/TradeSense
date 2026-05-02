@@ -3645,8 +3645,8 @@ body {
 }
 
 .sidebar-item.active {
-  background: var(--accent-primary-dim);
-  color: var(--accent-primary);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
   box-shadow: none;
 }
 

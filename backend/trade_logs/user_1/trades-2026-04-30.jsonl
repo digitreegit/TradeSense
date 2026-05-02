@@ -17,3 +17,4 @@
 {"time": "2026-04-30T15:33:32.488985-04:00", "symbol": "SLB", "qty": 3, "proceeds": 170.37, "cost_basis": 170.31, "pnl": 0.06, "hold_term": "short", "fifo_slices": 0}
 {"time": "2026-04-30T15:33:32.528797-04:00", "symbol": "XLE", "qty": 1, "proceeds": 59.5, "cost_basis": 59.44, "pnl": 0.06, "hold_term": "short", "fifo_slices": 0}
 {"time": "2026-04-30T15:33:47.235072-04:00", "symbol": "XOM", "qty": 3, "proceeds": 464.42, "cost_basis": 464.07, "pnl": 0.35, "hold_term": "short", "fifo_slices": 0}
+{"time": "2026-04-30T15:53:24.241771-04:00", "symbol": "USO", "qty": 1, "proceeds": 146.88, "cost_basis": 146.69, "pnl": 0.19, "hold_term": "short", "fifo_slices": 1}

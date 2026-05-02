@@ -1,0 +1,5 @@
+{"time": "2026-05-01T09:37:38.677560-04:00", "symbol": "GOOGL", "qty": 1, "proceeds": 381.88, "cost_basis": 382.83, "pnl": -0.95, "hold_term": "short", "fifo_slices": 1}
+{"time": "2026-05-01T09:39:15.892745-04:00", "symbol": "XLE", "qty": 1, "proceeds": 59.41, "cost_basis": 59.25, "pnl": 0.16, "hold_term": "short", "fifo_slices": 1}
+{"time": "2026-05-01T09:57:03.852687-04:00", "symbol": "XLE", "qty": 6, "proceeds": 352.38, "cost_basis": 353.28, "pnl": -0.9, "hold_term": "short", "fifo_slices": 1}
+{"time": "2026-05-01T09:57:07.134086-04:00", "symbol": "XLE", "qty": 1, "proceeds": 58.72, "cost_basis": 58.88, "pnl": -0.16, "hold_term": "short", "fifo_slices": 1}
+{"time": "2026-05-01T09:57:52.055372-04:00", "symbol": "AAPL", "qty": 1, "proceeds": 282.91, "cost_basis": 283.68, "pnl": -0.77, "hold_term": "short", "fifo_slices": 1}
