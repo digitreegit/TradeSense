@@ -177,8 +177,8 @@ const AgentPanel: React.FC = () => {
       height: 'calc(100vh - 64px - 48px)',
     }}>
       <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-        <div className="card-header">
-          <span className="card-title" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+        <div className="card-header agent-card-header">
+          <span className="card-title agent-card-title" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
             <AiAgentIcon className="card-icon" aria-hidden style={{ width: 18, height: 18 }} />
             {t('aiAgentTitle')}
             <span style={{
@@ -193,7 +193,7 @@ const AgentPanel: React.FC = () => {
               {aiModelBadge ? `${aiModelBadge} · ${t('powered')}` : t('loading')}
             </span>
           </span>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div className="agent-card-actions" style={{ display: 'flex', gap: '8px' }}>
             {quickActions.slice(0, 3).map((action, i) => (
               <button
                 key={i}

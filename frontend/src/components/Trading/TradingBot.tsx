@@ -575,13 +575,16 @@ const TradingBot: React.FC = () => {
     <div className="page-enter trading-page">
       {/* Bot Control Header */}
       <div className="card" style={{ marginBottom: 'var(--space-xl)' }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: 'var(--space-xl)',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <div
+          className="trading-bot-hero"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: 'var(--space-xl)',
+          }}
+        >
+          <div className="trading-bot-hero-main" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
             <div
               className={`trading-bot-header-mark${botActive ? ' trading-bot-header-mark--active' : ''}`}
               aria-hidden
@@ -598,7 +601,7 @@ const TradingBot: React.FC = () => {
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+          <div className="trading-bot-hero-actions" style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
             <span style={{
               fontSize: '12px',
               fontWeight: 700,
@@ -637,6 +640,7 @@ const TradingBot: React.FC = () => {
                 <CheckBadgeIcon className="card-icon" /> {t('tradingStrategies')}
               </span>
               <div
+                className="trading-strategies-header-controls"
                 style={{
                   display: 'flex',
                   alignItems: 'center',

@@ -1822,7 +1822,8 @@ html[data-theme='light'] .trading-range::-moz-range-track {
   border-radius: var(--radius-full);
   cursor: pointer;
   box-sizing: border-box;
-  background: rgba(100, 116, 139, 0.45);
+  /* Manual (off): dark blue-gray — same family as accent, not neutral black */
+  background: rgba(38, 62, 108, 0.72);
   transition: background var(--transition-base);
 }
 
@@ -1841,11 +1842,18 @@ html[data-theme='light'] .trading-range::-moz-range-track {
 }
 
 .playbook-switch[aria-checked='true'] {
-  background: #3f4652;
+  /* Auto (on), dark theme: deep blue aligned with --accent-primary */
+  background: linear-gradient(180deg, #355a9e 0%, #284878 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 [data-theme='light'] .playbook-switch:not([aria-checked='true']) {
-  background: rgba(148, 163, 184, 0.55);
+  background: rgba(59, 91, 150, 0.34);
+}
+
+[data-theme='light'] .playbook-switch[aria-checked='true'] {
+  background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
 .playbook-switch-thumb {
@@ -4147,7 +4155,10 @@ body {
     margin: 0;
   }
 
-  .header-badge:not(.paper) {
+  /* Hide the optional paper-mode pill on mobile to save space, but keep the
+     LIVE badge visible — users on real money need to see the mode at all
+     viewport widths. */
+  .header-badge.paper {
     display: none !important;
   }
 
@@ -4157,6 +4168,83 @@ body {
 
   .stats-grid {
     grid-template-columns: 1fr;
+  }
+
+  /* AI Agent header: title + quick actions cram into one row at narrow
+     widths and clip the model badge / button labels. Stack vertically and
+     let the action row scroll horizontally if it overflows. */
+  .agent-card-header {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: 10px;
+    padding: 12px 14px;
+  }
+
+  .agent-card-header .agent-card-title {
+    font-size: 15px;
+    line-height: 1.3;
+  }
+
+  .agent-card-header .agent-card-actions {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    flex-wrap: nowrap;
+  }
+
+  .agent-card-header .agent-card-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .agent-card-header .agent-card-actions .btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  /* Trading Bot: top hero + section card headers — title row vs. controls on
+     separate lines at narrow widths (same idea as AI Agent panel). */
+  .trading-bot-hero {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: 14px;
+    padding: var(--space-lg) !important;
+  }
+
+  .trading-bot-hero-main {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .trading-bot-hero-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 12px;
+  }
+
+  .trading-page .card-header {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: 10px;
+    padding: 12px 14px;
+  }
+
+  .trading-page .card-header .card-title {
+    flex-wrap: wrap;
+  }
+
+  .trading-strategies-header-controls {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    flex-wrap: nowrap;
+  }
+
+  .trading-strategies-header-controls::-webkit-scrollbar {
+    display: none;
   }
 }
 
