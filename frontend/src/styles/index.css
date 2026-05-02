@@ -18,45 +18,45 @@
   --bg-input: rgba(15, 23, 42, 0.5);
   --bg-overlay: rgba(0, 0, 0, 0.6);
 
-  /* Accent Colors */
-  --accent-primary: #4578ed;
-  --accent-primary-dim: rgba(69, 120, 237, 0.15);
-  --accent-primary-glow: rgba(69, 120, 237, 0.4);
-  --accent-secondary: #4578ed;
-  --accent-secondary-dim: rgba(69, 120, 237, 0.15);
+  /* Accent Colors — dark: slightly higher chroma than before */
+  --accent-primary: #3d74f5;
+  --accent-primary-dim: rgba(61, 116, 245, 0.16);
+  --accent-primary-glow: rgba(61, 116, 245, 0.42);
+  --accent-secondary: #3d74f5;
+  --accent-secondary-dim: rgba(61, 116, 245, 0.16);
   --accent-tertiary: #8b5cf6;
-  --accent-gold: #f3af56;
-  --accent-gold-dim: rgba(243, 175, 86, 0.15);
+  --accent-gold: #f59e2a;
+  --accent-gold-dim: rgba(245, 158, 42, 0.16);
 
   /* Semantic Colors */
-  --profit: #449782;
-  --profit-dim: rgba(68, 151, 130, 0.15);
-  --profit-glow: rgba(68, 151, 130, 0.4);
-  --loss: #df484c;
-  --loss-dim: rgba(223, 72, 76, 0.15);
-  --loss-glow: rgba(223, 72, 76, 0.4);
-  --warning: #f3af56;
-  --info: #4578ed;
+  --profit: #2eb899;
+  --profit-dim: rgba(46, 184, 153, 0.16);
+  --profit-glow: rgba(46, 184, 153, 0.42);
+  --loss: #ef3e48;
+  --loss-dim: rgba(239, 62, 72, 0.16);
+  --loss-glow: rgba(239, 62, 72, 0.42);
+  --warning: #f59e2a;
+  --info: #3d74f5;
   --on-accent: #ffffff;
 
-  --state-info-bg: rgba(69, 120, 237, 0.12);
-  --state-info-border: rgba(69, 120, 237, 0.3);
-  --state-warning-bg: rgba(243, 175, 86, 0.15);
-  --state-warning-border: rgba(243, 175, 86, 0.4);
-  --state-danger-bg: rgba(223, 72, 76, 0.15);
-  --state-danger-border: rgba(223, 72, 76, 0.4);
+  --state-info-bg: rgba(61, 116, 245, 0.14);
+  --state-info-border: rgba(61, 116, 245, 0.34);
+  --state-warning-bg: rgba(245, 158, 42, 0.16);
+  --state-warning-border: rgba(245, 158, 42, 0.42);
+  --state-danger-bg: rgba(239, 62, 72, 0.14);
+  --state-danger-border: rgba(239, 62, 72, 0.4);
   --surface-soft-bg: rgba(255, 255, 255, 0.03);
   --surface-soft-border: rgba(255, 255, 255, 0.05);
   --surface-hover-soft: rgba(255, 255, 255, 0.05);
 
-  --chart-ma-fast: rgba(68, 151, 130, 0.6);
-  --chart-ma-slow: rgba(69, 120, 237, 0.6);
-  --chart-candle-up: #449782;
-  --chart-candle-down: #df484c;
-  --chart-candle-up-dim: rgba(68, 151, 130, 0.2);
-  --chart-candle-down-dim: rgba(223, 72, 76, 0.2);
-  --chart-candle-up-line: rgba(68, 151, 130, 0.5);
-  --chart-candle-down-line: rgba(223, 72, 76, 0.5);
+  --chart-ma-fast: rgba(46, 184, 153, 0.62);
+  --chart-ma-slow: rgba(61, 116, 245, 0.62);
+  --chart-candle-up: #2eb899;
+  --chart-candle-down: #ef3e48;
+  --chart-candle-up-dim: rgba(46, 184, 153, 0.22);
+  --chart-candle-down-dim: rgba(239, 62, 72, 0.22);
+  --chart-candle-up-line: rgba(46, 184, 153, 0.52);
+  --chart-candle-down-line: rgba(239, 62, 72, 0.52);
 
   /* Text Colors — brighter for readability */
   --text-primary:   #f8fafc;
@@ -67,12 +67,12 @@
   /* Border */
   --border-primary: rgba(148, 163, 184, 0.1);
   --border-secondary: rgba(148, 163, 184, 0.06);
-  --border-accent: rgba(69, 120, 237, 0.3);
+  --border-accent: rgba(61, 116, 245, 0.34);
 
   /* Gradients */
-  --gradient-primary: linear-gradient(135deg, #4578ed 0%, #4578ed 100%);
-  --gradient-profit: linear-gradient(135deg, #449782 0%, #449782 100%);
-  --gradient-loss: linear-gradient(135deg, #df484c 0%, #df484c 100%);
+  --gradient-primary: linear-gradient(135deg, #3d74f5 0%, #3d74f5 100%);
+  --gradient-profit: linear-gradient(135deg, #2eb899 0%, #2eb899 100%);
+  --gradient-loss: linear-gradient(135deg, #ef3e48 0%, #ef3e48 100%);
   --gradient-card: linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(15, 23, 42, 0.7) 100%);
   --gradient-glass: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.01) 100%);
   --gradient-sidebar: linear-gradient(180deg, #0c1220 0%, #060a13 100%);
@@ -82,9 +82,9 @@
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
   --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.6);
-  --shadow-glow-green: 0 0 20px rgba(68, 151, 130, 0.3);
-  --shadow-glow-red: 0 0 20px rgba(223, 72, 76, 0.3);
-  --shadow-glow-purple: 0 0 20px rgba(69, 120, 237, 0.3);
+  --shadow-glow-green: 0 0 20px rgba(46, 184, 153, 0.32);
+  --shadow-glow-red: 0 0 20px rgba(239, 62, 72, 0.32);
+  --shadow-glow-purple: 0 0 20px rgba(61, 116, 245, 0.32);
 
   /* Typography */
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -529,7 +529,7 @@ body {
 
 .btn-start {
   padding: 10px 16px;
-  background: linear-gradient(135deg, #449782 0%, #449782 50%, #4578ed 100%);
+  background: linear-gradient(135deg, var(--profit) 0%, var(--profit) 50%, var(--accent-primary) 100%);
   color: white;
   border: none;
   border-radius: var(--radius-lg);
@@ -541,7 +541,7 @@ body {
   justify-content: center;
   gap: 12px;
   transition: all 0.2s ease;
-  box-shadow: 0 4px 12px rgba(68, 151, 130, 0.2);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--profit) 35%, transparent);
 }
 
 .btn-start:hover {
@@ -552,9 +552,9 @@ body {
 
 .btn-stop {
   padding: 10px 16px;
-  background: rgba(223, 72, 76, 0.1);
-  color: #df484c;
-  border: 1.5px solid rgba(223, 72, 76, 0.4);
+  background: color-mix(in srgb, var(--loss) 12%, transparent);
+  color: var(--loss);
+  border: 1.5px solid color-mix(in srgb, var(--loss) 42%, transparent);
   border-radius: var(--radius-lg);
   font-weight: 700;
   font-size: 14px;
@@ -567,8 +567,8 @@ body {
 }
 
 .btn-stop:hover {
-  background: rgba(223, 72, 76, 0.2);
-  border-color: #df484c;
+  background: color-mix(in srgb, var(--loss) 22%, transparent);
+  border-color: var(--loss);
   transform: translateY(-1px);
 }
 
@@ -2796,17 +2796,17 @@ html[data-theme='light'] .trading-range::-moz-range-track {
   --accent-secondary: #a1a1aa;
   --accent-secondary-dim: rgba(161, 161, 170, 0.12);
   --accent-tertiary: #d6d3d1;
-  --accent-gold: #f3af56;
-  --accent-gold-dim: rgba(243, 175, 86, 0.14);
+  --accent-gold: #f59e2a;
+  --accent-gold-dim: rgba(245, 158, 42, 0.16);
 
-  --profit: #449782;
-  --profit-dim: rgba(68, 151, 130, 0.12);
-  --profit-glow: rgba(68, 151, 130, 0.24);
-  --loss: #df484c;
-  --loss-dim: rgba(223, 72, 76, 0.12);
-  --loss-glow: rgba(223, 72, 76, 0.24);
-  --warning: #f3af56;
-  --info: #4578ed;
+  --profit: #2eb899;
+  --profit-dim: rgba(46, 184, 153, 0.14);
+  --profit-glow: rgba(46, 184, 153, 0.26);
+  --loss: #ef3e48;
+  --loss-dim: rgba(239, 62, 72, 0.14);
+  --loss-glow: rgba(239, 62, 72, 0.26);
+  --warning: #f59e2a;
+  --info: #3d74f5;
 
   --text-primary: #f7f7f4;
   --text-secondary: #c7c7c2;
@@ -2818,8 +2818,8 @@ html[data-theme='light'] .trading-range::-moz-range-track {
   --border-accent: rgba(255, 255, 255, 0.28);
 
   --gradient-primary: linear-gradient(180deg, #ffffff 0%, #d7d7d0 100%);
-  --gradient-profit: linear-gradient(180deg, #449782 0%, #449782 100%);
-  --gradient-loss: linear-gradient(180deg, #df484c 0%, #df484c 100%);
+  --gradient-profit: linear-gradient(180deg, #2eb899 0%, #2eb899 100%);
+  --gradient-loss: linear-gradient(180deg, #ef3e48 0%, #ef3e48 100%);
   --gradient-card: linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.025) 100%);
   --gradient-glass: linear-gradient(180deg, rgba(255,255,255,0.09) 0%, rgba(255,255,255,0.025) 100%);
   --gradient-sidebar: linear-gradient(180deg, rgba(43,43,43,0.96) 0%, rgba(33,33,33,0.96) 100%);
@@ -2828,8 +2828,8 @@ html[data-theme='light'] .trading-range::-moz-range-track {
   --shadow-md: 0 12px 36px rgba(0, 0, 0, 0.26);
   --shadow-lg: 0 24px 72px rgba(0, 0, 0, 0.34);
   --shadow-xl: 0 36px 120px rgba(0, 0, 0, 0.48);
-  --shadow-glow-green: 0 0 28px rgba(68, 151, 130, 0.12);
-  --shadow-glow-red: 0 0 28px rgba(223, 72, 76, 0.12);
+  --shadow-glow-green: 0 0 28px rgba(46, 184, 153, 0.14);
+  --shadow-glow-red: 0 0 28px rgba(239, 62, 72, 0.14);
   --shadow-glow-purple: 0 0 28px rgba(255, 255, 255, 0.1);
 
   --radius-sm: 8px;
@@ -3433,40 +3433,40 @@ body {
   --bg-input: #212121;
   --bg-overlay: rgba(0, 0, 0, 0.58);
 
-  --accent-primary: #6b92f2;
-  --accent-primary-dim: rgba(107, 146, 242, 0.18);
-  --accent-primary-glow: rgba(107, 146, 242, 0.32);
-  --accent-secondary: #7aa0f5;
-  --accent-secondary-dim: rgba(122, 160, 245, 0.16);
+  --accent-primary: #5b8cff;
+  --accent-primary-dim: rgba(91, 140, 255, 0.2);
+  --accent-primary-glow: rgba(91, 140, 255, 0.36);
+  --accent-secondary: #6e9bff;
+  --accent-secondary-dim: rgba(110, 155, 255, 0.18);
   --accent-tertiary: #a78cf7;
-  --accent-gold: #f6bf73;
-  --accent-gold-dim: rgba(246, 191, 115, 0.18);
+  --accent-gold: #ffb84d;
+  --accent-gold-dim: rgba(255, 184, 77, 0.2);
 
-  --profit: #63b19c;
-  --profit-dim: rgba(99, 177, 156, 0.16);
-  --profit-glow: rgba(99, 177, 156, 0.24);
-  --loss: #e66b6f;
-  --loss-dim: rgba(230, 107, 111, 0.16);
-  --loss-glow: rgba(230, 107, 111, 0.24);
-  --warning: #f6bf73;
-  --info: #6b92f2;
+  --profit: #42c9a3;
+  --profit-dim: rgba(66, 201, 163, 0.18);
+  --profit-glow: rgba(66, 201, 163, 0.3);
+  --loss: #ff5a62;
+  --loss-dim: rgba(255, 90, 98, 0.18);
+  --loss-glow: rgba(255, 90, 98, 0.3);
+  --warning: #ffb84d;
+  --info: #5b8cff;
   --on-accent: #ffffff;
 
-  --state-info-bg: rgba(107, 146, 242, 0.18);
-  --state-info-border: rgba(107, 146, 242, 0.34);
-  --state-warning-bg: rgba(246, 191, 115, 0.2);
-  --state-warning-border: rgba(246, 191, 115, 0.42);
-  --state-danger-bg: rgba(230, 107, 111, 0.2);
-  --state-danger-border: rgba(230, 107, 111, 0.42);
+  --state-info-bg: rgba(91, 140, 255, 0.2);
+  --state-info-border: rgba(91, 140, 255, 0.38);
+  --state-warning-bg: rgba(255, 184, 77, 0.2);
+  --state-warning-border: rgba(255, 184, 77, 0.44);
+  --state-danger-bg: rgba(255, 90, 98, 0.2);
+  --state-danger-border: rgba(255, 90, 98, 0.42);
 
-  --chart-ma-fast: rgba(121, 194, 173, 0.72);
-  --chart-ma-slow: rgba(122, 160, 245, 0.72);
-  --chart-candle-up: #63b19c;
-  --chart-candle-down: #e66b6f;
-  --chart-candle-up-dim: rgba(99, 177, 156, 0.24);
-  --chart-candle-down-dim: rgba(230, 107, 111, 0.24);
-  --chart-candle-up-line: rgba(99, 177, 156, 0.56);
-  --chart-candle-down-line: rgba(230, 107, 111, 0.56);
+  --chart-ma-fast: rgba(66, 201, 163, 0.75);
+  --chart-ma-slow: rgba(91, 140, 255, 0.75);
+  --chart-candle-up: #42c9a3;
+  --chart-candle-down: #ff5a62;
+  --chart-candle-up-dim: rgba(66, 201, 163, 0.26);
+  --chart-candle-down-dim: rgba(255, 90, 98, 0.26);
+  --chart-candle-up-line: rgba(66, 201, 163, 0.58);
+  --chart-candle-down-line: rgba(255, 90, 98, 0.58);
 
   --text-primary: #d1d4dc;
   --text-secondary: #b2b5be;
@@ -3475,11 +3475,11 @@ body {
 
   --border-primary: #2a2e39;
   --border-secondary: rgba(120, 123, 134, 0.24);
-  --border-accent: rgba(107, 146, 242, 0.52);
+  --border-accent: rgba(91, 140, 255, 0.52);
 
-  --gradient-primary: linear-gradient(180deg, #7aa0f5 0%, #6b92f2 100%);
-  --gradient-profit: linear-gradient(180deg, #79c2ad 0%, #63b19c 100%);
-  --gradient-loss: linear-gradient(180deg, #ef8d90 0%, #e66b6f 100%);
+  --gradient-primary: linear-gradient(180deg, #6e9bff 0%, #5b8cff 100%);
+  --gradient-profit: linear-gradient(180deg, #5ad4b8 0%, #42c9a3 100%);
+  --gradient-loss: linear-gradient(180deg, #ff7278 0%, #ff5a62 100%);
   --gradient-card: linear-gradient(180deg, #1e222d 0%, #1e222d 100%);
   --gradient-glass: linear-gradient(180deg, #1e222d 0%, #1e222d 100%);
   --gradient-sidebar: linear-gradient(180deg, #212121 0%, #212121 100%);
@@ -3488,9 +3488,9 @@ body {
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.22);
   --shadow-lg: 0 16px 44px rgba(0, 0, 0, 0.28);
   --shadow-xl: 0 28px 72px rgba(0, 0, 0, 0.34);
-  --shadow-glow-green: 0 0 0 3px rgba(99, 177, 156, 0.14);
-  --shadow-glow-red: 0 0 0 3px rgba(230, 107, 111, 0.14);
-  --shadow-glow-purple: 0 0 0 3px rgba(167, 140, 247, 0.16);
+  --shadow-glow-green: 0 0 0 3px rgba(66, 201, 163, 0.16);
+  --shadow-glow-red: 0 0 0 3px rgba(255, 90, 98, 0.16);
+  --shadow-glow-purple: 0 0 0 3px rgba(91, 140, 255, 0.18);
 
   --radius-sm: 6px;
   --radius-md: 8px;

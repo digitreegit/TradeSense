@@ -72,8 +72,8 @@ const ChartView: React.FC = () => {
     const axisLbl = (cs.getPropertyValue('--chart-axis-label').trim() || '#64748b');
     const maFast = (cs.getPropertyValue('--chart-ma-fast').trim() || 'rgba(68, 151, 130, 0.6)');
     const maSlow = (cs.getPropertyValue('--chart-ma-slow').trim() || 'rgba(69, 120, 237, 0.6)');
-    const candleUp = (cs.getPropertyValue('--chart-candle-up').trim() || '#449782');
-    const candleDown = (cs.getPropertyValue('--chart-candle-down').trim() || '#df484c');
+    const candleUp = (cs.getPropertyValue('--chart-candle-up').trim() || '#2eb899');
+    const candleDown = (cs.getPropertyValue('--chart-candle-down').trim() || '#ef3e48');
     const candleUpDim = (cs.getPropertyValue('--chart-candle-up-dim').trim() || 'rgba(68, 151, 130, 0.2)');
     const candleDownDim = (cs.getPropertyValue('--chart-candle-down-dim').trim() || 'rgba(223, 72, 76, 0.2)');
     const candleUpLine = (cs.getPropertyValue('--chart-candle-up-line').trim() || 'rgba(68, 151, 130, 0.5)');
