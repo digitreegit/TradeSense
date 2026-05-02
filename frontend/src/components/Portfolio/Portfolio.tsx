@@ -34,8 +34,8 @@ const Portfolio: React.FC = () => {
 
   return (
     <div className="page-enter">
-      {/* Portfolio Stats */}
-      <div className="stats-grid">
+      {/* Portfolio Stats — headline figures; weight scoped in CSS */}
+      <div className="stats-grid portfolio-performance-stats">
         <div className={`stat-card ${totalPL >= 0 ? 'profit' : 'loss'}`}>
           <div className="stat-label">{t('totalEquity')}</div>
           <div className={`stat-value ${getChangeClass(totalPL)}`}>
@@ -298,7 +298,7 @@ const Portfolio: React.FC = () => {
                 <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{item.label}</span>
                 <span style={{
                   fontSize: '13px',
-                  fontWeight: 600,
+                  fontWeight: 700,
                   fontFamily: 'var(--font-mono)',
                   color: item.color === 'profit' ? 'var(--profit)' : item.color === 'loss' ? 'var(--loss)' : 'var(--text-primary)',
                 }}>

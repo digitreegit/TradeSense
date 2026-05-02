@@ -667,7 +667,7 @@ const Dashboard: React.FC = () => {
                 <div>
                   <div style={{
                     fontSize: '32px',
-                    fontWeight: 600,
+                    fontWeight: 700,
                     fontFamily: 'var(--font-mono)',
                     color: totalPL >= 0 ? 'var(--profit)' : 'var(--loss)',
                     letterSpacing: '0',
