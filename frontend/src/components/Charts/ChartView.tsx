@@ -254,7 +254,26 @@ const ChartView: React.FC = () => {
         <div className="card-header" style={{ gap: '16px', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
             <div className="chart-symbol-search">
-              <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>🔍</span>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={1.5}
+                stroke="currentColor"
+                aria-hidden
+                style={{
+                  width: 18,
+                  height: 18,
+                  flexShrink: 0,
+                  color: 'var(--text-muted)',
+                }}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+                />
+              </svg>
               <input
                 type="text"
                 value={searchInput}
