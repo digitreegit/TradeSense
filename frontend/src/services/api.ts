@@ -292,11 +292,6 @@ export const api = {
       method: 'POST',
     }),
 
-  testWhatsapp: () =>
-    request<{ ok: boolean; message: string }>('/auth/whatsapp-test', {
-      method: 'POST',
-    }),
-
   saveAlpacaKeys: (api_key: string, secret_key: string) =>
     request<{ ok: boolean; message: string }>('/auth/alpaca-keys', {
       method: 'POST',
