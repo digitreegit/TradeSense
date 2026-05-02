@@ -64,10 +64,11 @@ const History: React.FC = () => {
                     <td className="symbol">{order.symbol}</td>
                     <td>
                       <span style={{
-                        padding: '2px 8px',
+                        padding: '1px 6px',
                         borderRadius: 'var(--radius-full)',
-                        fontSize: '12px',
+                        fontSize: '10px',
                         fontWeight: 600,
+                        letterSpacing: '0.02em',
                         textTransform: 'uppercase',
                         background: order.side === 'buy' ? 'var(--profit-dim)' : 'var(--loss-dim)',
                         color: order.side === 'buy' ? 'var(--profit)' : 'var(--loss)',
@@ -84,10 +85,11 @@ const History: React.FC = () => {
                     </td>
                     <td>
                       <span style={{
-                        padding: '2px 8px',
+                        padding: '1px 6px',
                         borderRadius: 'var(--radius-full)',
-                        fontSize: '12px',
+                        fontSize: '10px',
                         fontWeight: 600,
+                        letterSpacing: '0.02em',
                         textTransform: 'uppercase',
                         background: order.status === 'filled' ? 'var(--profit-dim)' :
                                    order.status === 'cancelled' ? 'var(--loss-dim)' : 'var(--accent-gold-dim)',
