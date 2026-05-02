@@ -1184,6 +1184,8 @@ body {
   appearance: none;
   background: transparent;
   cursor: pointer;
+  /* Filled portion of WebKit track (set from JS per slider value). */
+  --trading-range-fill-pct: 0%;
 }
 
 .trading-range:focus {
@@ -1198,13 +1200,25 @@ body {
 .trading-range::-webkit-slider-runnable-track {
   height: 6px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
   border: 1px solid rgba(255, 255, 255, 0.07);
+  background: linear-gradient(
+    to right,
+    var(--trading-range-thumb, var(--accent-primary)) 0,
+    var(--trading-range-thumb, var(--accent-primary)) var(--trading-range-fill-pct, 0%),
+    rgba(255, 255, 255, 0.12) var(--trading-range-fill-pct, 0%),
+    rgba(255, 255, 255, 0.12) 100%
+  );
 }
 
 html[data-theme='light'] .trading-range::-webkit-slider-runnable-track {
-  background: #ececee;
   border: 1px solid rgba(0, 0, 0, 0.06);
+  background: linear-gradient(
+    to right,
+    var(--trading-range-thumb, var(--accent-primary)) 0,
+    var(--trading-range-thumb, var(--accent-primary)) var(--trading-range-fill-pct, 0%),
+    #ececee var(--trading-range-fill-pct, 0%),
+    #ececee 100%
+  );
 }
 
 .trading-range::-webkit-slider-thumb {

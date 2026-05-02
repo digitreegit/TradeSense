@@ -94,6 +94,14 @@ function presetNumbersForLevel(level: RiskLevelId) {
 const DEFAULT_RISK_LEVEL: RiskLevelId = 'moderate';
 const DEFAULT_RISK_NUMBERS = presetNumbersForLevel('moderate');
 
+/** WebKit range track fill — `--trading-range-fill-pct` on `.trading-range` (Chrome/Safari). */
+function tradingRangeFillPct(value: number, min: number, max: number): string {
+  const span = max - min;
+  if (span <= 0) return '0%';
+  const t = ((value - min) / span) * 100;
+  return `${Math.min(100, Math.max(0, t))}%`;
+}
+
 type LevelNumbers = {
   maxPositionSize: number;
   stopLossPercent: number;
@@ -858,6 +866,11 @@ const TradingBot: React.FC = () => {
                     {
                       width: '100%',
                       ['--trading-range-thumb' as string]: 'var(--accent-primary)',
+                      ['--trading-range-fill-pct' as string]: tradingRangeFillPct(
+                        levelNums.maxPositionSize,
+                        5,
+                        25,
+                      ),
                     } as React.CSSProperties
                   }
                 />
@@ -887,6 +900,11 @@ const TradingBot: React.FC = () => {
                     {
                       width: '100%',
                       ['--trading-range-thumb' as string]: 'var(--loss)',
+                      ['--trading-range-fill-pct' as string]: tradingRangeFillPct(
+                        levelNums.stopLossPercent,
+                        0.1,
+                        2.0,
+                      ),
                     } as React.CSSProperties
                   }
                 />
@@ -916,6 +934,11 @@ const TradingBot: React.FC = () => {
                     {
                       width: '100%',
                       ['--trading-range-thumb' as string]: 'var(--profit)',
+                      ['--trading-range-fill-pct' as string]: tradingRangeFillPct(
+                        levelNums.takeProfitPercent,
+                        0.2,
+                        5.0,
+                      ),
                     } as React.CSSProperties
                   }
                 />
