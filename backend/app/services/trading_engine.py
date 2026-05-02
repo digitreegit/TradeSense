@@ -40,6 +40,7 @@ from app.core.risk_presets import (
 )
 from app.services.alpaca_service import AlpacaService
 from app.services.compliance_service import ComplianceService
+from app.services.earnings_service import earnings_today_map
 from app.services.event_calendar import is_blackout, symbol_is_earnings_today
 from app.services.execution_logger import ExecutionLogger
 from app.services.execution_service import Executor, spread_info
@@ -190,6 +191,20 @@ class TradingEngine:
 
         # Per-position peaks for trailing stop high-water mark
         self._position_peaks: dict = {}
+
+        # {SYMBOL: ['YYYY-MM-DD']} — refreshed on each new ET trading day so
+        # ``symbol_is_earnings_today`` actually filters when scanning.
+        self._earnings_today: dict = {}
+
+        # Weekly / monthly equity peaks for portfolio loss caps. Reset by date.
+        self._week_anchor_iso: Optional[str] = None
+        self._week_start_equity: float = self._initial_capital
+        self._month_anchor_iso: Optional[str] = None
+        self._month_start_equity: float = self._initial_capital
+        # First-week real-money safety clamp: cap each new entry at this USD
+        # while ``settings.first_week_real_money_guard`` is on. Only enforced
+        # when the engine is in *live* mode.
+        self._first_live_session_iso: Optional[str] = None
 
         # SPY 1m/5m vol → entry score delta (refreshed at most once per ET minute)
         self._vol_entry_minute_key: Optional[Tuple[int, int, int, int, int]] = None
@@ -984,6 +999,32 @@ class TradingEngine:
         except Exception:
             self._day_start_equity = self._initial_capital
 
+        # ── Earnings-today blacklist (P0-3) ─────────────────────
+        try:
+            self._earnings_today = earnings_today_map(
+                symbols=list(self.SCALP_UNIVERSE) + list(self.focus_symbols or []),
+                today=today,
+            )
+            if self._earnings_today:
+                self._log(
+                    "info",
+                    f"📅 Earnings today: {', '.join(sorted(self._earnings_today.keys()))}",
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("earnings refresh failed: %s", exc)
+            self._earnings_today = {}
+
+        # Weekly / monthly equity anchors for portfolio loss caps (P1).
+        iso_year, iso_week, _ = today.isocalendar()
+        week_iso = f"{iso_year}-W{iso_week:02d}"
+        if self._week_anchor_iso != week_iso:
+            self._week_anchor_iso = week_iso
+            self._week_start_equity = self._day_start_equity
+        month_iso = f"{today.year}-{today.month:02d}"
+        if self._month_anchor_iso != month_iso:
+            self._month_anchor_iso = month_iso
+            self._month_start_equity = self._day_start_equity
+
         self._log("info", f"📅 New trading day: {today} | Start equity: ${self._day_start_equity:,.2f}")
         self._log(
             "info",
@@ -1269,10 +1310,78 @@ class TradingEngine:
             return
         if self._compliance.is_cooling_down():
             return
+
+        # ── GFV RESTRICTED halt (P0-2) ──────────────────────────
+        if self._compliance.is_gfv_restricted():
+            self.regime_data["gfv_restricted"] = True
+            if self._scan_count % 10 == 1:
+                self._log(
+                    "info",
+                    "🚫 GFV RESTRICTED (≥3 good-faith violations / 12mo) — no new entries; manage open positions only",
+                )
+            return
+        else:
+            self.regime_data["gfv_restricted"] = False
+
+        # ── Account / broker hard halts (P0-1) ──────────────────
+        broker_blocked = bool(account.get("trading_blocked") or account.get("account_blocked"))
+        if broker_blocked:
+            if self._scan_count % 10 == 1:
+                self._log("error", "⛔ Broker reports account/trading blocked — no new entries")
+            return
+
+        # ── PDT enforcement (P0-1): margin + <$25K + ≥3 day-trades over 5 BD ──
+        is_margin = bool(account.get("is_margin_account"))
+        dt_count = int(account.get("day_trade_count") or 0)
+        pdt_flag = bool(account.get("pattern_day_trader"))
+        equity_now = float(account.get("equity") or 0.0)
+        pdt_block = False
+        pdt_reason = ""
+        if is_margin and equity_now < 25_000.0 and dt_count >= 3:
+            pdt_block = True
+            pdt_reason = (
+                f"PDT guard: margin acct, equity ${equity_now:,.2f} < $25,000, "
+                f"day_trades={dt_count}/5BD — a 4th would lock the account"
+            )
+        elif is_margin and equity_now < 25_000.0 and pdt_flag:
+            pdt_block = True
+            pdt_reason = "Broker flagged PDT under $25K — no new same-day round-trips"
+        self.regime_data["pdt_blocked"] = pdt_block
+        self.regime_data["pdt_reason"] = pdt_reason
+        self.regime_data["day_trade_count"] = dt_count
+        if pdt_block:
+            if self._scan_count % 10 == 1:
+                self._log("info", f"🚫 {pdt_reason}")
+            return
+
         if self._daily_trades >= preset.max_trades_per_day:
             if self._scan_count % 10 == 1:
                 self._log("info", f"🧯 Daily trade cap {preset.max_trades_per_day} reached")
             return
+
+        # ── Weekly / monthly portfolio loss caps (P1) ───────────
+        weekly_cap = float(getattr(settings, "weekly_loss_limit_percent", 0.0) or 0.0)
+        if weekly_cap > 0 and self._week_start_equity > 0:
+            wk_pct = (equity_now - self._week_start_equity) / self._week_start_equity * 100.0
+            self.regime_data["weekly_pnl_pct"] = round(wk_pct, 2)
+            if wk_pct <= -weekly_cap:
+                if self._scan_count % 10 == 1:
+                    self._log(
+                        "info",
+                        f"🛑 Weekly loss cap hit: {wk_pct:+.2f}% ≤ -{weekly_cap}% — no new entries this week",
+                    )
+                return
+        monthly_cap = float(getattr(settings, "monthly_loss_limit_percent", 0.0) or 0.0)
+        if monthly_cap > 0 and self._month_start_equity > 0:
+            mo_pct = (equity_now - self._month_start_equity) / self._month_start_equity * 100.0
+            self.regime_data["monthly_pnl_pct"] = round(mo_pct, 2)
+            if mo_pct <= -monthly_cap:
+                if self._scan_count % 10 == 1:
+                    self._log(
+                        "info",
+                        f"🛑 Monthly loss cap hit: {mo_pct:+.2f}% ≤ -{monthly_cap}% — no new entries this month",
+                    )
+                return
 
         pending_buys = [o["symbol"] for o in pending if o["side"] == "buy"]
         slots = preset.max_concurrent_positions - (len(current_symbols) + len(set(pending_buys)))
@@ -1396,6 +1505,16 @@ class TradingEngine:
                 else preset.min_notional_slow
             )
             buy_power = min(max_value, settled * preset.settled_cash_trade_cap)
+            # First-week real-money guard (Step 4): in live mode, cap each new
+            # entry at FIRST_WEEK_PER_POSITION_USD until disabled. Paper mode
+            # ignores this so backtest/forward-test stays unimpeded.
+            fw_cap_usd = float(getattr(settings, "first_week_per_position_usd", 0.0) or 0.0)
+            if (
+                fw_cap_usd > 0
+                and not getattr(self._alpaca, "paper_trading", True)
+                and bool(getattr(settings, "first_week_real_money_guard", False))
+            ):
+                buy_power = min(buy_power, fw_cap_usd)
             if buy_power < min_notional:
                 continue
             qty = int(buy_power / price)

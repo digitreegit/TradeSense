@@ -69,6 +69,11 @@ async def me(user_id: Optional[int] = Depends(get_current_user_id_optional)):
         raise HTTPException(status_code=401, detail="User not found")
     has_alpaca = bool(row.get("alpaca_key_enc") and row.get("alpaca_secret_enc"))
     paper = users_db.get_alpaca_paper_trading(user_id) if has_alpaca else True
+    twilio_configured = bool(
+        (settings.twilio_account_sid or "").strip()
+        and (settings.twilio_auth_token or "").strip()
+        and (settings.twilio_whatsapp_from or "").strip()
+    )
     return {
         "authenticated": True,
         "user_id": user_id,
@@ -78,6 +83,9 @@ async def me(user_id: Optional[int] = Depends(get_current_user_id_optional)):
         "notify_telegram": bool(int(row.get("notify_telegram") or 0)),
         "telegram_chat_id": (row.get("telegram_chat_id") or "") or "",
         "telegram_bot_configured": bool((settings.telegram_bot_token or "").strip()),
+        "notify_whatsapp": bool(int(row.get("notify_whatsapp") or 0)),
+        "whatsapp_e164": (row.get("whatsapp_e164") or "") or "",
+        "whatsapp_configured": twilio_configured,
     }
 
 
@@ -105,16 +113,26 @@ async def delete_alpaca_keys(user_id: int = Depends(get_current_user_id)):
 class NotificationPrefsBody(BaseModel):
     notify_telegram: bool = False
     telegram_chat_id: str = Field(default="", max_length=64)
+    notify_whatsapp: bool = False
+    whatsapp_e164: str = Field(default="", max_length=24)
 
 
 def _notification_prefs_dict(user_id: int) -> dict:
     row = users_db.get_user_by_id(user_id)
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
+    twilio_configured = bool(
+        (settings.twilio_account_sid or "").strip()
+        and (settings.twilio_auth_token or "").strip()
+        and (settings.twilio_whatsapp_from or "").strip()
+    )
     return {
         "notify_telegram": bool(int(row.get("notify_telegram") or 0)),
         "telegram_chat_id": (row.get("telegram_chat_id") or "") or "",
         "telegram_bot_configured": bool((settings.telegram_bot_token or "").strip()),
+        "notify_whatsapp": bool(int(row.get("notify_whatsapp") or 0)),
+        "whatsapp_e164": (row.get("whatsapp_e164") or "") or "",
+        "whatsapp_configured": twilio_configured,
     }
 
 
@@ -132,6 +150,8 @@ async def set_notification_prefs(
         user_id,
         notify_telegram=body.notify_telegram,
         telegram_chat_id=body.telegram_chat_id,
+        notify_whatsapp=body.notify_whatsapp,
+        whatsapp_e164=body.whatsapp_e164,
     )
     return _notification_prefs_dict(user_id)
 
@@ -142,4 +162,13 @@ async def test_notification(user_id: int = Depends(get_current_user_id)):
     result = notification_service.try_send_telegram_test(user_id)
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error", "Telegram test failed"))
+    return {"ok": True, "message": result.get("message", "Delivered.")}
+
+
+@router.post("/whatsapp-test")
+async def test_whatsapp(user_id: int = Depends(get_current_user_id)):
+    """Send a short WhatsApp test; explicit error if Twilio rejects or prefs missing."""
+    result = notification_service.try_send_whatsapp_test(user_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error", "WhatsApp test failed"))
     return {"ok": True, "message": result.get("message", "Delivered.")}

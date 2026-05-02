@@ -1,0 +1,15 @@
+services:
+  tradesense:
+    build: .
+    image: tradesense:local
+    container_name: tradesense
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - tradesense_data:/data
+
+volumes:
+  tradesense_data:

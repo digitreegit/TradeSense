@@ -131,6 +131,13 @@ class AlpacaService:
             "daily_profit_loss": 0.0,
             "daily_profit_loss_pct": 0.0,
             "day_trade_count": 0,
+            "pattern_day_trader": False,
+            "account_blocked": False,
+            "trading_blocked": False,
+            "multiplier": 1.0,
+            "is_margin_account": False,
+            "paper_trading": self.paper_trading,
+            "trading_mode": "paper" if self.paper_trading else "live",
             "initial_capital": 0.0,
             "win_rate": 0.0,
             "avg_win": 0.0,
@@ -139,6 +146,30 @@ class AlpacaService:
             "sharpe_ratio": 0.0,
             "live_balances_unavailable": True,
             "live_balances_reason": reason,
+        }
+
+    @staticmethod
+    def _account_pdt_fields(account) -> dict:
+        """Extract PDT / margin fields from an Alpaca account object.
+
+        Alpaca exposes:
+        - ``daytrade_count``: int (trailing 5 business days, real value only matters on margin)
+        - ``pattern_day_trader``: bool — broker-side PDT flag
+        - ``multiplier``: '1' (cash) | '2' (Reg-T) | '4' (PDT margin)
+        - ``account_blocked`` / ``trading_blocked``: account-level halts
+        """
+        try:
+            mult_raw = getattr(account, "multiplier", None)
+            multiplier = float(mult_raw) if mult_raw is not None else 1.0
+        except (TypeError, ValueError):
+            multiplier = 1.0
+        return {
+            "day_trade_count": int(getattr(account, "daytrade_count", 0) or 0),
+            "pattern_day_trader": bool(getattr(account, "pattern_day_trader", False) or False),
+            "account_blocked": bool(getattr(account, "account_blocked", False) or False),
+            "trading_blocked": bool(getattr(account, "trading_blocked", False) or False),
+            "multiplier": multiplier,
+            "is_margin_account": multiplier > 1.0,
         }
 
     # ─── Account ───────────────────────────────────────────────
@@ -237,6 +268,7 @@ class AlpacaService:
                 total_pl = real_equity - initial
                 total_pl_pct = (total_pl / initial * 100) if initial > 0 else 0.0
 
+                pdt_fields = self._account_pdt_fields(account)
                 return {
                     "equity": round(real_equity, 2),
                     "cash": round(real_cash, 2),
@@ -246,8 +278,10 @@ class AlpacaService:
                     "profit_loss_pct": round(total_pl_pct, 2),
                     "daily_profit_loss": round(daily_pl, 2),
                     "daily_profit_loss_pct": round(daily_pl_pct, 2),
-                    "day_trade_count": int(account.daytrade_count or 0),
                     "initial_capital": round(initial, 2),
+                    "paper_trading": self.paper_trading,
+                    "trading_mode": "paper" if self.paper_trading else "live",
+                    **pdt_fields,
                     **metrics,
                 }
 
@@ -356,6 +390,7 @@ class AlpacaService:
             except Exception as me:
                 logger.warning(f"Error calculating detailed metrics: {me}")
 
+            pdt_fields = self._account_pdt_fields(account)
             return {
                 "equity":                round(equity, 2),
                 "cash":                  round(displayed_cash, 2),
@@ -365,8 +400,10 @@ class AlpacaService:
                 "profit_loss_pct":       round(total_profit_loss_pct, 2),
                 "daily_profit_loss":     round(daily_profit_loss, 2),
                 "daily_profit_loss_pct": round(daily_profit_loss_pct, 2),
-                "day_trade_count":       int(account.daytrade_count or 0),
                 "initial_capital":       initial,
+                "paper_trading":         self.paper_trading,
+                "trading_mode":          "paper" if self.paper_trading else "live",
+                **pdt_fields,
                 **metrics,
             }
 

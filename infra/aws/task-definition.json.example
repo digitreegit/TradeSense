@@ -1,0 +1,80 @@
+{
+  "family": "tradesense",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT:role/tradesense-task-role",
+  "volumes": [
+    {
+      "name": "tradesense-data",
+      "efsVolumeConfiguration": {
+        "fileSystemId": "fs-EFS_ID",
+        "transitEncryption": "ENABLED",
+        "authorizationConfig": {
+          "accessPointId": "fsap-ACCESS_POINT_ID",
+          "iam": "ENABLED"
+        }
+      }
+    }
+  ],
+  "containerDefinitions": [
+    {
+      "name": "tradesense",
+      "image": "ACCOUNT.dkr.ecr.REGION.amazonaws.com/tradesense:latest",
+      "essential": true,
+      "portMappings": [
+        { "containerPort": 8000, "protocol": "tcp" }
+      ],
+      "mountPoints": [
+        { "sourceVolume": "tradesense-data", "containerPath": "/data" }
+      ],
+      "environment": [
+        { "name": "TRADING_MODE", "value": "paper" },
+        { "name": "CAPITAL_SCALE", "value": "auto" },
+        { "name": "INITIAL_CAPITAL", "value": "3000" },
+        { "name": "ACCOUNT_TYPE", "value": "cash" },
+        { "name": "STREAMING_ENABLED", "value": "true" },
+        { "name": "ALLOW_EXTENDED_HOURS", "value": "false" },
+        { "name": "EARNINGS_CALENDAR_FILE", "value": "/data/earnings.json" },
+        { "name": "FIRST_WEEK_REAL_MONEY_GUARD", "value": "true" },
+        { "name": "FIRST_WEEK_PER_POSITION_USD", "value": "50" },
+        { "name": "WEEKLY_LOSS_LIMIT_PERCENT", "value": "2.0" },
+        { "name": "MONTHLY_LOSS_LIMIT_PERCENT", "value": "5.0" }
+      ],
+      "secrets": [
+        { "name": "ALPACA_API_KEY",      "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT:secret:tradesense/alpaca:ALPACA_API_KEY::" },
+        { "name": "ALPACA_SECRET_KEY",   "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT:secret:tradesense/alpaca:ALPACA_SECRET_KEY::" },
+        { "name": "ALPACA_BASE_URL",     "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT:secret:tradesense/alpaca:ALPACA_BASE_URL::" },
+        { "name": "ALPACA_DATA_FEED",    "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT:secret:tradesense/alpaca:ALPACA_DATA_FEED::" },
+        { "name": "TELEGRAM_BOT_TOKEN",  "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT:secret:tradesense/notify:TELEGRAM_BOT_TOKEN::" },
+        { "name": "RESEND_API_KEY",      "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT:secret:tradesense/notify:RESEND_API_KEY::" },
+        { "name": "TWILIO_ACCOUNT_SID",  "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT:secret:tradesense/notify:TWILIO_ACCOUNT_SID::" },
+        { "name": "TWILIO_AUTH_TOKEN",   "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT:secret:tradesense/notify:TWILIO_AUTH_TOKEN::" },
+        { "name": "TWILIO_WHATSAPP_FROM","valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT:secret:tradesense/notify:TWILIO_WHATSAPP_FROM::" },
+        { "name": "OPENAI_API_KEY",      "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT:secret:tradesense/ai:OPENAI_API_KEY::" },
+        { "name": "SUPABASE_URL",        "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT:secret:tradesense/auth:SUPABASE_URL::" },
+        { "name": "SUPABASE_ANON_KEY",   "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT:secret:tradesense/auth:SUPABASE_ANON_KEY::" },
+        { "name": "SUPABASE_JWT_SECRET", "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT:secret:tradesense/auth:SUPABASE_JWT_SECRET::" },
+        { "name": "TRADESENSE_SECRET_KEY","valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT:secret:tradesense/auth:TRADESENSE_SECRET_KEY::" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/tradesense",
+          "awslogs-region": "REGION",
+          "awslogs-create-group": "true",
+          "awslogs-stream-prefix": "tradesense"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/api/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 30
+      }
+    }
+  ]
+}

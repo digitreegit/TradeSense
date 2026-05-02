@@ -254,6 +254,9 @@ export const api = {
       notify_telegram?: boolean;
       telegram_chat_id?: string;
       telegram_bot_configured?: boolean;
+      notify_whatsapp?: boolean;
+      whatsapp_e164?: string;
+      whatsapp_configured?: boolean;
     }>('/auth/me'),
 
   getNotificationPrefs: () =>
@@ -261,13 +264,24 @@ export const api = {
       notify_telegram: boolean;
       telegram_chat_id: string;
       telegram_bot_configured: boolean;
+      notify_whatsapp: boolean;
+      whatsapp_e164: string;
+      whatsapp_configured: boolean;
     }>('/auth/notification-prefs'),
 
-  setNotificationPrefs: (body: { notify_telegram: boolean; telegram_chat_id: string }) =>
+  setNotificationPrefs: (body: {
+    notify_telegram: boolean;
+    telegram_chat_id: string;
+    notify_whatsapp: boolean;
+    whatsapp_e164: string;
+  }) =>
     request<{
       notify_telegram: boolean;
       telegram_chat_id: string;
       telegram_bot_configured: boolean;
+      notify_whatsapp: boolean;
+      whatsapp_e164: string;
+      whatsapp_configured: boolean;
     }>('/auth/notification-prefs', {
       method: 'POST',
       body: JSON.stringify(body),
@@ -275,6 +289,11 @@ export const api = {
 
   testNotification: () =>
     request<{ ok: boolean; message: string }>('/auth/notification-test', {
+      method: 'POST',
+    }),
+
+  testWhatsapp: () =>
+    request<{ ok: boolean; message: string }>('/auth/whatsapp-test', {
       method: 'POST',
     }),
 

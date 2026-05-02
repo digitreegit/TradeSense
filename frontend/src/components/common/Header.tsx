@@ -32,9 +32,23 @@ const SunIcon = (props: React.ComponentProps<'svg'>) => (
 );
 
 const Header: React.FC = () => {
-  const { currentPage, marketOpen, colorTheme, setColorTheme } = useAppStore();
+  const {
+    currentPage,
+    marketOpen,
+    colorTheme,
+    setColorTheme,
+    authEmail,
+    authAlpacaConfigured,
+    authAlpacaPaperTrading,
+  } = useAppStore();
   const { language, t } = useI18n();
   const [time, setTime] = React.useState(new Date());
+
+  // Single source of truth for the mode badge:
+  //   - signed-in user with stored Alpaca keys → DB ``alpaca_paper_trading``
+  //   - guest / no keys → render as paper (legacy env-based engine cannot
+  //     trade live without keys anyway).
+  const isLive = Boolean(authEmail && authAlpacaConfigured && !authAlpacaPaperTrading);
 
   React.useEffect(() => {
     const timer = setInterval(() => {
@@ -65,9 +79,26 @@ const Header: React.FC = () => {
             <span className={`dot ${isMarketOpen() || marketOpen ? 'open' : 'closed'}`} />
             <span>{isMarketOpen() || marketOpen ? t('marketOpen') : t('marketClosed')}</span>
           </div>
-          <div className="header-badge paper" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <div
+            className={`header-badge ${isLive ? 'live' : 'paper'}`}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              ...(isLive
+                ? {
+                    background: 'rgba(223, 72, 76, 0.14)',
+                    border: '1px solid rgba(223, 72, 76, 0.42)',
+                    color: 'var(--loss)',
+                    fontWeight: 700,
+                    letterSpacing: '0.02em',
+                  }
+                : {}),
+            }}
+            title={isLive ? 'Alpaca live trading API' : 'Alpaca paper trading API'}
+          >
             <DocumentCheckIcon style={{ width: '14px', height: '14px' }} />
-            {t('paperTrading')}
+            {isLive ? t('liveTrading') : t('paperTrading')}
           </div>
           <div className="header-clock">
             {time.toLocaleTimeString(language === 'ko' ? 'ko-KR' : 'en-US', {

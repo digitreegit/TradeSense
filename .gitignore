@@ -4,6 +4,13 @@ __pycache__/
 *.pyc
 venv/
 .venv/
+.venv-*/
+
+# pytest / tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+backend/tests/_tmp_logs/
 
 # Environment (applies under any path, e.g. frontend/.env)
 .env

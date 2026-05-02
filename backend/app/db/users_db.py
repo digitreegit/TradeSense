@@ -204,18 +204,26 @@ def update_user_notification_prefs(
     *,
     notify_telegram: Optional[bool] = None,
     telegram_chat_id: Optional[str] = None,
+    notify_whatsapp: Optional[bool] = None,
+    whatsapp_e164: Optional[str] = None,
 ) -> None:
-    """Update Telegram notification columns; pass None to leave a field unchanged."""
+    """Update Telegram + WhatsApp notification columns; ``None`` leaves a field unchanged."""
     row = get_user_by_id(user_id)
     if not row:
         return
     nt = bool(int(row["notify_telegram"])) if row.get("notify_telegram") is not None else False
     tid = (row.get("telegram_chat_id") or "").strip()
+    nw = bool(int(row["notify_whatsapp"])) if row.get("notify_whatsapp") is not None else False
+    wp = (row.get("whatsapp_e164") or "").strip()
 
     if notify_telegram is not None:
         nt = bool(notify_telegram)
     if telegram_chat_id is not None:
         tid = telegram_chat_id.strip()
+    if notify_whatsapp is not None:
+        nw = bool(notify_whatsapp)
+    if whatsapp_e164 is not None:
+        wp = whatsapp_e164.strip()
 
     conn = get_connection()
     try:
@@ -223,10 +231,12 @@ def update_user_notification_prefs(
             """
             UPDATE users SET
                 notify_telegram = ?,
-                telegram_chat_id = NULLIF(?, '')
+                telegram_chat_id = NULLIF(?, ''),
+                notify_whatsapp = ?,
+                whatsapp_e164 = NULLIF(?, '')
             WHERE id = ?
             """,
-            (1 if nt else 0, tid, user_id),
+            (1 if nt else 0, tid, 1 if nw else 0, wp, user_id),
         )
         conn.commit()
     finally:

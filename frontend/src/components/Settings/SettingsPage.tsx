@@ -77,6 +77,10 @@ const SettingsPage: React.FC = () => {
   const [notifLoading, setNotifLoading] = useState(false);
   const [notifSaving, setNotifSaving] = useState(false);
   const [notifMsg, setNotifMsg] = useState<string | null>(null);
+  const [notifyWa, setNotifyWa] = useState(false);
+  const [waE164, setWaE164] = useState('');
+  const [waConfigured, setWaConfigured] = useState(false);
+  const [waTestLoading, setWaTestLoading] = useState(false);
   const [taxYear, setTaxYear] = useState(() => new Date().getFullYear());
   const [taxExporting, setTaxExporting] = useState(false);
   const [taxExportErr, setTaxExportErr] = useState<string | null>(null);
@@ -107,6 +111,9 @@ const SettingsPage: React.FC = () => {
         setNotifyTg(Boolean(p.notify_telegram));
         setTgChatId(p.telegram_chat_id || '');
         setTgBotOk(Boolean(p.telegram_bot_configured));
+        setNotifyWa(Boolean(p.notify_whatsapp));
+        setWaE164(p.whatsapp_e164 || '');
+        setWaConfigured(Boolean(p.whatsapp_configured));
       })
       .catch(() => {
         /* non-fatal */
@@ -194,8 +201,11 @@ const SettingsPage: React.FC = () => {
       const p = await api.setNotificationPrefs({
         notify_telegram: notifyTg,
         telegram_chat_id: tgChatId.trim(),
+        notify_whatsapp: notifyWa,
+        whatsapp_e164: waE164.trim(),
       });
       setTgBotOk(Boolean(p.telegram_bot_configured));
+      setWaConfigured(Boolean(p.whatsapp_configured));
       setNotifMsg('Notification preferences saved.');
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to save notifications');
@@ -215,6 +225,20 @@ const SettingsPage: React.FC = () => {
       setErr(e instanceof Error ? e.message : 'Test send failed');
     } finally {
       setNotifLoading(false);
+    }
+  };
+
+  const sendTestWhatsapp = async () => {
+    setWaTestLoading(true);
+    setNotifMsg(null);
+    setErr(null);
+    try {
+      const res = await api.testWhatsapp();
+      setNotifMsg(res.message || 'WhatsApp test sent.');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'WhatsApp test failed');
+    } finally {
+      setWaTestLoading(false);
     }
   };
 
@@ -750,6 +774,76 @@ const SettingsPage: React.FC = () => {
           {notifMsg && (
             <p style={{ color: 'var(--profit)', fontSize: '12px', marginTop: '10px' }}>{notifMsg}</p>
           )}
+        </div>
+
+        <div style={{ marginTop: '28px' }}>
+          <label
+            style={{
+              fontSize: '12px',
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              color: 'var(--text-tertiary)',
+            }}
+          >
+            WhatsApp alerts (Twilio)
+          </label>
+          <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', margin: '6px 0 14px', lineHeight: 1.55 }}>
+            Add <strong>TWILIO_ACCOUNT_SID</strong>, <strong>TWILIO_AUTH_TOKEN</strong>, and
+            <strong> TWILIO_WHATSAPP_FROM</strong> (e.g. <code>whatsapp:+14155238886</code>) to the server{' '}
+            <code style={{ fontSize: '11px' }}>.env</code>. Recipients must join the Twilio Sandbox once
+            (or be on an approved template list). Enter your WhatsApp number in E.164 (e.g.{' '}
+            <code>+15551234567</code>).
+          </p>
+          {!waConfigured && (
+            <p style={{ fontSize: '12px', color: 'var(--loss)', marginBottom: '10px' }}>
+              WhatsApp is not configured on the server (Twilio credentials missing).
+            </p>
+          )}
+          <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', marginBottom: '8px' }}>
+            <input
+              type="checkbox"
+              checked={notifyWa}
+              onChange={(e) => setNotifyWa(e.target.checked)}
+              disabled={!waConfigured}
+            />
+            Send alerts to WhatsApp
+          </label>
+          <label style={{ fontSize: '12px' }}>WhatsApp number (E.164)</label>
+          <input
+            type="tel"
+            value={waE164}
+            onChange={(e) => setWaE164(e.target.value)}
+            placeholder="+15551234567"
+            disabled={!waConfigured}
+            style={{
+              display: 'block',
+              width: '100%',
+              margin: '6px 0 14px',
+              padding: '10px',
+              borderRadius: '8px',
+              border: '2px solid var(--border-secondary)',
+              background: 'var(--bg-secondary)',
+              color: 'inherit',
+            }}
+          />
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '4px' }}>
+            <button
+              type="button"
+              className="btn-start"
+              onClick={() => void saveNotificationPrefs()}
+              disabled={notifSaving}
+            >
+              {notifSaving ? t('saving') : t('saveAlertPreferences')}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => void sendTestWhatsapp()}
+              disabled={waTestLoading || !notifyWa}
+            >
+              {waTestLoading ? t('sending') : t('sendTest')}
+            </button>
+          </div>
         </div>
 
         <div

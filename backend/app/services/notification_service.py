@@ -79,7 +79,7 @@ class NotificationService:
         to_email: Optional[str] = None,
         user_id: Optional[int] = None,
     ):
-        """Send alert: log + optional Resend + Telegram."""
+        """Send alert: log + optional Resend + Telegram + WhatsApp."""
         full_msg = f"[{level}] {title}\n\n{message}"
 
         logger.info(f"🔔 ALERT: {title} - {message}")
@@ -93,6 +93,7 @@ class NotificationService:
             )
 
         self._send_telegram_alert(title, message, level, user_id=user_id)
+        self._send_whatsapp_alert(title, message, level, user_id=user_id)
 
     def send_daily_summary(
         self,
@@ -122,6 +123,7 @@ class NotificationService:
             self._send_resend_email(subject=subject, text=text, to_email=to_email)
         body = text.strip()
         self._send_telegram_alert(subject, body, "INFO", user_id=user_id)
+        self._send_whatsapp_alert(subject, body, "INFO", user_id=user_id)
 
     def _send_resend_email(self, *, subject: str, text: str, to_email: str) -> None:
         if not self.resend_api_key or not self.resend_from_email:
@@ -199,6 +201,105 @@ class NotificationService:
             logger.info("📱 Telegram alert sent.")
         except Exception as exc:  # noqa: BLE001
             logger.error("Telegram send failed: %s", exc)
+
+    # ─── WhatsApp via Twilio ────────────────────────────────────
+    @staticmethod
+    def _whatsapp_text(title: str, message: str, level: str, *, max_len: int = 1500) -> str:
+        title_t = _strip_telegram_icons(title)
+        message_t = _strip_telegram_icons(message)
+        body = f"[{level}] {title_t}\n\n{message_t}"
+        if len(body) > max_len:
+            body = body[: max_len - 1] + "…"
+        return body
+
+    @staticmethod
+    def _whatsapp_to(addr: str) -> str:
+        s = (addr or "").strip()
+        if not s:
+            return ""
+        return s if s.lower().startswith("whatsapp:") else f"whatsapp:{s}"
+
+    def _twilio_post_message(self, *, body: str, to: str) -> tuple[bool, str]:
+        """POST one Twilio Messages API call. Returns (ok, error_text)."""
+        sid = (settings.twilio_account_sid or "").strip()
+        token = (settings.twilio_auth_token or "").strip()
+        sender = self._whatsapp_to(settings.twilio_whatsapp_from or "")
+        if not sid or not token or not sender:
+            return False, (
+                "Server has no TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / "
+                "TWILIO_WHATSAPP_FROM. Add them to .env (e.g. "
+                "TWILIO_WHATSAPP_FROM=whatsapp:+14155238886) and restart."
+            )
+        recipient = self._whatsapp_to(to)
+        if not recipient:
+            return False, "Missing WhatsApp recipient (E.164, e.g. +15551234567)."
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
+        try:
+            r = httpx.post(
+                url,
+                data={"From": sender, "To": recipient, "Body": body},
+                auth=(sid, token),
+                timeout=15.0,
+            )
+            if r.status_code >= 400:
+                logger.error("WhatsApp send failed: %s %s", r.status_code, r.text)
+                try:
+                    j = r.json()
+                    return False, str(j.get("message") or r.text)
+                except Exception:  # noqa: BLE001
+                    return False, r.text
+            return True, ""
+        except Exception as exc:  # noqa: BLE001
+            logger.error("WhatsApp send failed: %s", exc)
+            return False, f"Network error calling Twilio: {exc}"
+
+    def _send_whatsapp_alert(
+        self,
+        title: str,
+        message: str,
+        level: str,
+        *,
+        user_id: Optional[int],
+    ) -> None:
+        if user_id is None:
+            return  # WhatsApp opt-in is per-user; no anonymous fan-out
+        row = _load_user_notify_row(user_id)
+        if not row:
+            return
+        if not bool(int(row.get("notify_whatsapp") or 0)):
+            return
+        e164 = (row.get("whatsapp_e164") or "").strip()
+        if not e164:
+            return
+        body = self._whatsapp_text(title, message, level)
+        ok, err = self._twilio_post_message(body=body, to=e164)
+        if ok:
+            logger.info("📱 WhatsApp alert sent.")
+        elif err:
+            logger.error("WhatsApp send failed: %s", err)
+
+    def try_send_whatsapp_test(self, user_id: int) -> dict:
+        """Send a one-off WhatsApp test; returns ``{ok, message?}`` or ``{ok: False, error}``."""
+        row = _load_user_notify_row(user_id)
+        if not row:
+            return {"ok": False, "error": "User not found."}
+        if not bool(int(row.get("notify_whatsapp") or 0)):
+            return {
+                "ok": False,
+                "error": "Turn on “Send alerts to WhatsApp”, enter your WhatsApp number, then click Save before Send test.",
+            }
+        e164 = (row.get("whatsapp_e164") or "").strip()
+        if not e164:
+            return {"ok": False, "error": "Enter your WhatsApp number in E.164 (e.g. +15551234567) and click Save."}
+        body = self._whatsapp_text(
+            "TradeSense test",
+            "If you see this, WhatsApp alerts are configured correctly.",
+            "INFO",
+        )
+        ok, err = self._twilio_post_message(body=body, to=e164)
+        if ok:
+            return {"ok": True, "message": "Message delivered to WhatsApp."}
+        return {"ok": False, "error": err or "WhatsApp send failed."}
 
     def try_send_telegram_test(self, user_id: int) -> dict:
         """Send a one-off test message; return {ok, message?} or {ok: False, error}."""

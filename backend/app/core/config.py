@@ -47,8 +47,20 @@ class Settings(BaseSettings):
     # Cash account scalping
     daily_target_percent: float = float(os.getenv("DAILY_TARGET_PERCENT", "1.0"))
     daily_loss_limit_percent: float = float(os.getenv("DAILY_LOSS_LIMIT_PERCENT", "0.5"))
+    # Portfolio-level loss caps in % of weekly/monthly anchor equity (0 = disabled).
+    weekly_loss_limit_percent: float = float(os.getenv("WEEKLY_LOSS_LIMIT_PERCENT", "2.0"))
+    monthly_loss_limit_percent: float = float(os.getenv("MONTHLY_LOSS_LIMIT_PERCENT", "5.0"))
     account_type: str = os.getenv("ACCOUNT_TYPE", "cash")
     scan_interval_seconds: float = float(os.getenv("SCAN_INTERVAL_SECONDS", "1"))
+
+    # Real-money first-week safety: when on, each live entry is capped at
+    # FIRST_WEEK_PER_POSITION_USD. Disable after the first week of live trading.
+    first_week_real_money_guard: bool = (
+        os.getenv("FIRST_WEEK_REAL_MONEY_GUARD", "true").lower() != "false"
+    )
+    first_week_per_position_usd: float = float(
+        os.getenv("FIRST_WEEK_PER_POSITION_USD", "50")
+    )
 
     # Global killswitch: consecutive Alpaca REST failures trip circuit breaker (see trading_engine)
     killswitch_api_consecutive_failures: int = int(os.getenv("KILLSWITCH_API_CONSECUTIVE_FAILURES", "5"))
@@ -135,6 +147,13 @@ class Settings(BaseSettings):
     # Telegram Bot API (shared bot; users set chat_id in Settings)
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_default_chat_id: str = os.getenv("TELEGRAM_DEFAULT_CHAT_ID", "")
+
+    # WhatsApp via Twilio (Sandbox or approved sender). Format the from-number
+    # as ``whatsapp:+14155238886``. Recipient must have joined the Sandbox or
+    # be on an approved template list for production.
+    twilio_account_sid: str = os.getenv("TWILIO_ACCOUNT_SID", "")
+    twilio_auth_token: str = os.getenv("TWILIO_AUTH_TOKEN", "")
+    twilio_whatsapp_from: str = os.getenv("TWILIO_WHATSAPP_FROM", "")
 
     class Config:
         env_file = _env_file_path or ".env"
