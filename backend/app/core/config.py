@@ -45,8 +45,8 @@ class Settings(BaseSettings):
     risk_level: str = os.getenv("RISK_LEVEL", "moderate")
 
     # Cash account scalping
-    daily_target_percent: float = float(os.getenv("DAILY_TARGET_PERCENT", "1.0"))
-    daily_loss_limit_percent: float = float(os.getenv("DAILY_LOSS_LIMIT_PERCENT", "0.5"))
+    daily_target_percent: float = float(os.getenv("DAILY_TARGET_PERCENT", "1.5"))
+    daily_loss_limit_percent: float = float(os.getenv("DAILY_LOSS_LIMIT_PERCENT", "1.0"))
     # Portfolio-level loss caps in % of weekly/monthly anchor equity (0 = disabled).
     weekly_loss_limit_percent: float = float(os.getenv("WEEKLY_LOSS_LIMIT_PERCENT", "2.0"))
     monthly_loss_limit_percent: float = float(os.getenv("MONTHLY_LOSS_LIMIT_PERCENT", "5.0"))

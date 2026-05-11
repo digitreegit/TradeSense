@@ -34,6 +34,8 @@
         { "name": "TRADING_MODE", "value": "paper" },
         { "name": "CAPITAL_SCALE", "value": "auto" },
         { "name": "INITIAL_CAPITAL", "value": "3000" },
+        { "name": "DAILY_TARGET_PERCENT", "value": "1.5" },
+        { "name": "DAILY_LOSS_LIMIT_PERCENT", "value": "1.0" },
         { "name": "ACCOUNT_TYPE", "value": "cash" },
         { "name": "STREAMING_ENABLED", "value": "true" },
         { "name": "ALLOW_EXTENDED_HOURS", "value": "false" },

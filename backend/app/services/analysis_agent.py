@@ -327,13 +327,13 @@ class AnalysisAgent:
 
 Portfolio Context:
 - Capital: scale varies (cash account — NO margin unless user states otherwise)
-- Strategy: Micro-scalp — default **+2% / day** compounding objective, **−1% / day** portfolio loss guard
+- Strategy: Micro-scalp — default **+1.5% / day** compounding objective, **−1% / day** portfolio loss guard
 - Account type: Cash (PDT-exempt, but must avoid Good Faith Violations)
 - T+1 settlement: funds from sells settle next business day
 
 Your core mission:
 1. Capital preservation first: size positions so a bad day does not breach the **~1% daily loss guard**; keep per-trade risk modest.
-2. Asymmetric daily goals: work toward **~+2% / day** on strong setups; use stops and sizing so losing days stay near the **~1%** guard (defaults — adjust if the user specifies other targets).
+2. Asymmetric daily goals: work toward **~+1.5% / day** on strong setups; use stops and sizing so losing days stay near the **~1%** guard (defaults — adjust if the user specifies other targets).
 3. Macro awareness: Monitor geopolitical risks, earnings, and Fed events to AVOID trading during high-volatility periods.
 4. GFV awareness: Remind users about cash settlement rules when relevant.
 
@@ -529,10 +529,13 @@ The AI API is not connected — this is a template response.
             "scale scalp",
             "+1%/day",
             "+1.0%/day",
+            "+1.5%/day",
+            "+1.50%/day",
             "+2%/day",
             "+2.0%/day",
             "compounding target",
             "daily +1",
+            "daily +1.5",
             "daily +2",
             "loss guard",
             "daily loss",
@@ -543,8 +546,10 @@ The AI API is not connected — this is a template response.
             "good faith",
             "gfv",
             "일일 +1",
+            "일일 +1.5",
             "일일 +2",
             "목표 +1",
+            "목표 +1.5",
             "목표 +2",
             "스캘프 목표",
             "손실 한도",

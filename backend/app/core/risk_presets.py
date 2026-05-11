@@ -40,9 +40,9 @@ class RiskPreset:
     stop_loss_percent: float = 0.30          # per-trade hard stop
     take_profit_percent: float = 0.80        # per-trade profit target
     trailing_trigger_percent: float = 0.20   # peak − now to trigger trail exit
-    # Daily caps
-    daily_loss_limit_percent: float = 0.50
-    daily_target_percent: float = 1.00
+    # Daily caps (moderate-style headline defaults; tables override per level/scale)
+    daily_loss_limit_percent: float = 1.00
+    daily_target_percent: float = 1.50
     max_trades_per_day: int = 40
     # Entry gating
     entry_score_threshold: int = 50          # 0..100 signal score to enter
@@ -100,8 +100,8 @@ _PRESETS_3K: Dict[RiskLevel, RiskPreset] = {
         stop_loss_percent=0.30,
         take_profit_percent=0.80,
         trailing_trigger_percent=0.20,
-        daily_loss_limit_percent=0.50,
-        daily_target_percent=1.00,
+        daily_loss_limit_percent=1.00,
+        daily_target_percent=1.50,
         max_trades_per_day=26,
         entry_score_threshold=50,
         spread_filter_percent=0.05,
@@ -169,7 +169,7 @@ _PRESETS_10K: Dict[RiskLevel, RiskPreset] = {
         take_profit_percent=0.60,
         trailing_trigger_percent=0.18,
         daily_loss_limit_percent=1.00,       # $100
-        daily_target_percent=1.00,           # $100
+        daily_target_percent=1.50,           # $150
         max_trades_per_day=88,
         entry_score_threshold=48,
         spread_filter_percent=0.05,
@@ -236,8 +236,8 @@ _PRESETS_30K: Dict[RiskLevel, RiskPreset] = {
         stop_loss_percent=0.20,
         take_profit_percent=0.45,
         trailing_trigger_percent=0.15,
-        daily_loss_limit_percent=1.5,       # $450
-        daily_target_percent=1.00,          # $300
+        daily_loss_limit_percent=1.0,       # $300
+        daily_target_percent=1.50,          # $450
         max_trades_per_day=200,
         entry_score_threshold=45,
         spread_filter_percent=0.05,

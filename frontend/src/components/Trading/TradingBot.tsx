@@ -376,7 +376,7 @@ const TradingBot: React.FC = () => {
     const localized: Record<string, { name: string; description: string }> = {
       scalp: {
         name: '마이크로 스캘핑 v3',
-        description: '5분봉에서 RSI와 VWAP를 활용해 빠른 장중 단타를 수행합니다. 하루 약 1% 수익을 목표로 합니다.',
+        description: '5분봉에서 RSI와 VWAP를 활용해 빠른 장중 단타를 수행합니다. 기본 전략은 하루 약 +1.5% 목표, −1% 일일 손실 한도입니다.',
       },
       'regime-adaptive': {
         name: 'AI 섹터 적응형',

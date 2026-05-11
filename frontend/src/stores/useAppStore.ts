@@ -49,14 +49,14 @@ function readStoredAgentGoals(): {
 } {
   try {
     const raw = localStorage.getItem(AGENT_GOALS_STORAGE_KEY);
-    if (!raw) return { dailyPct: 2, dailyLossLimitPct: 1, paperCapitalUsd: null };
+    if (!raw) return { dailyPct: 1.5, dailyLossLimitPct: 1, paperCapitalUsd: null };
     const j = JSON.parse(raw) as {
       dailyPct?: unknown;
       dailyLossLimitPct?: unknown;
       paperCapitalUsd?: unknown;
     };
     const dailyPct =
-      typeof j.dailyPct === 'number' && j.dailyPct > 0 && j.dailyPct <= 100 ? j.dailyPct : 2;
+      typeof j.dailyPct === 'number' && j.dailyPct > 0 && j.dailyPct <= 100 ? j.dailyPct : 1.5;
     const dailyLossLimitPct =
       typeof j.dailyLossLimitPct === 'number' &&
       j.dailyLossLimitPct > 0 &&
@@ -67,7 +67,7 @@ function readStoredAgentGoals(): {
       typeof j.paperCapitalUsd === 'number' && j.paperCapitalUsd > 0 ? j.paperCapitalUsd : null;
     return { dailyPct, dailyLossLimitPct, paperCapitalUsd };
   } catch {
-    return { dailyPct: 2, dailyLossLimitPct: 1, paperCapitalUsd: null };
+    return { dailyPct: 1.5, dailyLossLimitPct: 1, paperCapitalUsd: null };
   }
 }
 
@@ -286,7 +286,7 @@ export const useAppStore = create<AppState>((set) => ({
       time: new Date().toLocaleTimeString(),
       type: 'info',
       message:
-        'TradeSense v3 — Scalp engine initialized (default: +2% / day target, −1% / day loss guard)',
+        'TradeSense v3 — Scalp engine initialized (default: +1.5% / day target, −1% / day loss guard)',
     },
     { time: new Date().toLocaleTimeString(), type: 'info', message: 'PDT-Exempt mode active. GFV monitoring enabled.' },
     { time: new Date().toLocaleTimeString(), type: 'signal', message: 'Scanning 5-Min bars for AI Scalp opportunities...' },
@@ -354,7 +354,7 @@ export const useAppStore = create<AppState>((set) => ({
       id: 'scalp',
       name: 'Micro-Scalping v3',
       description:
-        'Fast intraday scalps on 5-min bars using RSI/VWAP. Default: ~+2% / day target, ~−1% / day loss guard.',
+        'Fast intraday scalps on 5-min bars using RSI/VWAP. Default: ~+1.5% / day target, ~−1% / day loss guard.',
       active: true,
       winRate: 0,
       trades: 0,
