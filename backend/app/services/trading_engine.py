@@ -237,7 +237,7 @@ class TradingEngine:
             "blackout_reason": "",
             "equity_session": "closed",
             "allow_extended_hours": getattr(settings, "allow_extended_hours", False),
-            "timestamp": datetime.now().strftime("%b %d, %Y, %-I:%M%p"),
+            "timestamp": datetime.now(ET).strftime("%b %d, %Y, %-I:%M%p"),
             "entry_vol_regime": {},
             "rationale_points_en": [],
             "rationale_points_ko": [],
@@ -345,7 +345,7 @@ class TradingEngine:
                 "stop_loss_percent": self._preset.stop_loss_percent,
                 "take_profit_percent": self._preset.take_profit_percent,
                 "daily_target": f"+{self._preset.daily_target_percent}%",
-                "timestamp": datetime.now().strftime("%b %d, %Y, %-I:%M%p"),
+                "timestamp": datetime.now(ET).strftime("%b %d, %Y, %-I:%M%p"),
             }
         )
         self._log(
@@ -410,7 +410,7 @@ class TradingEngine:
         self.regime_data["killswitch_reason"] = ""
         self.active = True
         self.active_strategy = strategy
-        self.regime_data["timestamp"] = datetime.now().strftime("%b %d, %Y, %-I:%M%p")
+        self.regime_data["timestamp"] = datetime.now(ET).strftime("%b %d, %Y, %-I:%M%p")
         self._sync_regime_playbook_display()
 
         if risk_level:
@@ -1097,7 +1097,7 @@ class TradingEngine:
                     "quant_changes_5d_pct": quant["changes_5d_pct"],
                     "vix_proxy_level": quant["vix_proxy_level"],
                     "sector_tilt": tilt,
-                    "timestamp": datetime.now().strftime("%b %d, %Y, %-I:%M%p"),
+                    "timestamp": datetime.now(ET).strftime("%b %d, %Y, %-I:%M%p"),
                 }
             )
             if tilt:
@@ -1165,7 +1165,7 @@ class TradingEngine:
                         "focus_sectors": self.focus_sectors,
                         "daily_pnl": self.regime_data.get("daily_pnl", "$0.00"),
                         "account_type": settings.account_type,
-                        "timestamp": datetime.now().strftime("%b %d, %Y, %-I:%M%p"),
+                        "timestamp": datetime.now(ET).strftime("%b %d, %Y, %-I:%M%p"),
                     }
                 )
                 self._apply_preset_from_score(blended, source="ai+quant")
@@ -1629,8 +1629,9 @@ class TradingEngine:
     # ─── Logging ───────────────────────────────────────────────
 
     def _log(self, log_type: str, message: str):
+        # Use US/Eastern so Docker (UTC) logs match the dashboard clock for US session users.
         entry = {
-            "time":    datetime.now().strftime("%H:%M:%S"),
+            "time":    datetime.now(ET).strftime("%H:%M:%S"),
             "type":    log_type,
             "message": message,
         }
