@@ -284,7 +284,7 @@ const SettingsPage: React.FC = () => {
   };
 
   const signOut = () => {
-    void supabase.auth.signOut();
+    void supabase?.auth.signOut();
     clearToken();
     setAuthProfile(null, false);
     setAuthMethod(null);

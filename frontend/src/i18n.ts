@@ -41,6 +41,8 @@ const ko: Record<string, string> = {
   invitationCode: '초대 전용',
   invitationCodePlaceholder: '초대 코드를 입력하세요',
   invitationInvalid: '유효하지 않은 초대 코드입니다.',
+  supabaseNotConfigured:
+    'Supabase 설정이 없습니다. VITE_SUPABASE_URL·VITE_SUPABASE_ANON_KEY를 넣고 프론트를 다시 빌드하세요.',
   invitationVerifyFailed:
     '초대 코드를 확인할 수 없습니다. 백엔드가 실행 중인지와 네트워크를 확인하세요.',
   continueWithGoogle: 'Google로 계속',
@@ -241,6 +243,8 @@ const en: Record<string, string> = {
   invitationCode: 'Invitation only',
   invitationCodePlaceholder: 'Enter your invitation code',
   invitationInvalid: 'Invalid invitation code.',
+  supabaseNotConfigured:
+    'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY, then rebuild the frontend.',
   invitationVerifyFailed:
     'Could not verify the invitation code. Ensure the API server is reachable.',
   continueWithGoogle: 'Continue with Google',

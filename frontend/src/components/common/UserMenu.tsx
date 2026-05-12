@@ -25,7 +25,7 @@ const UserMenu: React.FC = () => {
   }, []);
 
   const logout = () => {
-    void supabase.auth.signOut();
+    void supabase?.auth.signOut();
     clearToken();
     setAuthProfile(null, false);
     setAuthMethod(null);

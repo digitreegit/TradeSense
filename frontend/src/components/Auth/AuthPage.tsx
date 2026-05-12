@@ -51,6 +51,11 @@ const AuthPage: React.FC = () => {
       setLoading(false);
       return;
     }
+    if (!supabase) {
+      setError(t('supabaseNotConfigured'));
+      setLoading(false);
+      return;
+    }
     try {
       const redirectTo = `${window.location.origin}/`;
       const { error: oauthErr } = await supabase.auth.signInWithOAuth({

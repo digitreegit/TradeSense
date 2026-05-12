@@ -1,11 +1,30 @@
-# TradeSense backend container.
+# TradeSense: FastAPI + scalp engine + production SPA (optional multi-stage frontend build).
 #
-# Builds the FastAPI app + scalp engine for ECS Fargate / EC2 / docker compose.
-# Frontend is served as static assets when ``frontend/dist`` is mounted into
-# ``backend/app/static`` (the FastAPI app already mounts that path when it
-# exists). For ECS, build the SPA in CI and copy it in here, or front it
-# separately with CloudFront + S3.
+# Static UI is served from ``/app/frontend/dist`` when present (see ``backend/app/main.py``).
 
+# --- Frontend (Vite) ---------------------------------------------------------
+FROM node:20-bookworm-slim AS frontend-build
+
+WORKDIR /build/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/ ./
+
+# Same-origin Docker / EC2 (:8000): VITE_PUBLIC_BASE=/  VITE_API_BASE=/api
+# Legacy cPanel under /quant/: pass /quant/ and /quant/api instead.
+ARG VITE_PUBLIC_BASE=/
+ARG VITE_API_BASE=/api
+ARG VITE_SUPABASE_URL=
+ARG VITE_SUPABASE_ANON_KEY=
+ENV VITE_PUBLIC_BASE=$VITE_PUBLIC_BASE \
+    VITE_API_BASE=$VITE_API_BASE \
+    VITE_SUPABASE_URL=$VITE_SUPABASE_URL \
+    VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
+
+RUN npm run build
+
+# --- Backend -----------------------------------------------------------------
 FROM python:3.11-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -26,6 +45,8 @@ COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install -r backend/requirements.txt
 
 COPY backend/ ./backend/
+
+COPY --from=frontend-build /build/frontend/dist ./frontend/dist
 
 # Persist trade logs + SQLite to a dedicated volume / EFS mount. Mount this
 # at /data on Fargate (EFS) so engine restarts keep open lots, GFV history,

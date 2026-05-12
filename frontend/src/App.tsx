@@ -69,8 +69,11 @@ const App: React.FC = () => {
 
     const syncProfile = async () => {
       try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const supaToken = sessionData.session?.access_token ?? null;
+        let supaToken: string | null = null;
+        if (supabase) {
+          const { data: sessionData } = await supabase.auth.getSession();
+          supaToken = sessionData.session?.access_token ?? null;
+        }
         if (supaToken) {
           setToken(supaToken);
         }
@@ -96,6 +99,13 @@ const App: React.FC = () => {
         if (!cancelled) setBootstrapped(true);
       }
     };
+
+    if (!supabase) {
+      void syncProfile();
+      return () => {
+        cancelled = true;
+      };
+    }
 
     supabase.auth.getSession().then(() => {
       if (!cancelled) void syncProfile();

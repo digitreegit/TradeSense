@@ -7,7 +7,7 @@ import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -127,6 +127,14 @@ async def lifespan(app: FastAPI):
     default_engine.stop()
 
 
+# Built frontend (Docker): ``/app/frontend/dist`` next to ``backend/`` in the image.
+_app_root = Path(__file__).resolve().parent.parent.parent
+STATIC_DIR = _app_root / "frontend" / "dist"
+if not STATIC_DIR.is_dir():
+    STATIC_DIR = _app_root
+SPA_INDEX_FILE = (STATIC_DIR / "index.html") if (STATIC_DIR / "index.html").is_file() else None
+
+
 # Create FastAPI app
 app = FastAPI(
     title="TradeSense API",
@@ -142,6 +150,7 @@ app.add_middleware(
         "http://localhost:5173",
         "https://skyface.com",
         "https://www.skyface.com",
+        "https://tradesense.skyface.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -159,7 +168,12 @@ app.include_router(tax.router, prefix="/api")
 
 
 @app.get("/")
-async def root():
+async def root(request: Request):
+    """Serve the SPA for normal browsers; JSON for ``curl -H 'Accept: application/json'``."""
+    accept = (request.headers.get("accept") or "").lower()
+    want_json = accept.strip().startswith("application/json")
+    if SPA_INDEX_FILE is not None and not want_json:
+        return FileResponse(str(SPA_INDEX_FILE))
     return {
         "name": "TradeSense API",
         "version": "1.1.0",
@@ -214,12 +228,7 @@ async def health_streaming():
     return streaming_service.state()
 
 
-_app_root = Path(__file__).resolve().parent.parent.parent
-STATIC_DIR = _app_root / "frontend" / "dist"
-if not STATIC_DIR.is_dir():
-    STATIC_DIR = _app_root
-
-if STATIC_DIR.is_dir() and (STATIC_DIR / "index.html").is_file():
+if SPA_INDEX_FILE is not None:
     _assets_dir = STATIC_DIR / "assets"
     if _assets_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="static-assets")
