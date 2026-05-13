@@ -59,7 +59,6 @@ function formatUsageLine(u: AlpacaApiUsage | null, lang: 'ko' | 'en'): string | 
   const lim = tr?.limit ?? u.limit;
   const pct =
     tr?.percent_used != null ? tr.percent_used : u.percent_used != null ? u.percent_used : null;
-  const pctStr = pct != null ? ` · ${pct}%` : '';
 
   if (
     rem != null &&
@@ -68,16 +67,17 @@ function formatUsageLine(u: AlpacaApiUsage | null, lang: 'ko' | 'en'): string | 
     da?.limit != null &&
     da.limit !== lim
   ) {
-    const dPct = da.percent_used != null ? ` · ${da.percent_used}%` : '';
+    const bPct = pct != null ? ` ${pct}%` : '';
+    const dPct = da.percent_used != null ? ` ${da.percent_used}%` : '';
     return lang === 'ko'
-      ? `브로커 ${rem}/${lim}/분${pctStr} · 데이터 ${da.remaining}/${da.limit}/분${dPct}`
-      : `Broker ${rem}/${lim}/min${pctStr} · Data ${da.remaining}/${da.limit}/min${dPct}`;
+      ? `브로커 ${rem}/${lim}/분${bPct}\n데이터 ${da.remaining}/${da.limit}/분${dPct}`
+      : `Broker ${rem}/${lim}/min${bPct}\nData ${da.remaining}/${da.limit}/min${dPct}`;
   }
 
   if (rem != null && lim != null) {
     return lang === 'ko'
-      ? `브로커 REST ${rem}/${lim}/분${pctStr}`
-      : `Broker REST ${rem}/${lim}/min${pctStr}`;
+      ? `브로커 REST ${rem}/${lim}/분${pct != null ? ` ${pct}%` : ''}`
+      : `Broker REST ${rem}/${lim}/min${pct != null ? ` ${pct}%` : ''}`;
   }
 
   if (u.remaining != null) {
@@ -246,7 +246,7 @@ export function SidebarNavAndFooter({ onNavigate }: { onNavigate?: () => void })
                 alpacaUsage.reset_in_seconds > 0 &&
                 alpacaUsage.remaining != null &&
                 alpacaUsage.limit != null
-                  ? ` · reset ~${alpacaUsage.reset_in_seconds}s`
+                  ? `${usageLine.includes('\n') ? '\n' : ' '}· reset ~${alpacaUsage.reset_in_seconds}s`
                   : ''}
               </span>
             )}

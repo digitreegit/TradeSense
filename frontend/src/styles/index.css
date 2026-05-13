@@ -751,6 +751,7 @@ body {
   line-height: 1.35;
   font-family: var(--font-mono, ui-monospace, monospace);
   word-break: break-word;
+  white-space: pre-line;
 }
 
 .sidebar-status:not(.disconnected) .sidebar-status-meta {
