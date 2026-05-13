@@ -1,6 +1,13 @@
 """
 TradeSense - Trading Engine v4
-Cash-account scalping with compliance, event, and regime guards.
+Cash-account trading with compliance, event, and regime guards.
+
+Default **swing / small-book** policy (env-tunable): no same-calendar-day exits
+for TP/trail (FIFO lot ``bought_on``); optional same-day stop-loss; Alpaca
+margin accounts blocked for new entries when ``REQUIRE_CASH_ACCOUNT``; rolling
+5 weekday-session cap on new buy fills (``SWING_MAX_NEW_ENTRIES_PER_5BD``)
+with optional score pressure. For unconstrained intraday + margin PDT paths,
+see branch ``cursor/scalp-25k-pdt-baseline`` / disable swing envs.
 
 v4.1 adds:
 - Capital-scale aware risk presets (3k vs 30k) via core.risk_presets
@@ -241,6 +248,10 @@ class TradingEngine:
             "entry_vol_regime": {},
             "rationale_points_en": [],
             "rationale_points_ko": [],
+            "swing_entries_last_5bd": 0,
+            "swing_entry_slots_remaining": 0,
+            "cash_only_block": False,
+            "swing_entry_cap_block": False,
         }
 
         # Session stats
@@ -1214,6 +1225,10 @@ class TradingEngine:
         active_playbooks = list(self.regime_data.get("active_playbooks") or self._last_active_playbooks)
         active_playbook_tag = ",".join(active_playbooks) if active_playbooks else None
 
+        cap_sw = int(getattr(settings, "swing_max_new_entries_per_5bd", 0) or 0)
+        self.regime_data["swing_entries_last_5bd"] = self._compliance.swing_buy_fills_in_last_n_sessions(5)
+        self.regime_data["swing_entry_slots_remaining"] = self._compliance.swing_entry_slots_remaining(cap_sw)
+
         pending_symbols = [o["symbol"] for o in pending]
         current_symbols = [p["symbol"] for p in positions]
         use_ext = self._use_extended_limit_orders(now_et)
@@ -1273,6 +1288,20 @@ class TradingEngine:
 
             if not exit_reason:
                 continue
+
+            if bool(getattr(settings, "swing_no_same_day_exit", False)):
+                allow_sl = bool(getattr(settings, "swing_allow_same_day_stop_loss", True))
+                is_stop = (exit_reason or "").startswith("🔴 STOP")
+                if not (allow_sl and is_stop):
+                    el = self._compliance.earliest_open_lot_bought_on(symbol)
+                    if el is not None and el == now_et.date():
+                        if self._scan_count % 12 == 1:
+                            self._log(
+                                "info",
+                                f"🌙 Swing hold: skip exit {symbol} — lot opened {el.isoformat()} "
+                                f"(no same-day TP/trail; SL same-day={'on' if allow_sl else 'off'})",
+                            )
+                        continue
 
             self._log("sell", f"{exit_reason} {symbol} (${pl_usd:+,.2f})")
             exit_tif = "day" if use_ext else self._exit_tif_for_reason(exit_reason)
@@ -1362,6 +1391,18 @@ class TradingEngine:
                 self._log("info", f"🚫 {pdt_reason}")
             return
 
+        req_cash = bool(getattr(settings, "require_cash_account", True))
+        if req_cash and is_margin:
+            self.regime_data["cash_only_block"] = True
+            self.regime_data["cash_only_reason"] = (
+                "Alpaca reports a margin account — this bot is configured cash-only for new buys"
+            )
+            if self._scan_count % 15 == 1:
+                self._log("warning", f"🚫 {self.regime_data['cash_only_reason']}")
+            return
+        self.regime_data["cash_only_block"] = False
+        self.regime_data.pop("cash_only_reason", None)
+
         if self._daily_trades >= preset.max_trades_per_day:
             if self._scan_count % 10 == 1:
                 self._log("info", f"🧯 Daily trade cap {preset.max_trades_per_day} reached")
@@ -1402,6 +1443,17 @@ class TradingEngine:
             self._log("info", f"💤 Settled cash too low: ${settled:,.2f}")
             return
 
+        if cap_sw > 0 and not self._compliance.swing_can_open_new_position(cap_sw):
+            self.regime_data["swing_entry_cap_block"] = True
+            if self._scan_count % 12 == 1:
+                self._log(
+                    "info",
+                    f"🚫 Swing entry cap: {cap_sw} new buy fills in last 5 sessions "
+                    f"({self._compliance.swing_buy_fills_in_last_n_sessions(5)} used) — wait for window to roll",
+                )
+            return
+        self.regime_data["swing_entry_cap_block"] = False
+
         entry_threshold = float(preset.entry_score_threshold)
         vol_payload = self._refresh_entry_vol_regime(now_et)
         entry_threshold += float(vol_payload.get("vol_entry_delta", 0))
@@ -1409,6 +1461,11 @@ class TradingEngine:
             entry_threshold = max(20.0, entry_threshold - 8.0)
         if self._daily_target_reached:
             entry_threshold = max(entry_threshold, 70.0)
+        if bool(getattr(settings, "swing_quality_entry_pressure", False)) and cap_sw > 0:
+            used_sw = self._compliance.swing_buy_fills_in_last_n_sessions(5)
+            if used_sw >= max(0, cap_sw - 1):
+                bump = min(24, 6 + used_sw * 6)
+                entry_threshold += bump
         entry_threshold = int(max(18, min(98, round(entry_threshold))))
         self.regime_data["entry_score_threshold_effective"] = entry_threshold
 

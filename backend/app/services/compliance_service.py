@@ -20,7 +20,8 @@ Cash-account compliance tracking: GFV / free-riding + T+1 proceeds + tax lots.
   lot's cost basis (substantially-identical heuristic; same-symbol only).
 
 State is persisted per ``log_dir`` to ``compliance_state.json`` (atomic
-rename) so engine restarts don't drop open lots / GFV history / wash carry.
+rename) so engine restarts don't drop open lots / GFV history / wash carry /
+rolling swing buy-fill timestamps (v3).
 JSONL under ``TRADESENSE_LOG_DIR`` continues to be the durable audit trail
 for realized trades and wash-sale analytics.
 """
@@ -46,6 +47,18 @@ logger = logging.getLogger(__name__)
 SETTLE_DAYS = 1
 WASH_SALE_LOOKBACK_DAYS = 30
 LONG_TERM_HOLD_DAYS = 365
+SWING_ROLLING_BD = 5
+
+
+def rolling_weekday_sessions_ending(anchor: date, n: int) -> set[date]:
+    """Last ``n`` Mon–Fri calendar dates ending at ``anchor`` (NYSE-style; no holiday file)."""
+    out: list[date] = []
+    d = anchor
+    while len(out) < n:
+        if d.weekday() < 5:
+            out.append(d)
+        d -= timedelta(days=1)
+    return set(out)
 
 
 def _today_et() -> date:
@@ -115,7 +128,7 @@ class ComplianceService:
     conservative re-entry cooldown per symbol.
     """
 
-    STATE_VERSION = 2
+    STATE_VERSION = 3
 
     def __init__(self, log_dir: Optional[Path] = None):
         self._tax_lots: List[TaxLot] = []
@@ -127,6 +140,8 @@ class ComplianceService:
         self._loss_streak: int = 0
         self._cooldown_until: Optional[datetime] = None
         self._state_lock = threading.Lock()
+        # ISO timestamps (ET) for each filled BUY — powers 3-in-5BD-style entry budget.
+        self._swing_buy_fill_instants: List[str] = []
 
         self._log_dir = log_dir or Path(os.getenv("TRADESENSE_LOG_DIR", "./trade_logs"))
         self._log_dir.mkdir(parents=True, exist_ok=True)
@@ -219,6 +234,8 @@ class ComplianceService:
                 "compliance: wash-sale basis carry $%.2f added to %s lot %s (raw cost=$%.2f → adj=$%.2f)",
                 wash_add, sym, lot_id, cost, adjusted_total,
             )
+        self._swing_buy_fill_instants.append(_today_et().isoformat())
+        self._prune_swing_buy_fills()
         self._save_state()
 
     def _close_lots_fifo(
@@ -398,6 +415,42 @@ class ComplianceService:
                 return False
         return True
 
+    def earliest_open_lot_bought_on(self, symbol: str) -> Optional[date]:
+        """Earliest ``bought_on`` among open FIFO lots for ``symbol`` (None if no modeled lots)."""
+        sym = symbol.upper()
+        dates = [lot.bought_on for lot in self._tax_lots if lot.symbol == sym and lot.qty > 0]
+        return min(dates) if dates else None
+
+    def _prune_swing_buy_fills(self) -> None:
+        keep_from = (_today_et() - timedelta(days=21)).isoformat()
+        self._swing_buy_fill_instants = [
+            s for s in self._swing_buy_fill_instants if (s or "")[:10] >= keep_from[:10]
+        ]
+
+    def swing_buy_fills_in_last_n_sessions(self, n: int = SWING_ROLLING_BD) -> int:
+        """How many buy fills fell on calendar dates in the last ``n`` Mon–Fri days (ending today ET)."""
+        self._prune_swing_buy_fills()
+        window = rolling_weekday_sessions_ending(_today_et(), n)
+        n_hit = 0
+        for s in self._swing_buy_fill_instants:
+            try:
+                d = date.fromisoformat(str(s)[:10])
+            except ValueError:
+                continue
+            if d in window:
+                n_hit += 1
+        return n_hit
+
+    def swing_can_open_new_position(self, cap: int) -> bool:
+        if cap <= 0:
+            return True
+        return self.swing_buy_fills_in_last_n_sessions() < cap
+
+    def swing_entry_slots_remaining(self, cap: int) -> int:
+        if cap <= 0:
+            return 999
+        return max(0, cap - self.swing_buy_fills_in_last_n_sessions())
+
     def can_enter(self, symbol: str) -> Optional[str]:
         sym = symbol.upper()
         until = self._wash_sale_cooldown.get(sym)
@@ -465,6 +518,8 @@ class ComplianceService:
             },
             "wash_loss_carries_active": carries_active,
             "t_plus_one_settlement_days": SETTLE_DAYS,
+            "swing_buy_fills_last_5bd": self.swing_buy_fills_in_last_n_sessions(SWING_ROLLING_BD),
+            "swing_rolling_bd": SWING_ROLLING_BD,
         }
 
     def _persist_realized(self) -> None:
@@ -514,6 +569,7 @@ class ComplianceService:
             "cooldown_until": (
                 self._cooldown_until.isoformat() if self._cooldown_until else None
             ),
+            "swing_buy_fill_instants": list(self._swing_buy_fill_instants),
         }
 
     def _save_state(self) -> None:
@@ -615,6 +671,9 @@ class ComplianceService:
                     )
                 )
             self._loss_streak = int(payload.get("loss_streak") or 0)
+            for raw in payload.get("swing_buy_fill_instants") or []:
+                if isinstance(raw, str) and len(raw) >= 10 and raw[:4].isdigit():
+                    self._swing_buy_fill_instants.append(raw)
             cu_raw = payload.get("cooldown_until")
             if cu_raw:
                 try:
@@ -622,11 +681,12 @@ class ComplianceService:
                 except ValueError:
                     self._cooldown_until = None
             logger.info(
-                "compliance: restored state from %s — lots=%d gfv=%d wash_carries=%d",
+                "compliance: restored state from %s — lots=%d gfv=%d wash_carries=%d swing_fills=%d",
                 self._state_path,
                 len(self._tax_lots),
                 len(self._gfv_events),
                 len(self._wash_loss_carries),
+                len(self._swing_buy_fill_instants),
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("compliance: state restore partial failure: %s", exc)
