@@ -28,6 +28,8 @@ const ko: Record<string, string> = {
   alpacaKeysRequired: 'Alpaca 키가 필요합니다',
   connectedToAlpaca: 'Alpaca에 연결됨',
   disconnected: '연결 끊김',
+  alpacaUsageTooltip:
+    '브로커(주문·계정) REST와 마켓 데이터 REST는 각각 분당 호출 한도가 있습니다. Algo Trader Plus/SIP는 합산 시세·바 구독이며 브로커 API를 무제한으로 만들지 않습니다. 좌측 숫자는 Alpaca 응답 헤더 기준입니다.',
   usStocks: '미국 주식',
   authTitle: '시장 요약, 실시간 시세, AI 거래 아이디어.',
   authSubtitle: '포트폴리오를 추적하고, 활발한 종목을 스캔하고, 모던 워크스페이스에서 자동 전략을 실행하세요.',
@@ -229,6 +231,8 @@ const en: Record<string, string> = {
   alpacaKeysRequired: 'Alpaca keys required',
   connectedToAlpaca: 'Connected to Alpaca',
   disconnected: 'Disconnected',
+  alpacaUsageTooltip:
+    'Broker (orders/account) and Market Data REST each have separate per-minute limits. Algo Trader+ / SIP is for consolidated market data; it does not make broker order APIs unlimited. Numbers are from Alpaca rate-limit headers.',
   usStocks: 'US stocks',
   authTitle: 'Market summary, live quotes, AI trade ideas.',
   authSubtitle:

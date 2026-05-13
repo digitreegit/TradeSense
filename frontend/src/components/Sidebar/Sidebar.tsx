@@ -51,22 +51,45 @@ const navItems: NavItem[] = [
   { id: 'settings', label: 'Settings', icon: CogIcon },
 ];
 
-function formatUsageLine(u: AlpacaApiUsage | null): string | null {
+function formatUsageLine(u: AlpacaApiUsage | null, lang: 'ko' | 'en'): string | null {
   if (!u || !u.ok) return null;
-  if (u.remaining != null && u.limit != null) {
-    const pct = u.percent_used != null ? ` · ${u.percent_used}% used` : '';
-    return `API ${u.remaining}/${u.limit} left${pct}`;
+  const tr = u.trading_api;
+  const da = u.data_api;
+  const rem = tr?.remaining ?? u.remaining;
+  const lim = tr?.limit ?? u.limit;
+  const pct =
+    tr?.percent_used != null ? tr.percent_used : u.percent_used != null ? u.percent_used : null;
+  const pctStr = pct != null ? ` · ${pct}%` : '';
+
+  if (
+    rem != null &&
+    lim != null &&
+    da?.remaining != null &&
+    da?.limit != null &&
+    da.limit !== lim
+  ) {
+    const dPct = da.percent_used != null ? ` · ${da.percent_used}%` : '';
+    return lang === 'ko'
+      ? `브로커 ${rem}/${lim}/분${pctStr} · 데이터 ${da.remaining}/${da.limit}/분${dPct}`
+      : `Broker ${rem}/${lim}/min${pctStr} · Data ${da.remaining}/${da.limit}/min${dPct}`;
   }
+
+  if (rem != null && lim != null) {
+    return lang === 'ko'
+      ? `브로커 REST ${rem}/${lim}/분${pctStr}`
+      : `Broker REST ${rem}/${lim}/min${pctStr}`;
+  }
+
   if (u.remaining != null) {
-    return `API ${u.remaining} left (window)`;
+    return lang === 'ko' ? `API ${u.remaining} (윈도우)` : `API ${u.remaining} left (window)`;
   }
   if (u.note) {
     return u.note.length > 52 ? `${u.note.slice(0, 49)}…` : u.note;
   }
   if (u.headers_available === false) {
-    return 'REST OK · rate-limit headers not shown';
+    return lang === 'ko' ? 'REST OK · 한도 헤더 없음' : 'REST OK · rate-limit headers not shown';
   }
-  return 'REST OK · no quota headers';
+  return lang === 'ko' ? 'REST OK · 한도 정보 없음' : 'REST OK · no quota headers';
 }
 
 /** Logo block: desktop sidebar header or mobile top-left brand. */
@@ -95,7 +118,7 @@ export function SidebarLogoBlock({ compact }: { compact?: boolean }) {
 
 /** Shared nav + Alpaca status (desktop sidebar + mobile drawer). */
 export function SidebarNavAndFooter({ onNavigate }: { onNavigate?: () => void }) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const {
     currentPage,
     setCurrentPage,
@@ -113,7 +136,7 @@ export function SidebarNavAndFooter({ onNavigate }: { onNavigate?: () => void })
       : showConnected
         ? t('connectedToAlpaca')
         : t('disconnected');
-  const usageLine = formatUsageLine(alpacaUsage);
+  const usageLine = formatUsageLine(alpacaUsage, language);
 
   let currentSection = '';
 
@@ -200,16 +223,21 @@ export function SidebarNavAndFooter({ onNavigate }: { onNavigate?: () => void })
                 className="sidebar-status-meta"
                 title={
                   [
+                    t('alpacaUsageTooltip'),
+                    alpacaUsage?.usage_scope_note,
+                    alpacaUsage?.data_probe_error
+                      ? `${language === 'ko' ? '데이터 API 조회' : 'Data API probe'}: ${alpacaUsage.data_probe_error}`
+                      : null,
                     alpacaUsage?.note,
                     alpacaUsage?.http_probe_error
                       ? `HTTP probe: ${alpacaUsage.http_probe_error}`
                       : null,
                     alpacaUsage?.reset_in_seconds != null
-                      ? `Resets in ~${alpacaUsage.reset_in_seconds}s`
+                      ? `${language === 'ko' ? '약' : '~'} ${alpacaUsage.reset_in_seconds}s ${language === 'ko' ? '후 브로커 한도 리셋' : 'until broker window resets'}`
                       : null,
                   ]
                     .filter(Boolean)
-                    .join('\n') || 'Alpaca REST'
+                    .join('\n\n') || 'Alpaca REST'
                 }
               >
                 {usageLine}

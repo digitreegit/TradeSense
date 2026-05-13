@@ -157,7 +157,16 @@ export interface PlaybookConfig {
   }>;
 }
 
-/** Alpaca REST rate-limit snapshot (from response headers via /v2/clock probe). */
+/** Alpaca REST rate-limit snapshot (broker + optional market-data host). */
+export interface AlpacaRateLimitWindow {
+  limit?: number | null;
+  remaining?: number | null;
+  used?: number | null;
+  reset_epoch?: number | null;
+  reset_in_seconds?: number | null;
+  percent_used?: number | null;
+}
+
 export interface AlpacaApiUsage {
   ok: boolean;
   connected?: boolean;
@@ -172,6 +181,12 @@ export interface AlpacaApiUsage {
   percent_used?: number | null;
   /** False when Alpaca responded OK but sent no rate-limit headers */
   headers_available?: boolean;
+  /** Broker (paper-api / live) host — same as top-level limit/remaining when present */
+  trading_api?: AlpacaRateLimitWindow | null;
+  /** data.alpaca.markets host — often a higher per-minute bucket than broker */
+  data_api?: AlpacaRateLimitWindow | null;
+  data_probe_error?: string | null;
+  usage_scope_note?: string | null;
 }
 
 export interface ComplianceStatus {

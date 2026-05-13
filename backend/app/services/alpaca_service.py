@@ -5,7 +5,7 @@ Streaming-aware: prefers the WebSocket cache when available (see
 ``app.services.streaming_service``); falls back to REST snapshots.
 """
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 import httpx
@@ -24,6 +24,54 @@ from alpaca.data.enums import DataFeed
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_alpaca_ratelimit_headers(h: httpx.Headers) -> Dict[str, Optional[int]]:
+    """Parse Alpaca X-Ratelimit-* (or RFC8594) headers from a REST response."""
+    norm = {k.lower(): v for k, v in h.items()}
+    limit_raw = norm.get("x-ratelimit-limit") or norm.get("ratelimit-limit")
+    remain_raw = norm.get("x-ratelimit-remaining") or norm.get("ratelimit-remaining")
+    reset_raw = norm.get("x-ratelimit-reset") or norm.get("ratelimit-reset")
+
+    def _to_int(val: Optional[str]) -> Optional[int]:
+        if val is None or val == "":
+            return None
+        try:
+            return int(float(val))
+        except (TypeError, ValueError):
+            return None
+
+    lim = _to_int(limit_raw)
+    rem = _to_int(remain_raw)
+    rst = _to_int(reset_raw)
+    if rst and rst > 10_000_000_000:
+        rst = rst // 1000
+    return {"limit": lim, "remaining": rem, "reset_epoch": rst}
+
+
+def _rate_limit_usage_block(
+    limit: Optional[int],
+    remaining: Optional[int],
+    reset_epoch: Optional[int],
+) -> Dict[str, Any]:
+    used = None
+    if limit is not None and remaining is not None:
+        used = max(0, limit - remaining)
+    pct_used = None
+    if limit and limit > 0 and remaining is not None:
+        pct_used = round((1.0 - remaining / limit) * 100.0, 1)
+    now = datetime.now(timezone.utc).timestamp()
+    reset_in_s = None
+    if reset_epoch:
+        reset_in_s = max(0, int(reset_epoch - now))
+    return {
+        "limit": limit,
+        "remaining": remaining,
+        "used": used,
+        "reset_epoch": reset_epoch,
+        "reset_in_seconds": reset_in_s,
+        "percent_used": pct_used,
+    }
 
 
 def _resolve_feed() -> DataFeed:
@@ -924,7 +972,7 @@ class AlpacaService:
 
     # ─── REST API usage (rate-limit headers) ───────────────────
     def get_api_usage(self) -> Dict[str, Any]:
-        """Alpaca REST rate-limit snapshot from a lightweight /v2/clock call."""
+        """Broker (paper/live API) and Market Data API rate limits are separate per-minute buckets."""
         if not settings.alpaca_api_key or not settings.alpaca_secret_key:
             return {
                 "ok": False,
@@ -933,53 +981,53 @@ class AlpacaService:
             }
 
         base = (settings.alpaca_base_url or "").rstrip("/")
-        url = f"{base}/v2/clock"
+        clock_url = f"{base}/v2/clock"
         headers = {
             "APCA-API-KEY-ID": settings.alpaca_api_key,
             "APCA-API-SECRET-KEY": settings.alpaca_secret_key,
         }
-
-        def _parse_rl(h: httpx.Headers) -> Dict[str, Optional[int]]:
-            norm = {k.lower(): v for k, v in h.items()}
-            limit_raw = norm.get("x-ratelimit-limit") or norm.get("ratelimit-limit")
-            remain_raw = norm.get("x-ratelimit-remaining") or norm.get("ratelimit-remaining")
-            reset_raw = norm.get("x-ratelimit-reset") or norm.get("ratelimit-reset")
-
-            def _to_int(val: Optional[str]) -> Optional[int]:
-                if val is None or val == "":
-                    return None
-                try:
-                    return int(float(val))
-                except (TypeError, ValueError):
-                    return None
-
-            lim = _to_int(limit_raw)
-            rem = _to_int(remain_raw)
-            rst = _to_int(reset_raw)
-            if rst and rst > 10_000_000_000:
-                rst = rst // 1000
-            return {"limit": lim, "remaining": rem, "reset_epoch": rst}
 
         parsed: Dict[str, Optional[int]] = {
             "limit": None,
             "remaining": None,
             "reset_epoch": None,
         }
+        data_parsed: Dict[str, Optional[int]] = {
+            "limit": None,
+            "remaining": None,
+            "reset_epoch": None,
+        }
         http_error: Optional[str] = None
+        data_probe_error: Optional[str] = None
 
         try:
             with httpx.Client(timeout=8.0, follow_redirects=True) as client:
-                resp = client.get(url, headers=headers)
+                resp = client.get(clock_url, headers=headers)
                 resp.raise_for_status()
-                parsed = _parse_rl(resp.headers)
+                parsed = _parse_alpaca_ratelimit_headers(resp.headers)
                 if parsed["limit"] is None and parsed["remaining"] is None:
                     acc_url = f"{base}/v2/account"
                     r2 = client.get(acc_url, headers=headers)
                     r2.raise_for_status()
-                    parsed = _parse_rl(r2.headers)
+                    parsed = _parse_alpaca_ratelimit_headers(r2.headers)
+
+                dbase = (settings.alpaca_data_url or "https://data.alpaca.markets").rstrip("/")
+                durl = f"{dbase}/v2/stocks/AAPL/trades/latest"
+                try:
+                    dr = client.get(durl, headers=headers)
+                    dr.raise_for_status()
+                    data_parsed = _parse_alpaca_ratelimit_headers(dr.headers)
+                except Exception as de:
+                    data_probe_error = str(de)
+                    logger.debug("Alpaca data API usage probe failed: %s", de)
         except Exception as e:
             http_error = str(e)
             logger.warning("Alpaca usage HTTP probe failed: %s", e)
+
+        usage_scope_note = (
+            "Broker (orders/account) and Market Data REST use separate per-minute limits. "
+            "Algo Trader+ / SIP is for consolidated market data; it does not remove broker REST throttles."
+        )
 
         if parsed["limit"] is None and parsed["remaining"] is None:
             if self.trading_client and self._initialized:
@@ -995,9 +1043,14 @@ class AlpacaService:
                         "reset_in_seconds": None,
                         "percent_used": None,
                         "headers_available": False,
+                        "trading_api": None,
+                        "data_api": None,
+                        "data_probe_error": data_probe_error,
+                        "usage_scope_note": usage_scope_note,
                         "note": (
                             "Trading API reachable (SDK get_clock). "
-                            "Rate-limit headers not returned on this path."
+                            "Rate-limit headers not returned on this path. "
+                            "See usage_scope_note for broker vs data limits."
                         ),
                         "http_probe_error": http_error,
                     }
@@ -1015,33 +1068,29 @@ class AlpacaService:
                 "error": http_error or "Alpaca not initialized",
             }
 
-        limit = parsed["limit"]
-        remaining = parsed["remaining"]
-        reset_epoch = parsed["reset_epoch"]
-
-        used = None
-        if limit is not None and remaining is not None:
-            used = max(0, limit - remaining)
-
-        pct_used = None
-        if limit and limit > 0 and remaining is not None:
-            pct_used = round((1.0 - remaining / limit) * 100.0, 1)
-
-        now = datetime.utcnow().timestamp()
-        reset_in_s = None
-        if reset_epoch:
-            reset_in_s = max(0, int(reset_epoch - now))
+        tr = _rate_limit_usage_block(parsed["limit"], parsed["remaining"], parsed["reset_epoch"])
+        data_block: Optional[Dict[str, Any]] = None
+        if data_parsed["limit"] is not None or data_parsed["remaining"] is not None:
+            data_block = _rate_limit_usage_block(
+                data_parsed["limit"],
+                data_parsed["remaining"],
+                data_parsed["reset_epoch"],
+            )
 
         return {
             "ok": True,
             "connected": self._initialized,
-            "limit": limit,
-            "remaining": remaining,
-            "used": used,
-            "reset_epoch": reset_epoch,
-            "reset_in_seconds": reset_in_s,
-            "percent_used": pct_used,
-            "headers_available": limit is not None or remaining is not None,
+            "limit": tr["limit"],
+            "remaining": tr["remaining"],
+            "used": tr["used"],
+            "reset_epoch": tr["reset_epoch"],
+            "reset_in_seconds": tr["reset_in_seconds"],
+            "percent_used": tr["percent_used"],
+            "headers_available": tr["limit"] is not None or tr["remaining"] is not None,
+            "trading_api": tr,
+            "data_api": data_block,
+            "data_probe_error": data_probe_error,
+            "usage_scope_note": usage_scope_note,
         }
 
 
