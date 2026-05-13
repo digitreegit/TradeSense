@@ -1340,6 +1340,8 @@ class TradingEngine:
         dt_count = int(account.get("day_trade_count") or 0)
         pdt_flag = bool(account.get("pattern_day_trader"))
         equity_now = float(account.get("equity") or 0.0)
+        # $25K threshold uses displayed equity (paper: capital slider = simulated live size).
+        is_paper = bool(account.get("paper_trading"))
         pdt_block = False
         pdt_reason = ""
         if is_margin and equity_now < 25_000.0 and dt_count >= 3:
@@ -1348,7 +1350,8 @@ class TradingEngine:
                 f"PDT guard: margin acct, equity ${equity_now:,.2f} < $25,000, "
                 f"day_trades={dt_count}/5BD — a 4th would lock the account"
             )
-        elif is_margin and equity_now < 25_000.0 and pdt_flag:
+        # Live only: broker PDT flag. On paper the flag tracks Alpaca's whole login, not your scaled book.
+        elif (not is_paper) and is_margin and equity_now < 25_000.0 and pdt_flag:
             pdt_block = True
             pdt_reason = "Broker flagged PDT under $25K — no new same-day round-trips"
         self.regime_data["pdt_blocked"] = pdt_block

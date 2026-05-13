@@ -186,6 +186,8 @@ class AlpacaService:
             "is_margin_account": False,
             "paper_trading": self.paper_trading,
             "trading_mode": "paper" if self.paper_trading else "live",
+            # Raw broker equity (e.g. UI/debug); PDT uses displayed ``equity`` + live-only PDT flag.
+            "broker_equity_for_pdt": 0.0,
             "initial_capital": 0.0,
             "win_rate": 0.0,
             "avg_win": 0.0,
@@ -329,6 +331,8 @@ class AlpacaService:
                     "initial_capital": round(initial, 2),
                     "paper_trading": self.paper_trading,
                     "trading_mode": "paper" if self.paper_trading else "live",
+                    # Same as ``equity`` on live; on paper = raw Alpaca equity (UI/debug only).
+                    "broker_equity_for_pdt": round(real_equity, 2),
                     **pdt_fields,
                     **metrics,
                 }
@@ -451,6 +455,8 @@ class AlpacaService:
                 "initial_capital":       initial,
                 "paper_trading":         self.paper_trading,
                 "trading_mode":          "paper" if self.paper_trading else "live",
+                # Raw Alpaca equity while ``equity`` is scaled for paper capital slider.
+                "broker_equity_for_pdt": round(real_equity, 2),
                 **pdt_fields,
                 **metrics,
             }
@@ -900,6 +906,8 @@ class AlpacaService:
             "profit_loss_pct": 0,
             "day_trade_count": 0,
             "initial_capital": ic,
+            "paper_trading": self.paper_trading,
+            "broker_equity_for_pdt": ic,
         }
 
     def _demo_bars(self, symbol: str, limit: int, start_price: float = None) -> list:

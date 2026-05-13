@@ -1,19 +1,8 @@
-"""PDT gating logic — replicates the engine's hard halt path on margin accounts.
+"""PDT gating logic — mirrors ``trading_engine`` margin + under-$25K rules.
 
-The engine guards in ``trading_engine._run_scalp`` with::
-
-    is_margin = bool(account.get("is_margin_account"))
-    dt_count = int(account.get("day_trade_count") or 0)
-    pdt_flag = bool(account.get("pattern_day_trader"))
-    equity_now = float(account.get("equity") or 0.0)
-    pdt_block = (
-        is_margin and equity_now < 25_000 and dt_count >= 3
-    ) or (
-        is_margin and equity_now < 25_000 and pdt_flag
-    )
-
-This test re-implements the same predicate so a regression in the boolean
-shape would surface immediately.
+- **Equity** for the $25K test is always displayed ``equity`` (paper: capital slider).
+- **Live**: block on (a) ``day_trade_count`` ≥ 3 in 5BD window, or (b) broker ``pattern_day_trader``.
+- **Paper**: same (a); ignore (b) because Alpaca's flag is for the whole paper login, not the scaled book.
 """
 from __future__ import annotations
 
@@ -25,11 +14,12 @@ def _pdt_block(account: dict) -> bool:
     dt_count = int(account.get("day_trade_count") or 0)
     pdt_flag = bool(account.get("pattern_day_trader"))
     equity_now = float(account.get("equity") or 0.0)
-    return bool(
-        is_margin
-        and equity_now < 25_000.0
-        and (dt_count >= 3 or pdt_flag)
-    )
+    is_paper = bool(account.get("paper_trading"))
+    if is_margin and equity_now < 25_000.0 and dt_count >= 3:
+        return True
+    if (not is_paper) and is_margin and equity_now < 25_000.0 and pdt_flag:
+        return True
+    return False
 
 
 @pytest.mark.parametrize(
@@ -41,10 +31,11 @@ def _pdt_block(account: dict) -> bool:
         ({"equity": 10_000.0, "is_margin_account": True, "day_trade_count": 2}, False),
         # Margin under $25K with 3 day-trades: BLOCK (4th would lock account).
         ({"equity": 10_000.0, "is_margin_account": True, "day_trade_count": 3}, True),
-        # Margin under $25K, broker flagged PDT.
+        # Live: margin under $25K, broker flagged PDT — block even with 0 DT in rolling count edge.
         (
             {
                 "equity": 24_999.0,
+                "paper_trading": False,
                 "is_margin_account": True,
                 "day_trade_count": 0,
                 "pattern_day_trader": True,
@@ -53,6 +44,28 @@ def _pdt_block(account: dict) -> bool:
         ),
         # Margin at/above $25K: PDT no longer relevant for entry block.
         ({"equity": 26_000.0, "is_margin_account": True, "day_trade_count": 5}, False),
+        # Paper: virtual ~$3K + broker PDT flag — do not block on flag alone (matches scaled-capital test).
+        (
+            {
+                "equity": 3_000.0,
+                "paper_trading": True,
+                "is_margin_account": True,
+                "day_trade_count": 0,
+                "pattern_day_trader": True,
+            },
+            False,
+        ),
+        # Paper: still block when day-trade count hits guard (same as live under $25K).
+        (
+            {
+                "equity": 3_000.0,
+                "paper_trading": True,
+                "is_margin_account": True,
+                "day_trade_count": 3,
+                "pattern_day_trader": False,
+            },
+            True,
+        ),
     ],
 )
 def test_pdt_block_logic(account, expected):
