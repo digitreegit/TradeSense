@@ -2,7 +2,7 @@
 
 - **Equity** for the $25K test is always displayed ``equity`` (paper: capital slider).
 - **Live**: block on (a) ``day_trade_count`` ≥ 3 in 5BD window, or (b) broker ``pattern_day_trader``.
-- **Paper**: same (a); ignore (b) because Alpaca's flag is for the whole paper login, not the scaled book.
+- **Paper**: no PDT block from broker DT count or flag — swing entry cap / cash-only apply instead.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ def _pdt_block(account: dict) -> bool:
     pdt_flag = bool(account.get("pattern_day_trader"))
     equity_now = float(account.get("equity") or 0.0)
     is_paper = bool(account.get("paper_trading"))
-    if is_margin and equity_now < 25_000.0 and dt_count >= 3:
+    if (not is_paper) and is_margin and equity_now < 25_000.0 and dt_count >= 3:
         return True
     if (not is_paper) and is_margin and equity_now < 25_000.0 and pdt_flag:
         return True
@@ -29,8 +29,16 @@ def _pdt_block(account: dict) -> bool:
         ({"equity": 3_000.0, "is_margin_account": False, "day_trade_count": 5}, False),
         # Margin under $25K with 2 day-trades: still safe.
         ({"equity": 10_000.0, "is_margin_account": True, "day_trade_count": 2}, False),
-        # Margin under $25K with 3 day-trades: BLOCK (4th would lock account).
-        ({"equity": 10_000.0, "is_margin_account": True, "day_trade_count": 3}, True),
+        # Margin under $25K with 3 day-trades: BLOCK (4th would lock account) — live only.
+        (
+            {
+                "equity": 10_000.0,
+                "paper_trading": False,
+                "is_margin_account": True,
+                "day_trade_count": 3,
+            },
+            True,
+        ),
         # Live: margin under $25K, broker flagged PDT — block even with 0 DT in rolling count edge.
         (
             {
@@ -55,7 +63,7 @@ def _pdt_block(account: dict) -> bool:
             },
             False,
         ),
-        # Paper: still block when day-trade count hits guard (same as live under $25K).
+        # Paper: broker DT count does not gate (scaled book vs Alpaca whole-account).
         (
             {
                 "equity": 3_000.0,
@@ -64,7 +72,7 @@ def _pdt_block(account: dict) -> bool:
                 "day_trade_count": 3,
                 "pattern_day_trader": False,
             },
-            True,
+            False,
         ),
     ],
 )

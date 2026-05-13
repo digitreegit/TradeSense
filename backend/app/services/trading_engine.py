@@ -1365,16 +1365,30 @@ class TradingEngine:
                 self._log("error", "⛔ Broker reports account/trading blocked — no new entries")
             return
 
-        # ── PDT enforcement (P0-1): margin + <$25K + ≥3 day-trades over 5 BD ──
+        # ── Cash-only (before PDT): margin profile but bot is cash-first ───
         is_margin = bool(account.get("is_margin_account"))
+        req_cash = bool(getattr(settings, "require_cash_account", True))
+        if req_cash and is_margin:
+            self.regime_data["cash_only_block"] = True
+            self.regime_data["cash_only_reason"] = (
+                "Alpaca reports a margin account — this bot is configured cash-only for new buys"
+            )
+            if self._scan_count % 15 == 1:
+                self._log("warning", f"🚫 {self.regime_data['cash_only_reason']}")
+            return
+        self.regime_data["cash_only_block"] = False
+        self.regime_data.pop("cash_only_reason", None)
+
+        # ── PDT enforcement (P0-1): margin + <$25K + ≥3 day-trades over 5 BD ──
+        # Paper: skip broker day_trade_count PDT — Alpaca paper is often margin + scaled
+        # virtual equity; swing entry cap / GFV still apply. Live margin: unchanged.
         dt_count = int(account.get("day_trade_count") or 0)
         pdt_flag = bool(account.get("pattern_day_trader"))
         equity_now = float(account.get("equity") or 0.0)
-        # $25K threshold uses displayed equity (paper: capital slider = simulated live size).
         is_paper = bool(account.get("paper_trading"))
         pdt_block = False
         pdt_reason = ""
-        if is_margin and equity_now < 25_000.0 and dt_count >= 3:
+        if (not is_paper) and is_margin and equity_now < 25_000.0 and dt_count >= 3:
             pdt_block = True
             pdt_reason = (
                 f"PDT guard: margin acct, equity ${equity_now:,.2f} < $25,000, "
@@ -1391,18 +1405,6 @@ class TradingEngine:
             if self._scan_count % 10 == 1:
                 self._log("info", f"🚫 {pdt_reason}")
             return
-
-        req_cash = bool(getattr(settings, "require_cash_account", True))
-        if req_cash and is_margin:
-            self.regime_data["cash_only_block"] = True
-            self.regime_data["cash_only_reason"] = (
-                "Alpaca reports a margin account — this bot is configured cash-only for new buys"
-            )
-            if self._scan_count % 15 == 1:
-                self._log("warning", f"🚫 {self.regime_data['cash_only_reason']}")
-            return
-        self.regime_data["cash_only_block"] = False
-        self.regime_data.pop("cash_only_reason", None)
 
         if self._daily_trades >= preset.max_trades_per_day:
             if self._scan_count % 10 == 1:
