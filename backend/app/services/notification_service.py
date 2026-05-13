@@ -167,14 +167,24 @@ class NotificationService:
         if user_id is not None:
             row = _load_user_notify_row(user_id)
             if not row:
+                logger.warning("Telegram skip: user_id=%s not in DB", user_id)
                 return
             if not bool(int(row.get("notify_telegram") or 0)):
+                logger.info(
+                    "Telegram skip: user_id=%s has notify_telegram off (Settings → turn on + chat ID)",
+                    user_id,
+                )
                 return
             chat_id = (row.get("telegram_chat_id") or "").strip()
         else:
             chat_id = (settings.telegram_default_chat_id or "").strip()
 
         if not chat_id:
+            if user_id is not None:
+                logger.info(
+                    "Telegram skip: user_id=%s missing telegram_chat_id (Settings → Save)",
+                    user_id,
+                )
             return
 
         body = _telegram_html_body(title, message, level)

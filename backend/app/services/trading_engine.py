@@ -1032,6 +1032,11 @@ class TradingEngine:
             f"(+{self._preset.daily_target_percent}%)",
         )
 
+        # New calendar day (ET): re-arm RTH auto-start + morning Telegram. Without this,
+        # ``active`` can stay True across a weekend (weekend has no auto-stop block) so
+        # Monday 9:20 ET never hits ``if not self.active`` and no "Scalp bot started" alert fires.
+        self.active = False
+
     # ─── GFV Prevention (delegates to self._compliance) ─────
 
     def _get_settled_cash(self, total_cash: float) -> float:
