@@ -21,7 +21,8 @@ Cash-account compliance tracking: GFV / free-riding + T+1 proceeds + tax lots.
 
 State is persisted per ``log_dir`` to ``compliance_state.json`` (atomic
 rename) so engine restarts don't drop open lots / GFV history / wash carry /
-rolling swing buy-fill timestamps (v3).
+rolling swing buy-fill timestamps (v3). Swing rolling windows use the **XNYS**
+calendar via ``exchange_calendars`` when available.
 JSONL under ``TRADESENSE_LOG_DIR`` continues to be the durable audit trail
 for realized trades and wash-sale analytics.
 """
@@ -49,9 +50,11 @@ WASH_SALE_LOOKBACK_DAYS = 30
 LONG_TERM_HOLD_DAYS = 365
 SWING_ROLLING_BD = 5
 
+_nyse_calendar_cache: Any = None
 
-def rolling_weekday_sessions_ending(anchor: date, n: int) -> set[date]:
-    """Last ``n`` Mon–Fri calendar dates ending at ``anchor`` (NYSE-style; no holiday file)."""
+
+def _rolling_weekday_sessions_ending_fallback(anchor: date, n: int) -> set[date]:
+    """Last ``n`` Mon–Fri calendar dates ending at ``anchor`` (holidays not excluded)."""
     out: list[date] = []
     d = anchor
     while len(out) < n:
@@ -59,6 +62,35 @@ def rolling_weekday_sessions_ending(anchor: date, n: int) -> set[date]:
             out.append(d)
         d -= timedelta(days=1)
     return set(out)
+
+
+def rolling_nyse_sessions_ending(anchor: date, n: int) -> set[date]:
+    """Last ``n`` XNYS (NYSE regular) **sessions** ending at ``anchor`` (inclusive).
+
+    If ``anchor`` is not a session (weekend/holiday), the window ends on the
+    prior session. Falls back to Mon–Fri-only math if ``exchange_calendars``
+    cannot be loaded.
+    """
+    global _nyse_calendar_cache
+    try:
+        from pandas import Timestamp
+
+        import exchange_calendars as ecals
+
+        if _nyse_calendar_cache is None:
+            _nyse_calendar_cache = ecals.get_calendar("XNYS")
+        cal = _nyse_calendar_cache
+        ts = Timestamp(anchor)
+        if cal.is_session(ts):
+            end = ts.normalize()
+        else:
+            end = cal.date_to_session(ts, direction="previous").normalize()
+        start = cal.session_offset(end, -(n - 1))
+        idx = cal.sessions_in_range(start, end)
+        return {pd_ts.date() for pd_ts in idx}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("rolling_nyse_sessions_ending: falling back to weekdays-only: %s", exc)
+        return _rolling_weekday_sessions_ending_fallback(anchor, n)
 
 
 def _today_et() -> date:
@@ -430,7 +462,7 @@ class ComplianceService:
     def swing_buy_fills_in_last_n_sessions(self, n: int = SWING_ROLLING_BD) -> int:
         """How many buy fills fell on calendar dates in the last ``n`` Mon–Fri days (ending today ET)."""
         self._prune_swing_buy_fills()
-        window = rolling_weekday_sessions_ending(_today_et(), n)
+        window = rolling_nyse_sessions_ending(_today_et(), n)
         n_hit = 0
         for s in self._swing_buy_fill_instants:
             try:

@@ -117,7 +117,7 @@ class Settings(BaseSettings):
     backtest_regulatory_fees_enabled: bool = os.getenv("BACKTEST_REGULATORY_FEES_ENABLED", "true").lower() != "false"
 
     # Swing / small-account discipline (cash-first, overnight holds vs intraday scalp).
-    # PDT-style 3/5BD here = max *new buy fills* in last 5 NYSE weekdays (weekday-only calendar).
+    # PDT-style 3/5BD here = max *new buy fills* in last 5 XNYS sessions (``exchange_calendars``).
     swing_no_same_day_exit: bool = os.getenv("SWING_NO_SAME_DAY_EXIT", "true").lower() != "false"
     swing_allow_same_day_stop_loss: bool = (
         os.getenv("SWING_ALLOW_SAME_DAY_STOP_LOSS", "true").lower() != "false"

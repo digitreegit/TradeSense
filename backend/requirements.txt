@@ -15,6 +15,7 @@ alpaca-py==0.38.0
 # Data & Analysis
 pandas==2.2.3
 numpy==2.2.4
+exchange-calendars==4.13.2
 scikit-learn==1.6.1
 
 # AI / LLM

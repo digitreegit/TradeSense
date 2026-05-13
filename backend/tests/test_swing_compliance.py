@@ -1,4 +1,4 @@
-"""Swing policy helpers: rolling weekday window + buy-fill budget."""
+"""Swing policy helpers: XNYS rolling sessions + buy-fill budget."""
 from __future__ import annotations
 
 from datetime import date
@@ -7,21 +7,34 @@ import pytest
 
 from app.services.compliance_service import (
     ComplianceService,
-    rolling_weekday_sessions_ending,
+    _rolling_weekday_sessions_ending_fallback,
+    rolling_nyse_sessions_ending,
 )
 
 
-def test_rolling_weekday_sessions_friday_anchor():
-    # 2026-05-08 is Friday
-    anchor = date(2026, 5, 8)
-    win = rolling_weekday_sessions_ending(anchor, 5)
+def test_rolling_nyse_sessions_friday_anchor():
+    anchor = date(2026, 5, 8)  # Friday — XNYS week Mon 4 .. Fri 8
+    win = rolling_nyse_sessions_ending(anchor, 5)
     assert anchor in win
-    assert date(2026, 5, 7) in win  # Thu
-    assert date(2026, 5, 6) in win  # Wed
-    assert date(2026, 5, 5) in win  # Tue
-    assert date(2026, 5, 4) in win  # Mon
     assert len(win) == 5
-    assert date(2026, 5, 3) not in win  # prior Sunday
+    assert date(2026, 5, 4) in win
+    assert date(2026, 5, 3) not in win  # Sunday
+
+
+def test_rolling_nyse_excludes_thanksgiving_2025():
+    """Thanksgiving (Thu) is not a session; Black Fri anchor window must skip Thu 11/27."""
+    anchor = date(2025, 11, 28)
+    win = rolling_nyse_sessions_ending(anchor, 5)
+    assert date(2025, 11, 27) not in win
+    assert date(2025, 11, 28) in win
+    assert len(win) == 5
+
+
+def test_weekday_fallback_still_covers_five_mondays_to_friday():
+    anchor = date(2026, 5, 8)
+    win = _rolling_weekday_sessions_ending_fallback(anchor, 5)
+    assert len(win) == 5
+    assert anchor in win
 
 
 def test_swing_buy_cap_per_5_sessions(tmp_path, monkeypatch):

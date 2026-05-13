@@ -5,7 +5,8 @@ Cash-account trading with compliance, event, and regime guards.
 Default **swing / small-book** policy (env-tunable): no same-calendar-day exits
 for TP/trail (FIFO lot ``bought_on``); optional same-day stop-loss; Alpaca
 margin accounts blocked for new entries when ``REQUIRE_CASH_ACCOUNT``; rolling
-5 weekday-session cap on new buy fills (``SWING_MAX_NEW_ENTRIES_PER_5BD``)
+5 **XNYS** session cap on new buy fills (``SWING_MAX_NEW_ENTRIES_PER_5BD``;
+``exchange_calendars``, weekdays-only fallback if import fails)
 with optional score pressure. For unconstrained intraday + margin PDT paths,
 see branch ``cursor/scalp-25k-pdt-baseline`` / disable swing envs.
 
