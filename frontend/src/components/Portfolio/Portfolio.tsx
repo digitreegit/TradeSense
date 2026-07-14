@@ -1,14 +1,10 @@
 import React from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import { formatCurrency, formatPercent, getChangeClass } from '../../utils/helpers';
+import { useI18n } from '../../i18n';
+import { PortfolioIcon } from '../icons/PortfolioIcon';
 
 // Heroicons v2 Outline SVGs
-const BriefcaseIcon = (props: React.ComponentProps<'svg'>) => (
-  <svg {...props} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 14.15v4.25c0 .621-.504 1.125-1.125 1.125H4.875A1.125 1.125 0 0 1 3.75 18.4V14.15m16.5 0a5.122 5.122 0 0 0-4.75-4.65M16.5 14.15m16.5 0a1.125 1.125 0 0 1-1.125 1.125H4.875a1.125 1.125 0 0 1-1.125-1.125m16.5 0h-16.5" />
-  </svg>
-);
-
 const ChartPieIcon = (props: React.ComponentProps<'svg'>) => (
   <svg {...props} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6a7.5 7.5 0 1 0 7.5 7.5h-7.5V6Z" />
@@ -30,16 +26,18 @@ const ArchiveBoxIcon = (props: React.ComponentProps<'svg'>) => (
 
 const Portfolio: React.FC = () => {
   const { account, positions } = useAppStore();
+  const { t } = useI18n();
+  const allocationColors = ['var(--profit)', 'var(--info)', 'var(--warning)', 'var(--loss)', 'var(--text-tertiary)'];
 
   const totalPL = account.equity - account.initial_capital;
   const totalPLPct = ((account.equity - account.initial_capital) / account.initial_capital) * 100;
 
   return (
     <div className="page-enter">
-      {/* Portfolio Stats */}
-      <div className="stats-grid">
+      {/* Portfolio Stats — headline figures; weight scoped in CSS */}
+      <div className="stats-grid portfolio-performance-stats">
         <div className={`stat-card ${totalPL >= 0 ? 'profit' : 'loss'}`}>
-          <div className="stat-label">Total Equity</div>
+          <div className="stat-label">{t('totalEquity')}</div>
           <div className={`stat-value ${getChangeClass(totalPL)}`}>
             {formatCurrency(account.equity)}
           </div>
@@ -49,21 +47,21 @@ const Portfolio: React.FC = () => {
         </div>
 
         <div className="stat-card accent">
-          <div className="stat-label">Cash</div>
+          <div className="stat-label">{t('cash')}</div>
           <div className="stat-value" style={{ color: 'var(--text-primary)' }}>
             {formatCurrency(account.cash)}
           </div>
         </div>
 
         <div className="stat-card accent">
-          <div className="stat-label">Buying Power</div>
+          <div className="stat-label">{t('buyingPower')}</div>
           <div className="stat-value" style={{ color: 'var(--accent-secondary)' }}>
             {formatCurrency(account.buying_power)}
           </div>
         </div>
 
         <div className={`stat-card ${account.daily_profit_loss >= 0 ? 'profit' : 'loss'}`}>
-          <div className="stat-label">Daily P&L</div>
+          <div className="stat-label">{t('dailyPL')}</div>
           <div className={`stat-value ${getChangeClass(account.daily_profit_loss)}`}>
             {account.daily_profit_loss >= 0 ? '+' : ''}{formatCurrency(account.daily_profit_loss)}
           </div>
@@ -77,7 +75,7 @@ const Portfolio: React.FC = () => {
       <div className="card" style={{ marginBottom: 'var(--space-xl)' }}>
         <div className="card-header">
           <span className="card-title">
-            <BriefcaseIcon className="card-icon" /> Holdings
+              <PortfolioIcon className="card-icon" /> {t('holdings')}
           </span>
           <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
             {positions.length} position{positions.length !== 1 ? 's' : ''}
@@ -89,23 +87,23 @@ const Portfolio: React.FC = () => {
               <div className="empty-state-icon">
                 <ArchiveBoxIcon style={{ width: '48px', height: '48px', color: 'var(--text-tertiary)' }} />
               </div>
-              <div className="empty-state-title">No Holdings</div>
+              <div className="empty-state-title">{t('noHoldings')}</div>
               <div className="empty-state-text">
-                Your portfolio is all cash. Start the trading bot to begin automated trading with $1,000 paper money.
+                {t('noHoldingsText')}
               </div>
             </div>
           ) : (
             <table className="positions-table">
               <thead>
                 <tr>
-                  <th>Symbol</th>
-                  <th>Side</th>
-                  <th>Qty</th>
-                  <th>Avg Entry</th>
-                  <th>Current Price</th>
-                  <th>Market Value</th>
-                  <th>Unrealized P&L</th>
-                  <th>% Change</th>
+                  <th>{t('symbol')}</th>
+                  <th>{t('side')}</th>
+                  <th>{t('qty')}</th>
+                  <th>{t('avgEntry')}</th>
+                  <th>{t('currentPrice')}</th>
+                  <th>{t('marketValue')}</th>
+                  <th>{t('unrealizedPL')}</th>
+                  <th>{t('percentChange')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -154,7 +152,7 @@ const Portfolio: React.FC = () => {
         <div className="card">
           <div className="card-header">
             <span className="card-title">
-              <ChartPieIcon className="card-icon" /> Asset Allocation
+              <ChartPieIcon className="card-icon" /> {t('assetAllocation')}
             </span>
           </div>
           <div className="card-body">
@@ -176,19 +174,18 @@ const Portfolio: React.FC = () => {
                     <>
                       {positions.map((pos, i) => {
                         const pct = (pos.market_value / account.equity) * 100;
-                        const colors = ['#10b981', '#6366f1', '#f59e0b', '#ef4444', '#8b5cf6'];
                         return (
                           <div
                             key={pos.symbol}
                             style={{
                               width: `${pct}%`,
-                              background: colors[i % colors.length],
+                              background: allocationColors[i % allocationColors.length],
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
                               fontSize: '12px',
                               fontWeight: 700,
-                              color: 'white',
+                              color: 'var(--on-accent)',
                             }}
                           >
                             {pct > 8 ? pos.symbol : ''}
@@ -205,7 +202,7 @@ const Portfolio: React.FC = () => {
                         fontWeight: 600,
                         color: 'var(--text-tertiary)',
                       }}>
-                        CASH
+                        {t('cash').toUpperCase()}
                       </div>
                     </>
                   ) : (
@@ -219,7 +216,7 @@ const Portfolio: React.FC = () => {
                       fontWeight: 600,
                       color: 'var(--accent-primary)',
                     }}>
-                      100% CASH — {formatCurrency(account.cash)}
+                      100% {t('cash').toUpperCase()} — {formatCurrency(account.cash)}
                     </div>
                   )}
                 </div>
@@ -232,7 +229,6 @@ const Portfolio: React.FC = () => {
                   flexWrap: 'wrap',
                 }}>
                   {positions.map((pos, i) => {
-                    const colors = ['#10b981', '#6366f1', '#f59e0b', '#ef4444', '#8b5cf6'];
                     const pct = (pos.market_value / account.equity) * 100;
                     return (
                       <div key={pos.symbol} style={{
@@ -245,7 +241,7 @@ const Portfolio: React.FC = () => {
                           width: 8,
                           height: 8,
                           borderRadius: '50%',
-                          background: colors[i % colors.length],
+                          background: allocationColors[i % allocationColors.length],
                         }} />
                         <span style={{ fontWeight: 600 }}>{pos.symbol}</span>
                         <span style={{ color: 'var(--text-tertiary)' }}>{pct.toFixed(1)}%</span>
@@ -265,7 +261,7 @@ const Portfolio: React.FC = () => {
                       background: 'var(--bg-tertiary)',
                       border: '1px solid var(--border-primary)',
                     }} />
-                    <span style={{ fontWeight: 600 }}>Cash</span>
+                    <span style={{ fontWeight: 600 }}>{t('cash')}</span>
                     <span style={{ color: 'var(--text-tertiary)' }}>
                       {((account.cash / account.equity) * 100).toFixed(1)}%
                     </span>
@@ -279,19 +275,19 @@ const Portfolio: React.FC = () => {
         <div className="card">
           <div className="card-header">
             <span className="card-title">
-              <CheckBadgeIcon className="card-icon" /> Performance Metrics
+              <CheckBadgeIcon className="card-icon" /> {t('performanceMetrics')}
             </span>
           </div>
           <div style={{ padding: 'var(--space-xl)' }}>
             {[
-              { label: 'Total Return', value: formatPercent(totalPLPct), color: getChangeClass(totalPL) },
-              { label: 'Total P&L', value: `${totalPL >= 0 ? '+' : ''}${formatCurrency(totalPL)}`, color: getChangeClass(totalPL) },
-              { label: 'Initial Capital', value: formatCurrency(account.initial_capital), color: '' },
-              { label: 'Win Rate', value: account.win_rate !== undefined ? `${account.win_rate}%` : '0%', color: '' },
-              { label: 'Avg Win', value: formatCurrency(account.avg_win || 0), color: '' },
-              { label: 'Avg Loss', value: formatCurrency(account.avg_loss || 0), color: '' },
-              { label: 'Profit Factor', value: (account.profit_factor || 0).toFixed(2), color: '' },
-              { label: 'Sharpe Ratio', value: (account.sharpe_ratio || 0).toFixed(2), color: '' },
+              { label: t('totalReturn'), value: formatPercent(totalPLPct), color: getChangeClass(totalPL) },
+              { label: t('totalPL'), value: `${totalPL >= 0 ? '+' : ''}${formatCurrency(totalPL)}`, color: getChangeClass(totalPL) },
+              { label: t('initialCapital'), value: formatCurrency(account.initial_capital), color: '' },
+              { label: t('winRate'), value: account.win_rate !== undefined ? `${account.win_rate}%` : '0%', color: '' },
+              { label: t('avgWin'), value: formatCurrency(account.avg_win || 0), color: '' },
+              { label: t('avgLoss'), value: formatCurrency(account.avg_loss || 0), color: '' },
+              { label: t('profitFactor'), value: (account.profit_factor || 0).toFixed(2), color: '' },
+              { label: t('sharpeRatio'), value: (account.sharpe_ratio || 0).toFixed(2), color: '' },
             ].map((item, i) => (
               <div key={i} style={{
                 display: 'flex',
@@ -302,7 +298,7 @@ const Portfolio: React.FC = () => {
                 <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{item.label}</span>
                 <span style={{
                   fontSize: '13px',
-                  fontWeight: 600,
+                  fontWeight: 700,
                   fontFamily: 'var(--font-mono)',
                   color: item.color === 'profit' ? 'var(--profit)' : item.color === 'loss' ? 'var(--loss)' : 'var(--text-primary)',
                 }}>

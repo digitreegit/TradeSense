@@ -1,0 +1,24 @@
+services:
+  tradesense:
+    build:
+      context: .
+      args:
+        # Same-origin EC2 / Docker (browser → :8000): root SPA + /api
+        VITE_PUBLIC_BASE: ${VITE_PUBLIC_BASE:-/}
+        VITE_API_BASE: ${VITE_API_BASE:-/api}
+        # Interpolation uses project-root .env + shell only (NOT env_file at runtime).
+        # If you only set SUPABASE_* for the backend, reuse them for the Vite build.
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-${SUPABASE_URL:-}}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-${SUPABASE_ANON_KEY:-}}
+    image: tradesense:local
+    container_name: tradesense
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - tradesense_data:/data
+
+volumes:
+  tradesense_data:

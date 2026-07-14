@@ -1,0 +1,5 @@
+# local backtesting / tests only
+-r requirements.txt
+yfinance>=0.2.50
+pytest>=8.0
+matplotlib>=3.9

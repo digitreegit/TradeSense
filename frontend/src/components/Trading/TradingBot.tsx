@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import { formatCurrency, formatPercent } from '../../utils/helpers';
 import api from '../../services/api';
+import { useI18n } from '../../i18n';
 
 // Heroicons v2 Outline SVGs
 const BoltIcon = (props: React.ComponentProps<'svg'>) => (
@@ -76,6 +77,202 @@ const ErrorIcon = (props: React.ComponentProps<'svg'>) => (
   </svg>
 );
 
+const RISK_PREFS_STORAGE_KEY = 'tradesense-risk-prefs';
+
+type RiskLevelId = 'conservative' | 'moderate' | 'aggressive';
+
+function presetNumbersForLevel(level: RiskLevelId) {
+  if (level === 'conservative') {
+    return { maxPositionSize: 10, stopLossPercent: 0.2, takeProfitPercent: 0.4 };
+  }
+  if (level === 'moderate') {
+    return { maxPositionSize: 15, stopLossPercent: 0.3, takeProfitPercent: 0.8 };
+  }
+  return { maxPositionSize: 20, stopLossPercent: 0.5, takeProfitPercent: 1.5 };
+}
+
+const DEFAULT_RISK_LEVEL: RiskLevelId = 'moderate';
+const DEFAULT_RISK_NUMBERS = presetNumbersForLevel('moderate');
+
+/** WebKit range track fill — `--trading-range-fill-pct` on `.trading-range` (Chrome/Safari). */
+function tradingRangeFillPct(value: number, min: number, max: number): string {
+  const span = max - min;
+  if (span <= 0) return '0%';
+  const t = ((value - min) / span) * 100;
+  return `${Math.min(100, Math.max(0, t))}%`;
+}
+
+type LevelNumbers = {
+  maxPositionSize: number;
+  stopLossPercent: number;
+  takeProfitPercent: number;
+};
+
+type RiskSnapshot = {
+  riskLevel: RiskLevelId;
+  maxPositionSize: number;
+  stopLossPercent: number;
+  takeProfitPercent: number;
+};
+
+type RiskPrefsStoredV2 = {
+  v: 2;
+  lastRiskLevel: RiskLevelId;
+  byLevel: Record<RiskLevelId, LevelNumbers>;
+};
+
+function defaultPrefsByLevel(): Record<RiskLevelId, LevelNumbers> {
+  return {
+    conservative: { ...presetNumbersForLevel('conservative') },
+    moderate: { ...presetNumbersForLevel('moderate') },
+    aggressive: { ...presetNumbersForLevel('aggressive') },
+  };
+}
+
+function clonePrefsByLevel(p: Record<RiskLevelId, LevelNumbers>): Record<RiskLevelId, LevelNumbers> {
+  return {
+    conservative: { ...p.conservative },
+    moderate: { ...p.moderate },
+    aggressive: { ...p.aggressive },
+  };
+}
+
+function normalizeLevelNumbers(l: LevelNumbers): LevelNumbers {
+  return {
+    maxPositionSize: Math.round(l.maxPositionSize),
+    stopLossPercent: Math.round(l.stopLossPercent * 100) / 100,
+    takeProfitPercent: Math.round(l.takeProfitPercent * 100) / 100,
+  };
+}
+
+function normalizeAllLevels(p: Record<RiskLevelId, LevelNumbers>): Record<RiskLevelId, LevelNumbers> {
+  return {
+    conservative: normalizeLevelNumbers(p.conservative),
+    moderate: normalizeLevelNumbers(p.moderate),
+    aggressive: normalizeLevelNumbers(p.aggressive),
+  };
+}
+
+function levelNumbersEqual(a: LevelNumbers, b: LevelNumbers): boolean {
+  const x = normalizeLevelNumbers(a);
+  const y = normalizeLevelNumbers(b);
+  return (
+    x.maxPositionSize === y.maxPositionSize &&
+    Math.abs(x.stopLossPercent - y.stopLossPercent) < 1e-5 &&
+    Math.abs(x.takeProfitPercent - y.takeProfitPercent) < 1e-5
+  );
+}
+
+function prefsByLevelEqual(a: Record<RiskLevelId, LevelNumbers>, b: Record<RiskLevelId, LevelNumbers>): boolean {
+  return (['conservative', 'moderate', 'aggressive'] as const).every((k) => levelNumbersEqual(a[k], b[k]));
+}
+
+function normalizeRiskSnapshot(s: RiskSnapshot): RiskSnapshot {
+  const n = normalizeLevelNumbers(s);
+  return { riskLevel: s.riskLevel, ...n };
+}
+
+function toRiskSnapshot(level: RiskLevelId, nums: LevelNumbers): RiskSnapshot {
+  return normalizeRiskSnapshot({ riskLevel: level, ...nums });
+}
+
+function parseLevelBucket(raw: unknown): LevelNumbers | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  const maxRaw = o.maxPositionSize ?? o.max_position;
+  const slRaw = o.stopLossPercent ?? o.stop_loss;
+  const tpRaw = o.takeProfitPercent ?? o.take_profit;
+  if (
+    typeof maxRaw !== 'number' ||
+    maxRaw < 5 ||
+    maxRaw > 25 ||
+    typeof slRaw !== 'number' ||
+    slRaw < 0.1 ||
+    slRaw > 2.0 ||
+    typeof tpRaw !== 'number' ||
+    tpRaw < 0.2 ||
+    tpRaw > 5.0
+  ) {
+    return null;
+  }
+  return normalizeLevelNumbers({
+    maxPositionSize: Math.round(maxRaw),
+    stopLossPercent: slRaw,
+    takeProfitPercent: tpRaw,
+  });
+}
+
+function readStoredRiskPrefs(): { lastRiskLevel: RiskLevelId; byLevel: Record<RiskLevelId, LevelNumbers> } {
+  const byLevel = defaultPrefsByLevel();
+  try {
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+      return { lastRiskLevel: DEFAULT_RISK_LEVEL, byLevel };
+    }
+    const raw = localStorage.getItem(RISK_PREFS_STORAGE_KEY);
+    if (!raw) return { lastRiskLevel: DEFAULT_RISK_LEVEL, byLevel };
+    const p = JSON.parse(raw) as Record<string, unknown>;
+
+    if (p.v === 2 && p.byLevel && typeof p.byLevel === 'object') {
+      const bl = p.byLevel as Record<string, unknown>;
+      for (const lvl of ['conservative', 'moderate', 'aggressive'] as const) {
+        const parsed = parseLevelBucket(bl[lvl]);
+        if (parsed) byLevel[lvl] = parsed;
+      }
+      const lr = p.lastRiskLevel ?? p.riskLevel;
+      const lastRiskLevel: RiskLevelId =
+        lr === 'conservative' || lr === 'moderate' || lr === 'aggressive' ? lr : DEFAULT_RISK_LEVEL;
+      return { lastRiskLevel, byLevel: normalizeAllLevels(byLevel) };
+    }
+
+    const snap: RiskSnapshot = {
+      riskLevel: DEFAULT_RISK_LEVEL,
+      maxPositionSize: DEFAULT_RISK_NUMBERS.maxPositionSize,
+      stopLossPercent: DEFAULT_RISK_NUMBERS.stopLossPercent,
+      takeProfitPercent: DEFAULT_RISK_NUMBERS.takeProfitPercent,
+    };
+    const lvl = p.riskLevel ?? p.risk_level;
+    if (lvl === 'conservative' || lvl === 'moderate' || lvl === 'aggressive') {
+      snap.riskLevel = lvl;
+    }
+    const maxRaw = p.maxPositionSize ?? p.max_position;
+    if (typeof maxRaw === 'number' && maxRaw >= 5 && maxRaw <= 25) {
+      snap.maxPositionSize = Math.round(maxRaw);
+    }
+    const slRaw = p.stopLossPercent ?? p.stop_loss;
+    if (typeof slRaw === 'number' && slRaw >= 0.1 && slRaw <= 2.0) {
+      snap.stopLossPercent = slRaw;
+    }
+    const tpRaw = p.takeProfitPercent ?? p.take_profit;
+    if (typeof tpRaw === 'number' && tpRaw >= 0.2 && tpRaw <= 5.0) {
+      snap.takeProfitPercent = tpRaw;
+    }
+    const n = normalizeRiskSnapshot(snap);
+    byLevel[n.riskLevel] = {
+      maxPositionSize: n.maxPositionSize,
+      stopLossPercent: n.stopLossPercent,
+      takeProfitPercent: n.takeProfitPercent,
+    };
+    return { lastRiskLevel: n.riskLevel, byLevel: normalizeAllLevels(byLevel) };
+  } catch {
+    return { lastRiskLevel: DEFAULT_RISK_LEVEL, byLevel: normalizeAllLevels(byLevel) };
+  }
+}
+
+function writeRiskPrefsToStorage(
+  byLevel: Record<RiskLevelId, LevelNumbers>,
+  lastRiskLevel: RiskLevelId,
+): void {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+    throw new Error('localStorage unavailable');
+  }
+  const payload: RiskPrefsStoredV2 = {
+    v: 2,
+    lastRiskLevel,
+    byLevel: normalizeAllLevels(byLevel),
+  };
+  localStorage.setItem(RISK_PREFS_STORAGE_KEY, JSON.stringify(payload));
+}
+
 const TradingBot: React.FC = () => {
   const {
     botActive,
@@ -83,15 +280,80 @@ const TradingBot: React.FC = () => {
     tradeLogs,
     setTradeLogs,
     strategies,
-    activeStrategy,
-    setActiveStrategy,
     account,
+    playbookAuto,
+    setPlaybookAuto,
+    manualPlaybooks,
+    setManualPlaybooks,
+    activePlaybooks,
+    setActivePlaybooks,
   } = useAppStore();
+  const { language, t } = useI18n();
 
-  const [riskLevel, setRiskLevel] = useState<'conservative' | 'moderate' | 'aggressive'>('moderate');
-  const [maxPositionSize, setMaxPositionSize] = useState(15);
-  const [stopLossPercent, setStopLossPercent] = useState(0.3);
-  const [takeProfitPercent, setTakeProfitPercent] = useState(0.8);
+  const [savingPlaybooks, setSavingPlaybooks] = useState(false);
+
+  const pushPlaybookConfig = useCallback(
+    async (next: { auto?: boolean; manual?: string[] }) => {
+      try {
+        setSavingPlaybooks(true);
+        const cfg = await api.setPlaybookConfig(next);
+        if (typeof cfg.auto === 'boolean') setPlaybookAuto(cfg.auto);
+        if (Array.isArray(cfg.manual)) setManualPlaybooks(cfg.manual);
+        if (Array.isArray(cfg.active)) setActivePlaybooks(cfg.active);
+      } catch (err) {
+        console.error('Failed to update playbooks:', err);
+      } finally {
+        setSavingPlaybooks(false);
+      }
+    },
+    [setPlaybookAuto, setManualPlaybooks, setActivePlaybooks],
+  );
+
+  const handleToggleAuto = () => {
+    pushPlaybookConfig({ auto: !playbookAuto });
+  };
+
+  const handleToggleManual = (id: string) => {
+    if (playbookAuto) return; // editing the manual set only matters in AUTO-OFF
+    const next = manualPlaybooks.includes(id)
+      ? manualPlaybooks.filter((p) => p !== id)
+      : [...manualPlaybooks, id];
+    pushPlaybookConfig({ manual: next });
+  };
+
+  const initialPrefs = useMemo(() => readStoredRiskPrefs(), []);
+
+  const [prefsByLevel, setPrefsByLevel] = useState<Record<RiskLevelId, LevelNumbers>>(() =>
+    clonePrefsByLevel(initialPrefs.byLevel),
+  );
+  const [baselineByLevel, setBaselineByLevel] = useState<Record<RiskLevelId, LevelNumbers>>(() =>
+    clonePrefsByLevel(initialPrefs.byLevel),
+  );
+  const [riskLevel, setRiskLevel] = useState<RiskLevelId>(() => initialPrefs.lastRiskLevel);
+  const [riskPrefsMsg, setRiskPrefsMsg] = useState<string | null>(null);
+  const [savingRiskPrefs, setSavingRiskPrefs] = useState(false);
+  /**
+   * Sliders only. Once true, Save+Reset stay enabled until Reset restores factory presets
+   * (then cleared). Save does not clear this, so after saving with no pending edits both stay on.
+   */
+  const [riskSlidersTouched, setRiskSlidersTouched] = useState(false);
+
+  const levelNums = prefsByLevel[riskLevel];
+
+  const factoryPrefs = useMemo(() => normalizeAllLevels(defaultPrefsByLevel()), []);
+
+  const riskSettingsDirty = useMemo(
+    () => !prefsByLevelEqual(prefsByLevel, baselineByLevel),
+    [prefsByLevel, baselineByLevel],
+  );
+
+  const updateCurrentLevelNums = (patch: Partial<LevelNumbers>) => {
+    setRiskSlidersTouched(true);
+    setPrefsByLevel((prev) => ({
+      ...prev,
+      [riskLevel]: normalizeLevelNumbers({ ...prev[riskLevel], ...patch }),
+    }));
+  };
 
   const [sessionStats, setSessionStats] = useState({
     total_trades: 0,
@@ -101,6 +363,81 @@ const TradingBot: React.FC = () => {
     win_rate: 0,
     max_drawdown: 0,
   });
+
+  const getStrategyText = (id: string, fallbackName: string, fallbackDescription: string) => {
+    if (language !== 'ko') {
+      return { name: fallbackName, description: fallbackDescription };
+    }
+
+    const normalizedId = id.toLowerCase();
+    const normalizedName = fallbackName.toLowerCase();
+    const normalizedDescription = fallbackDescription.toLowerCase();
+
+    const localized: Record<string, { name: string; description: string }> = {
+      scalp: {
+        name: '마이크로 스캘핑 v3',
+        description: '5분봉에서 RSI와 VWAP를 활용해 빠른 장중 단타를 수행합니다. 기본 전략은 하루 약 +1.5% 목표, −1% 일일 손실 한도입니다.',
+      },
+      'regime-adaptive': {
+        name: 'AI 섹터 적응형',
+        description: '전쟁, 금리, 실적 등 매크로 헤드라인 변화에 맞춰 AI가 집중 섹터와 종목을 회전시킵니다.',
+      },
+      'ml-predict': {
+        name: 'ML 예측',
+        description:
+          '5분봉 피처로 HistGradientBoosting 방향 확률을 쓰고, 미국 장 평일 1일 1회 재학습합니다. 피처 분포 드리프트가 크면 점수를 끕니다.',
+      },
+      micro: {
+        name: '마이크로구조 (호가·체결)',
+        description:
+          '호가 불균형, 스프레드, 테이프 속도, VPIN 근사로 초단기 수급을 보강합니다. WebSocket 체결·호가가 있을 때만 점수가 납니다.',
+      },
+      'pair-mr': {
+        name: 'ETF 페어 평균회귀',
+        description:
+          'XLE/USO, XLK/QQQ 등 로그 스프레드 z-점수로 상대적으로 싼 레그만 롱(캐시 계좌·숏 없음).',
+      },
+      vwap: {
+        name: 'VWAP 되돌림',
+        description: '가격이 VWAP 근처로 되돌아올 때 평균 회귀와 추세 지속 가능성을 함께 평가해 진입합니다.',
+      },
+      orb: {
+        name: '장초반 돌파',
+        description: '개장 초 형성된 고가와 저가 범위를 기준으로 거래량이 동반된 돌파 구간을 포착합니다.',
+      },
+      eod: {
+        name: '장마감 모멘텀',
+        description: '장 마감 전 수급과 추세가 강한 종목을 선별해 짧은 보유 시간의 모멘텀 거래를 수행합니다.',
+      },
+      momentum: {
+        name: '모멘텀 추종',
+        description: '상승 강도와 거래량이 함께 붙는 종목을 추적해 추세 방향으로 진입합니다.',
+      },
+      'news-spike-fade': {
+        name: '뉴스 급등 페이드',
+        description: 'AI가 감지한 패닉성 뉴스 급등 이후 매수/매도 과열이 소진되는 구간을 역추세로 공략합니다.',
+      },
+      news_spike_fade: {
+        name: '뉴스 급등 페이드',
+        description: 'AI가 감지한 패닉성 뉴스 급등 이후 매수/매도 과열이 소진되는 구간을 역추세로 공략합니다.',
+      },
+      news: {
+        name: '뉴스 급등 페이드',
+        description: 'AI가 감지한 패닉성 뉴스 급등 이후 매수/매도 과열이 소진되는 구간을 역추세로 공략합니다.',
+      },
+    };
+
+    if (localized[normalizedId]) return localized[normalizedId];
+    if (
+      normalizedName.includes('news spike') ||
+      normalizedDescription.includes('ai-detected panic') ||
+      normalizedDescription.includes('fade exhaustion')
+    ) {
+      return localized['news-spike-fade'];
+    }
+
+    return { name: fallbackName, description: fallbackDescription };
+  };
 
   // Poll bot status & logs from backend every 5 seconds
   const pollBotStatus = useCallback(async () => {
@@ -130,13 +467,94 @@ const TradingBot: React.FC = () => {
     return () => clearInterval(interval);
   }, [pollBotStatus]);
 
+  const flashRiskMsg = (msg: string) => {
+    setRiskPrefsMsg(msg);
+    window.setTimeout(() => setRiskPrefsMsg(null), 4000);
+  };
+
+  const handleSaveRiskSettings = async () => {
+    if (!riskSlidersTouched) return;
+    if (!riskSettingsDirty) return;
+    setSavingRiskPrefs(true);
+    const normalized = normalizeAllLevels(prefsByLevel);
+    try {
+      writeRiskPrefsToStorage(normalized, riskLevel);
+      setPrefsByLevel(normalized);
+      setBaselineByLevel(clonePrefsByLevel(normalized));
+      flashRiskMsg(t('riskSettingsSaved'));
+      if (botActive) {
+        try {
+          const snap = toRiskSnapshot(riskLevel, normalized[riskLevel]);
+          await api.startBot('scalp', {
+            stop_loss: snap.stopLossPercent,
+            take_profit: snap.takeProfitPercent,
+            max_position: snap.maxPositionSize,
+            risk_level: snap.riskLevel,
+          });
+          setTimeout(pollBotStatus, 400);
+        } catch (err) {
+          console.error('Apply risk settings to bot failed:', err);
+          flashRiskMsg(
+            language === 'ko'
+              ? '설정은 저장됐지만 봇에 반영하지 못했습니다.'
+              : 'Saved locally; could not apply to running bot.',
+          );
+        }
+      }
+    } catch (err) {
+      console.error('Persist risk settings failed:', err);
+      flashRiskMsg(language === 'ko' ? '저장에 실패했습니다.' : 'Save failed.');
+    } finally {
+      setSavingRiskPrefs(false);
+    }
+  };
+
+  const handleResetRiskSettings = async () => {
+    if (!riskSlidersTouched) return;
+    setSavingRiskPrefs(true);
+    const defaults = clonePrefsByLevel(factoryPrefs);
+    try {
+      writeRiskPrefsToStorage(defaults, DEFAULT_RISK_LEVEL);
+      setPrefsByLevel(defaults);
+      setBaselineByLevel(clonePrefsByLevel(defaults));
+      setRiskLevel(DEFAULT_RISK_LEVEL);
+      setRiskSlidersTouched(false);
+      flashRiskMsg(t('riskSettingsReset'));
+      if (botActive) {
+        try {
+          await api.startBot('scalp', {
+            stop_loss: DEFAULT_RISK_NUMBERS.stopLossPercent,
+            take_profit: DEFAULT_RISK_NUMBERS.takeProfitPercent,
+            max_position: DEFAULT_RISK_NUMBERS.maxPositionSize,
+            risk_level: DEFAULT_RISK_LEVEL,
+          });
+          setTimeout(pollBotStatus, 400);
+        } catch (err) {
+          console.error('Apply default risk to bot failed:', err);
+          flashRiskMsg(
+            language === 'ko'
+              ? '기본값은 저장됐지만 봇에 반영하지 못했습니다.'
+              : 'Defaults saved locally; could not apply to running bot.',
+          );
+        }
+      }
+    } catch (err) {
+      console.error('Reset risk settings failed:', err);
+      flashRiskMsg(language === 'ko' ? '초기화에 실패했습니다.' : 'Reset failed.');
+    } finally {
+      setSavingRiskPrefs(false);
+    }
+  };
+
   const handleToggleBot = async () => {
     try {
       if (!botActive) {
-        await api.startBot(activeStrategy || 'momentum', {
-          stop_loss: stopLossPercent,
-          take_profit: takeProfitPercent,
-          max_position: maxPositionSize,
+        const n = prefsByLevel[riskLevel];
+        await api.startBot('scalp', {
+          stop_loss: n.stopLossPercent,
+          take_profit: n.takeProfitPercent,
+          max_position: n.maxPositionSize,
+          risk_level: riskLevel,
         });
         setBotActive(true);
       } else {
@@ -162,62 +580,58 @@ const TradingBot: React.FC = () => {
   };
 
   return (
-    <div className="page-enter">
+    <div className="page-enter trading-page">
       {/* Bot Control Header */}
       <div className="card" style={{ marginBottom: 'var(--space-xl)' }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: 'var(--space-xl)',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <div style={{
-              width: 56,
-              height: 56,
-              borderRadius: 'var(--radius-lg)',
-              background: botActive ? 'var(--profit-dim)' : 'var(--bg-secondary)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'all var(--transition-base)',
-              boxShadow: botActive ? 'var(--shadow-glow-green)' : 'none',
-              color: botActive ? 'var(--profit)' : 'var(--text-tertiary)',
-            }}>
+        <div
+          className="trading-bot-hero"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: 'var(--space-xl)',
+          }}
+        >
+          <div className="trading-bot-hero-main" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <div
+              className={`trading-bot-header-mark${botActive ? ' trading-bot-header-mark--active' : ''}`}
+              aria-hidden
+            >
               <BoltIcon style={{ width: '32px', height: '32px' }} />
             </div>
             <div>
               <h2 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '4px' }}>
-                TradeSense Trading Bot
+                TradeSense {t('tradingBot')}
               </h2>
               <p style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
-                Automated quant trading • Paper Trading Mode • Capital: {formatCurrency(account.equity)}
+                {t('botSubtitle')} {formatCurrency(account.equity)}
               </p>
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+          <div className="trading-bot-hero-actions" style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
             <span style={{
-              fontSize: '14px',
+              fontSize: '12px',
               fontWeight: 700,
               color: botActive ? 'var(--profit)' : 'var(--text-tertiary)',
               letterSpacing: '0.5px',
             }}>
-              {botActive ? '● RUNNING' : '○ STOPPED'}
+              {botActive ? `● ${t('running').toUpperCase()}` : `○ ${t('stopped').toUpperCase()}`}
             </span>
             <button
-              className={botActive ? 'btn-stop' : 'btn-start'}
+              className={`${botActive ? 'btn-stop' : 'btn-start'} trading-bot-toggle`}
               onClick={handleToggleBot}
+              style={{ fontSize: '15px' }}
             >
               {botActive ? (
                 <>
                   <StopIcon style={{ width: '18px', height: '18px' }} />
-                  Stop Bot
+                  {t('stopBot')}
                 </>
               ) : (
                 <>
                   <RocketIcon style={{ width: '18px', height: '18px' }} />
-                  Start Bot
+                  {t('startBot')}
                 </>
               )}
             </button>
@@ -225,77 +639,157 @@ const TradingBot: React.FC = () => {
         </div>
       </div>
 
-      <div className="dashboard-grid">
-        <div className="dashboard-left">
+      <div className="dashboard-grid trading-dashboard-grid">
+        <div className="dashboard-left trading-dashboard-left">
           {/* Strategy Selection */}
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <CheckBadgeIcon className="card-icon" /> Trading Strategies
+                <CheckBadgeIcon className="card-icon" /> {t('tradingStrategies')}
               </span>
+              <div
+                className="trading-strategies-header-controls"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  opacity: savingPlaybooks ? 0.65 : 1,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: '10px',
+                    fontWeight: playbookAuto ? 500 : 700,
+                    color: playbookAuto ? 'var(--text-tertiary)' : 'var(--text-primary)',
+                    fontFamily: 'var(--font-sans)',
+                    letterSpacing: '0.02em',
+                  }}
+                >
+                  {language === 'ko' ? '수동' : 'Manual'}
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={playbookAuto}
+                  aria-label={
+                    language === 'ko'
+                      ? `전략 모드: ${playbookAuto ? '자동 — 엔진이 플레이북을 선택합니다' : '수동 — 선택한 플레이북만 실행됩니다'}`
+                      : `Strategy mode: ${playbookAuto ? 'Auto — engine selects playbooks' : 'Manual — only ticked playbooks run'}`
+                  }
+                  className="playbook-switch"
+                  onClick={handleToggleAuto}
+                  disabled={savingPlaybooks}
+                  title={
+                    playbookAuto
+                      ? (language === 'ko' ? 'AUTO: 시간대와 시장 국면에 따라 엔진이 플레이북을 선택합니다' : 'AUTO: engine picks active playbooks by time-of-day and regime')
+                      : (language === 'ko' ? 'MANUAL: 선택한 플레이북만 실행됩니다' : 'MANUAL: only the ticked playbooks will run')
+                  }
+                >
+                  <span className="playbook-switch-thumb" aria-hidden />
+                </button>
+                <span
+                  style={{
+                    fontSize: '10px',
+                    fontWeight: playbookAuto ? 700 : 500,
+                    color: playbookAuto ? 'var(--text-tertiary)' : 'var(--text-primary)',
+                    fontFamily: 'var(--font-sans)',
+                    letterSpacing: '0.02em',
+                  }}
+                >
+                  {language === 'ko' ? '자동' : 'Auto'}
+                </span>
+              </div>
             </div>
             <div style={{ padding: 'var(--space-lg)' }}>
+              {playbookAuto && (
+                <p style={{
+                  fontSize: '12px',
+                  color: 'var(--text-tertiary)',
+                  marginBottom: '12px',
+                  lineHeight: 1.5,
+                }}>
+                  {language === 'ko'
+                    ? '엔진이 시간대와 시장 국면에 따라 플레이북을 자동 라우팅합니다. AUTO를 끄면 아래에서 선택한 항목만 실행됩니다.'
+                    : 'Engine routes playbooks automatically (time-of-day + regime). Turn AUTO off to restrict to the ticked set below.'}
+                </p>
+              )}
               <div className="strategy-grid">
-                {strategies.map((strat) => (
-                  <div
-                    key={strat.id}
-                    className={`strategy-card ${activeStrategy === strat.id ? 'active' : ''}`}
-                    onClick={() => setActiveStrategy(strat.id)}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span className="strategy-name">{strat.name}</span>
-                      <span style={{
-                        width: 12,
-                        height: 12,
-                        borderRadius: '50%',
-                        border: '2px solid',
-                        borderColor: activeStrategy === strat.id ? 'var(--accent-primary)' : 'var(--text-muted)',
-                        background: activeStrategy === strat.id ? 'var(--accent-primary)' : 'transparent',
-                        display: 'inline-block',
-                      }} />
-                    </div>
-                    <p className="strategy-description">{strat.description}</p>
-                    <div className="strategy-stats">
-                      <div className="strategy-stat">
-                        <span className="strategy-stat-label">Win Rate</span>
-                        <span className="strategy-stat-value" style={{ color: 'var(--profit)' }}>
-                          {strat.winRate}%
-                        </span>
-                      </div>
-                      <div className="strategy-stat">
-                        <span className="strategy-stat-label">Trades</span>
-                        <span className="strategy-stat-value">{strat.trades}</span>
-                      </div>
-                      <div className="strategy-stat">
-                        <span className="strategy-stat-label">P&L</span>
-                        <span className="strategy-stat-value" style={{
-                          color: strat.pnl >= 0 ? 'var(--profit)' : 'var(--loss)',
+                {strategies.map((strat) => {
+                  const isActiveNow = activePlaybooks.includes(strat.id);
+                  const isManualOn = manualPlaybooks.includes(strat.id);
+                  const isOn = playbookAuto ? isActiveNow : isManualOn;
+                  const strategyText = getStrategyText(strat.id, strat.name, strat.description);
+                  return (
+                    <div
+                      key={strat.id}
+                      className={`strategy-card ${isOn ? 'active' : ''}`}
+                      onClick={() => handleToggleManual(strat.id)}
+                      style={{
+                        cursor: playbookAuto ? 'default' : 'pointer',
+                        opacity: playbookAuto && !isActiveNow ? 0.75 : 1,
+                      }}
+                      title={
+                        playbookAuto
+                          ? isActiveNow
+                            ? (language === 'ko' ? '현재 활성화됨 (AUTO)' : 'Currently active (AUTO)')
+                            : (language === 'ko' ? '현재 비활성 (조건이 맞으면 AUTO가 활성화)' : 'Not active right now (AUTO will enable when conditions match)')
+                          : isManualOn
+                            ? (language === 'ko' ? '수동 모드에서 활성화됨 — 클릭하면 비활성화' : 'Enabled for manual mode — click to disable')
+                            : (language === 'ko' ? '비활성 — 클릭하면 수동 모드에서 활성화' : 'Disabled — click to enable for manual mode')
+                      }
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span className="strategy-name">{strategyText.name}</span>
+                        <span style={{
+                          width: 14,
+                          height: 14,
+                          borderRadius: '4px',
+                          border: '2px solid',
+                          borderColor: isOn ? 'var(--accent-primary)' : 'var(--text-muted)',
+                          background: isOn ? 'var(--accent-primary)' : 'transparent',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: 'white',
+                          fontSize: '10px',
+                          fontWeight: 800,
                         }}>
-                          {strat.pnl >= 0 ? '+' : ''}{formatCurrency(strat.pnl)}
+                          {isOn ? '✓' : ''}
                         </span>
                       </div>
+                      <p className="strategy-description">{strategyText.description}</p>
+                      <div style={{
+                        marginTop: '2px',
+                        fontSize: '10px',
+                        fontFamily: 'var(--font-mono)',
+                        color: isActiveNow ? 'var(--profit)' : 'var(--text-muted)',
+                        letterSpacing: '0.5px',
+                      }}>
+                        {isActiveNow ? (language === 'ko' ? '● 현재 활성' : '● ACTIVE NOW') : (language === 'ko' ? '○ 대기' : '○ idle')}
+                        {!playbookAuto && isManualOn && !isActiveNow ? (language === 'ko' ? ' · 수동 켜짐' : ' · manual-on') : ''}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
 
           {/* Activity Log */}
-          <div className="card">
+          <div className="card trading-activity-log-card">
             <div className="card-header">
               <span className="card-title">
-                <ListIcon className="card-icon" /> Activity Log
+                <ListIcon className="card-icon" /> {t('activityLog')}
               </span>
               <span style={{
                 fontSize: '12px',
                 color: 'var(--text-tertiary)',
                 fontFamily: 'var(--font-mono)',
               }}>
-                {tradeLogs.length} events
+                {tradeLogs.length} {language === 'ko' ? '개 이벤트' : 'events'}
               </span>
             </div>
-            <div className="bot-log" style={{ maxHeight: '400px' }}>
+            <div className="bot-log trading-bot-log" style={{ maxHeight: '400px' }}>
               {[...tradeLogs].reverse().map((log, i) => (
                 <div key={i} className="bot-log-entry">
                   <span className="bot-log-time">{log.time}</span>
@@ -311,77 +805,74 @@ const TradingBot: React.FC = () => {
         </div>
 
         {/* Right Column - Settings */}
-        <div className="dashboard-right">
+        <div className="dashboard-right trading-dashboard-right">
           <div className="card">
             <div className="card-header">
               <span className="card-title">
-                <ShieldIcon className="card-icon" /> Risk Settings
+                <ShieldIcon className="card-icon" /> {t('riskLevel')}
               </span>
             </div>
-            <div style={{ padding: 'var(--space-xl)', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div style={{ padding: 'var(--space-xl)', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               {/* Risk Level */}
               <div>
                 <label style={{
                   fontSize: '12px',
                   textTransform: 'uppercase',
-                  letterSpacing: '1px',
                   color: 'var(--text-muted)',
                   fontWeight: 600,
                   display: 'block',
-                  marginBottom: '8px',
+                  marginBottom: '4px',
                 }}>
-                  Risk Level
+                  {t('riskLevel')}
                 </label>
                 <div style={{ display: 'flex', gap: '4px' }}>
                   {(['conservative', 'moderate', 'aggressive'] as const).map((level) => (
                     <button
+                      type="button"
                       key={level}
                       className={`btn btn-sm ${riskLevel === level ? 'btn-primary' : 'btn-secondary'}`}
-                      onClick={() => {
-                        setRiskLevel(level);
-                        if (level === 'conservative') {
-                          setMaxPositionSize(10);
-                          setStopLossPercent(0.2);
-                          setTakeProfitPercent(0.4);
-                        } else if (level === 'moderate') {
-                          setMaxPositionSize(15);
-                          setStopLossPercent(0.3);
-                          setTakeProfitPercent(0.8);
-                        } else if (level === 'aggressive') {
-                          setMaxPositionSize(20);
-                          setStopLossPercent(0.5);
-                          setTakeProfitPercent(1.5);
-                        }
-                      }}
+                      onClick={() => setRiskLevel(level)}
                       style={{ flex: 1, textTransform: 'capitalize' }}
                     >
-                      {level}
+                      {language === 'ko'
+                        ? level === 'conservative' ? '보수적' : level === 'moderate' ? '보통' : '공격적'
+                        : level}
                     </button>
                   ))}
                 </div>
               </div>
 
               {/* Max Position */}
-              <div>
+              <div style={{ marginTop: '16px' }}>
                 <label style={{
                   fontSize: '12px',
                   textTransform: 'uppercase',
-                  letterSpacing: '1px',
                   color: 'var(--text-muted)',
                   fontWeight: 600,
                   display: 'block',
-                  marginBottom: '8px',
+                  marginBottom: '4px',
                 }}>
-                  Max Position Size: {maxPositionSize}% ({formatCurrency(account.equity * maxPositionSize / 100)})
+                  {t('maxPositionSize')}: {levelNums.maxPositionSize}% ({formatCurrency(account.equity * levelNums.maxPositionSize / 100)})
                 </label>
                 <input
+                  className="trading-range"
                   type="range"
                   min={5}
                   max={25}
                   step={1}
-                  value={maxPositionSize}
-                  onChange={(e) => setMaxPositionSize(parseInt(e.target.value))}
-                  style={{ width: '100%', accentColor: 'var(--accent-primary)' }}
+                  value={levelNums.maxPositionSize}
+                  onChange={(e) => updateCurrentLevelNums({ maxPositionSize: parseInt(e.target.value, 10) })}
+                  style={
+                    {
+                      width: '100%',
+                      ['--trading-range-thumb' as string]: 'var(--accent-primary)',
+                      ['--trading-range-fill-pct' as string]: tradingRangeFillPct(
+                        levelNums.maxPositionSize,
+                        5,
+                        25,
+                      ),
+                    } as React.CSSProperties
+                  }
                 />
               </div>
 
@@ -390,22 +881,32 @@ const TradingBot: React.FC = () => {
                 <label style={{
                   fontSize: '12px',
                   textTransform: 'uppercase',
-                  letterSpacing: '1px',
                   color: 'var(--text-muted)',
                   fontWeight: 600,
                   display: 'block',
-                  marginBottom: '8px',
+                  marginBottom: '4px',
                 }}>
-                  Stop Loss: -{stopLossPercent}%
+                  {t('stopLoss')}: -{levelNums.stopLossPercent}%
                 </label>
                 <input
+                  className="trading-range"
                   type="range"
                   min={0.1}
                   max={2.0}
                   step={0.05}
-                  value={stopLossPercent}
-                  onChange={(e) => setStopLossPercent(parseFloat(e.target.value))}
-                  style={{ width: '100%', accentColor: 'var(--loss)' }}
+                  value={levelNums.stopLossPercent}
+                  onChange={(e) => updateCurrentLevelNums({ stopLossPercent: parseFloat(e.target.value) })}
+                  style={
+                    {
+                      width: '100%',
+                      ['--trading-range-thumb' as string]: 'var(--loss)',
+                      ['--trading-range-fill-pct' as string]: tradingRangeFillPct(
+                        levelNums.stopLossPercent,
+                        0.1,
+                        2.0,
+                      ),
+                    } as React.CSSProperties
+                  }
                 />
               </div>
 
@@ -414,62 +915,125 @@ const TradingBot: React.FC = () => {
                 <label style={{
                   fontSize: '12px',
                   textTransform: 'uppercase',
-                  letterSpacing: '1px',
                   color: 'var(--text-muted)',
                   fontWeight: 600,
                   display: 'block',
-                  marginBottom: '8px',
+                  marginBottom: '4px',
                 }}>
-                  Take Profit: +{takeProfitPercent}%
+                  {t('takeProfit')}: +{levelNums.takeProfitPercent}%
                 </label>
                 <input
+                  className="trading-range"
                   type="range"
                   min={0.2}
                   max={5.0}
                   step={0.05}
-                  value={takeProfitPercent}
-                  onChange={(e) => setTakeProfitPercent(parseFloat(e.target.value))}
-                  style={{ width: '100%', accentColor: 'var(--profit)' }}
+                  value={levelNums.takeProfitPercent}
+                  onChange={(e) => updateCurrentLevelNums({ takeProfitPercent: parseFloat(e.target.value) })}
+                  style={
+                    {
+                      width: '100%',
+                      ['--trading-range-thumb' as string]: 'var(--profit)',
+                      ['--trading-range-fill-pct' as string]: tradingRangeFillPct(
+                        levelNums.takeProfitPercent,
+                        0.2,
+                        5.0,
+                      ),
+                    } as React.CSSProperties
+                  }
                 />
               </div>
 
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '8px',
+                  marginTop: '12px',
+                  alignItems: 'center',
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-xs btn-risk-save"
+                  onClick={handleSaveRiskSettings}
+                  disabled={savingRiskPrefs || !riskSlidersTouched}
+                >
+                  {savingRiskPrefs ? t('saving') : t('saveRiskSettings')}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-xs"
+                  onClick={handleResetRiskSettings}
+                  disabled={savingRiskPrefs || !riskSlidersTouched}
+                >
+                  {t('resetRiskDefaults')}
+                </button>
+              </div>
+              <p
+                style={{
+                  fontSize: '11px',
+                  color: 'var(--text-muted)',
+                  margin: '6px 0 0 0',
+                  lineHeight: 1.45,
+                }}
+              >
+                {t('riskSettingsSaveHint')}
+              </p>
+              {riskPrefsMsg && (
+                <p
+                  style={{
+                    fontSize: '12px',
+                    color: 'var(--profit)',
+                    margin: '8px 0 0 0',
+                  }}
+                >
+                  {riskPrefsMsg}
+                </p>
+              )}
+
               {/* Summary */}
-              <div style={{
-                padding: '16px',
-                background: 'var(--bg-secondary)',
-                borderRadius: 'var(--radius-md)',
-                fontSize: '12px',
-                lineHeight: 1.8,
-              }}>
+              <div
+                className="trading-config-summary"
+                style={{
+                  padding: '16px 16px 16px 0',
+                  background: 'var(--bg-secondary)',
+                  borderRadius: 'var(--radius-md)',
+                  fontSize: '12px',
+                  lineHeight: 1.8,
+                }}
+              >
                   <div style={{ fontWeight: 600, marginBottom: '8px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <ListIcon style={{ width: '16px', height: '16px' }} /> Configuration Summary
+                    <ListIcon style={{ width: '16px', height: '16px' }} /> {language === 'ko' ? '설정 요약' : 'Configuration Summary'}
                   </div>
                 <div style={{ color: 'var(--text-secondary)' }}>
-                  • Capital: {formatCurrency(account.equity)}<br/>
-                  • Strategy: {strategies.find(s => s.id === activeStrategy)?.name}<br/>
-                  • Max per trade: {formatCurrency(account.equity * maxPositionSize / 100)}<br/>
-                  • Stop Loss: {formatPercent(-stopLossPercent)}<br/>
-                  • Take Profit: {formatPercent(takeProfitPercent)}<br/>
-                  • Risk/Reward: 1:{(takeProfitPercent / stopLossPercent).toFixed(1)}
+                  • {language === 'ko' ? '자본' : 'Capital'}: {formatCurrency(account.equity)}<br/>
+                  • {language === 'ko' ? '전략' : 'Strategy'}: {playbookAuto
+                    ? `AUTO · ${activePlaybooks.join(', ') || 'idle'}`
+                    : `MANUAL · ${manualPlaybooks.join(', ') || 'none'}`}<br/>
+                  • {language === 'ko' ? '거래당 최대' : 'Max per trade'}: {formatCurrency(account.equity * levelNums.maxPositionSize / 100)}<br/>
+                  • {t('stopLoss')}: {formatPercent(-levelNums.stopLossPercent)}<br/>
+                  • {t('takeProfit')}: {formatPercent(levelNums.takeProfitPercent)}<br/>
+                  • {language === 'ko' ? '손익비' : 'Risk/Reward'}: 1:{(levelNums.takeProfitPercent / levelNums.stopLossPercent).toFixed(1)}
                 </div>
               </div>
             </div>
           </div>
 
           {/* Quick Stats */}
-          <div className="card">
+          <div className="card trading-session-stats-card">
             <div className="card-header">
               <span className="card-title">
-                <ChartBarIcon className="card-icon" /> Session Stats
+                <ChartBarIcon className="card-icon" /> {t('sessionStats')}
               </span>
             </div>
-            <div style={{ padding: 'var(--space-xl)' }}>
+            <div className="trading-session-stats-inner" style={{ padding: 'var(--space-sm) var(--space-xl) var(--space-md)' }}>
               {[
-                { label: 'Total Trades', value: sessionStats.total_trades.toString(), color: 'var(--text-primary)' },
-                { label: 'Win Rate', value: `${sessionStats.win_rate.toFixed(1)}%`, color: sessionStats.win_rate >= 50 ? 'var(--profit)' : 'var(--text-tertiary)' },
-                { label: 'Winning Trades', value: sessionStats.winning_trades.toString(), color: 'var(--profit)' },
-                { label: 'Losing Trades', value: sessionStats.losing_trades.toString(), color: 'var(--loss)' },
-                { label: 'Total P&L', value: formatCurrency(sessionStats.total_pnl), color: sessionStats.total_pnl >= 0 ? 'var(--profit)' : 'var(--loss)' },
+                { label: t('totalTrades'), value: sessionStats.total_trades.toString(), color: 'var(--text-primary)' },
+                { label: t('winRate'), value: `${sessionStats.win_rate.toFixed(1)}%`, color: sessionStats.win_rate >= 50 ? 'var(--profit)' : 'var(--text-tertiary)' },
+                { label: t('winningTrades'), value: sessionStats.winning_trades.toString(), color: 'var(--profit)' },
+                { label: t('losingTrades'), value: sessionStats.losing_trades.toString(), color: 'var(--loss)' },
+                { label: t('totalPL'), value: formatCurrency(sessionStats.total_pnl), color: sessionStats.total_pnl >= 0 ? 'var(--profit)' : 'var(--loss)' },
               ].map((stat, i) => (
                 <div key={i} style={{
                   display: 'flex',

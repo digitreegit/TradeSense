@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Default fill for direct image use; sidebar uses inline SVG + currentColor -->
+  <text x="50" y="72" font-family="'Inter', system-ui, sans-serif" font-weight="700" font-size="62" fill="#0f172a" text-anchor="middle">TS</text>
+</svg>

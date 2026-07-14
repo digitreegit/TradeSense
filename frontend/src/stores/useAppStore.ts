@@ -1,5 +1,92 @@
 import { create } from 'zustand';
-import type { AccountInfo, Position, WatchlistItem, TradeLog, AgentMessage, Strategy, Order, PageId } from './types';
+import type {
+  AccountInfo,
+  Position,
+  WatchlistItem,
+  TradeLog,
+  AgentMessage,
+  Strategy,
+  Order,
+  PageId,
+  RegimeData,
+  ComplianceStatus,
+  AlpacaApiUsage,
+  ColorTheme,
+  AppLanguage,
+} from './types';
+import { applyThemeToDocument, persistTheme, readStoredTheme } from '../theme/theme';
+
+const LANGUAGE_STORAGE_KEY = 'tradesense-language';
+
+function readStoredLanguage(): AppLanguage {
+  try {
+    const value = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+    if (value === 'ko' || value === 'en') return value;
+  } catch {
+    /* private mode / SSR */
+  }
+  return 'ko';
+}
+
+function persistLanguage(language: AppLanguage): void {
+  try {
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
+  } catch {
+    /* ignore */
+  }
+}
+
+function applyLanguageToDocument(language: AppLanguage): void {
+  document.documentElement.lang = language === 'ko' ? 'ko' : 'en';
+}
+
+const AGENT_GOALS_STORAGE_KEY = 'tradesense-agent-goals-v1';
+
+function readStoredAgentGoals(): {
+  dailyPct: number;
+  dailyLossLimitPct: number;
+  paperCapitalUsd: number | null;
+} {
+  try {
+    const raw = localStorage.getItem(AGENT_GOALS_STORAGE_KEY);
+    if (!raw) return { dailyPct: 1.5, dailyLossLimitPct: 1, paperCapitalUsd: null };
+    const j = JSON.parse(raw) as {
+      dailyPct?: unknown;
+      dailyLossLimitPct?: unknown;
+      paperCapitalUsd?: unknown;
+    };
+    const dailyPct =
+      typeof j.dailyPct === 'number' && j.dailyPct > 0 && j.dailyPct <= 100 ? j.dailyPct : 1.5;
+    const dailyLossLimitPct =
+      typeof j.dailyLossLimitPct === 'number' &&
+      j.dailyLossLimitPct > 0 &&
+      j.dailyLossLimitPct <= 100
+        ? j.dailyLossLimitPct
+        : 1;
+    const paperCapitalUsd =
+      typeof j.paperCapitalUsd === 'number' && j.paperCapitalUsd > 0 ? j.paperCapitalUsd : null;
+    return { dailyPct, dailyLossLimitPct, paperCapitalUsd };
+  } catch {
+    return { dailyPct: 1.5, dailyLossLimitPct: 1, paperCapitalUsd: null };
+  }
+}
+
+function persistAgentGoals(
+  dailyPct: number,
+  paperCapitalUsd: number | null,
+  dailyLossLimitPct: number,
+): void {
+  try {
+    localStorage.setItem(
+      AGENT_GOALS_STORAGE_KEY,
+      JSON.stringify({ dailyPct, paperCapitalUsd, dailyLossLimitPct }),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+const initialAgentGoals = readStoredAgentGoals();
 
 interface AppState {
   // Navigation
@@ -27,6 +114,8 @@ interface AppState {
   // Trading Bot
   botActive: boolean;
   setBotActive: (active: boolean) => void;
+  botDailyTrades: number;
+  setBotDailyTrades: (count: number) => void;
   tradeLogs: TradeLog[];
   addTradeLog: (log: TradeLog) => void;
   setTradeLogs: (logs: TradeLog[]) => void;
@@ -36,6 +125,17 @@ interface AppState {
   addAgentMessage: (msg: AgentMessage) => void;
   agentLoading: boolean;
   setAgentLoading: (loading: boolean) => void;
+  /** Daily % gain target (default strategy). */
+  agentDailyTargetPct: number;
+  /** Daily % loss guard (default strategy). */
+  agentDailyLossLimitPct: number;
+  /** Paper: headline USD for the agent intro; null = fall back to `account.initial_capital`. */
+  agentPaperCapitalUsd: number | null;
+  setAgentTradingGoals: (next: {
+    dailyPct?: number;
+    dailyLossLimitPct?: number;
+    paperCapitalUsd?: number | null;
+  }) => void;
 
   // Strategies
   strategies: Strategy[];
@@ -54,6 +154,36 @@ interface AppState {
   setRegimeData: (data: RegimeData | null) => void;
   dismissedRegimeTimestamp: string | null;
   setDismissedRegimeTimestamp: (ts: string | null) => void;
+  compliance: ComplianceStatus | null;
+  setCompliance: (c: ComplianceStatus | null) => void;
+  alpacaUsage: AlpacaApiUsage | null;
+  setAlpacaUsage: (u: AlpacaApiUsage | null) => void;
+
+  // Playbook routing (AUTO vs MANUAL set + currently-active list)
+  playbookAuto: boolean;
+  setPlaybookAuto: (v: boolean) => void;
+  manualPlaybooks: string[];
+  setManualPlaybooks: (ids: string[]) => void;
+  activePlaybooks: string[];
+  setActivePlaybooks: (ids: string[]) => void;
+
+  /** Signed-in user (null = guest / legacy env Alpaca) */
+  authEmail: string | null;
+  authAlpacaConfigured: boolean;
+  /** Alpaca API endpoint: paper vs live (only meaningful when keys are saved). */
+  authAlpacaPaperTrading: boolean;
+  setAuthProfile: (
+    email: string | null,
+    alpacaConfigured: boolean,
+    alpacaPaperTrading?: boolean | null,
+  ) => void;
+  authMethod: 'google' | 'email' | null;
+  setAuthMethod: (method: 'google' | 'email' | null) => void;
+
+  colorTheme: ColorTheme;
+  setColorTheme: (theme: ColorTheme) => void;
+  language: AppLanguage;
+  setLanguage: (language: AppLanguage) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -66,6 +196,47 @@ export const useAppStore = create<AppState>((set) => ({
   setRegimeData: (data) => set({ regimeData: data }),
   dismissedRegimeTimestamp: null,
   setDismissedRegimeTimestamp: (ts) => set({ dismissedRegimeTimestamp: ts }),
+  compliance: null,
+  setCompliance: (c) => set({ compliance: c }),
+  alpacaUsage: null,
+  setAlpacaUsage: (u) => set({ alpacaUsage: u }),
+
+  playbookAuto: true,
+  setPlaybookAuto: (v) => set({ playbookAuto: v }),
+  manualPlaybooks: ['scalp', 'vwap', 'orb', 'eod'],
+  setManualPlaybooks: (ids) => set({ manualPlaybooks: ids }),
+  activePlaybooks: [],
+  setActivePlaybooks: (ids) => set({ activePlaybooks: ids }),
+
+  authEmail: null,
+  authAlpacaConfigured: false,
+  authAlpacaPaperTrading: true,
+  setAuthProfile: (email, alpacaConfigured, alpacaPaperTrading) =>
+    set({
+      authEmail: email,
+      authAlpacaConfigured: alpacaConfigured,
+      authAlpacaPaperTrading:
+        email === null
+          ? true
+          : alpacaPaperTrading !== undefined && alpacaPaperTrading !== null
+            ? Boolean(alpacaPaperTrading)
+            : useAppStore.getState().authAlpacaPaperTrading,
+    }),
+  authMethod: null,
+  setAuthMethod: (method) => set({ authMethod: method }),
+
+  colorTheme: readStoredTheme(),
+  setColorTheme: (theme) => {
+    persistTheme(theme);
+    applyThemeToDocument(theme);
+    set({ colorTheme: theme });
+  },
+  language: readStoredLanguage(),
+  setLanguage: (language) => {
+    persistLanguage(language);
+    applyLanguageToDocument(language);
+    set({ language });
+  },
 
   // Account - $3000 paper trading
   account: {
@@ -108,8 +279,15 @@ export const useAppStore = create<AppState>((set) => ({
   // Trading Bot
   botActive: false,
   setBotActive: (active) => set({ botActive: active }),
+  botDailyTrades: 0,
+  setBotDailyTrades: (count) => set({ botDailyTrades: Math.max(0, Number(count) || 0) }),
   tradeLogs: [
-    { time: new Date().toLocaleTimeString(), type: 'info', message: 'TradeSense v3 — Cash Account Scalp Engine Initialized ($3,000)' },
+    {
+      time: new Date().toLocaleTimeString(),
+      type: 'info',
+      message:
+        'TradeSense v3 — Scalp engine initialized (default: +1.5% / day target, −1% / day loss guard)',
+    },
     { time: new Date().toLocaleTimeString(), type: 'info', message: 'PDT-Exempt mode active. GFV monitoring enabled.' },
     { time: new Date().toLocaleTimeString(), type: 'signal', message: 'Scanning 5-Min bars for AI Scalp opportunities...' },
   ],
@@ -121,9 +299,9 @@ export const useAppStore = create<AppState>((set) => ({
   // AI Agent
   agentMessages: [
     {
-      id: '1',
+      id: 'welcome',
       role: 'ai',
-      content: '안녕하세요! 저는 TradeSense v3 마이크로 스캘핑 에이전트입니다. ⚡️\n\n**$3,000 캐시 어카운트**를 활용해 매일 **+1% 수익**을 목표로 복리 투자를 진행합니다.\n\n현재 모니터링 중인 스캘핑 전략:\n• RSI 과매도 반등 스캘핑 (5-min)\n• VWAP 지지/저항 돌파\n• AI 기반 섹터 순환 (Paid Tier)',
+      content: '',
       timestamp: new Date().toISOString(),
     },
   ],
@@ -132,13 +310,51 @@ export const useAppStore = create<AppState>((set) => ({
   })),
   agentLoading: false,
   setAgentLoading: (loading) => set({ agentLoading: loading }),
+  agentDailyTargetPct: initialAgentGoals.dailyPct,
+  agentDailyLossLimitPct: initialAgentGoals.dailyLossLimitPct,
+  agentPaperCapitalUsd: initialAgentGoals.paperCapitalUsd,
+  setAgentTradingGoals: (next) =>
+    set((state) => {
+      let dailyPct = state.agentDailyTargetPct;
+      if (next.dailyPct !== undefined) {
+        const n = Number(next.dailyPct);
+        if (Number.isFinite(n)) {
+          dailyPct = Math.min(100, Math.max(0.01, n));
+        }
+      }
+      let dailyLossLimitPct = state.agentDailyLossLimitPct;
+      if (next.dailyLossLimitPct !== undefined) {
+        const n = Number(next.dailyLossLimitPct);
+        if (Number.isFinite(n)) {
+          dailyLossLimitPct = Math.min(100, Math.max(0.01, n));
+        }
+      }
+      let paperCapitalUsd = state.agentPaperCapitalUsd;
+      if (next.paperCapitalUsd !== undefined) {
+        if (next.paperCapitalUsd === null) {
+          paperCapitalUsd = null;
+        } else {
+          const n = Number(next.paperCapitalUsd);
+          if (Number.isFinite(n) && n >= 1) {
+            paperCapitalUsd = Math.min(1e9, n);
+          }
+        }
+      }
+      persistAgentGoals(dailyPct, paperCapitalUsd, dailyLossLimitPct);
+      return {
+        agentDailyTargetPct: dailyPct,
+        agentDailyLossLimitPct: dailyLossLimitPct,
+        agentPaperCapitalUsd: paperCapitalUsd,
+      };
+    }),
 
   // Strategies
   strategies: [
     {
       id: 'scalp',
       name: 'Micro-Scalping v3',
-      description: '5분봉 기준 RSI/VWAP 지표를 활용한 빠른 단타 전략. 매일 1% 수익을 목표로 합니다.',
+      description:
+        'Fast intraday scalps on 5-min bars using RSI/VWAP. Default: ~+1.5% / day target, ~−1% / day loss guard.',
       active: true,
       winRate: 0,
       trades: 0,
@@ -147,7 +363,7 @@ export const useAppStore = create<AppState>((set) => ({
     {
       id: 'regime-adaptive',
       name: 'AI Sector Adaptive',
-      description: '실시간 시장 이슈(전쟁, 금리 등)에 따라 집중 섹터와 종목을 AI가 자동으로 변경합니다.',
+      description: 'AI rotates focus sectors and symbols as macro headlines shift (war, rates, etc.).',
       active: true,
       winRate: 0,
       trades: 0,
@@ -156,7 +372,7 @@ export const useAppStore = create<AppState>((set) => ({
     {
       id: 'ml-predict',
       name: 'ML Prediction',
-      description: 'Gradient Boosting 모델을 이용한 가격 예측 전략. 기술적 지표를 feature로 사용.',
+      description: 'Gradient-boosting price outlook using technical features as inputs.',
       active: false,
       winRate: 55.8,
       trades: 0,
@@ -164,7 +380,7 @@ export const useAppStore = create<AppState>((set) => ({
     },
   ],
   setStrategies: (strategies) => set({ strategies }),
-  activeStrategy: 'momentum',
+  activeStrategy: 'scalp',
   setActiveStrategy: (id) => set({ activeStrategy: id }),
 
   // Connection

@@ -1,5 +1,8 @@
 // Zustand store types and shared interfaces
 
+export type ColorTheme = 'dark' | 'light';
+export type AppLanguage = 'ko' | 'en';
+
 export interface Position {
   symbol: string;
   qty: number;
@@ -70,6 +73,8 @@ export interface Strategy {
   name: string;
   description: string;
   active: boolean;
+  /** Optional: from API playbook list */
+  enabled?: boolean;
   winRate: number;
   trades: number;
   pnl: number;
@@ -90,9 +95,128 @@ export interface RegimeData {
   risk_level: string;
   max_position_percent: number;
   stop_loss_percent: number;
+  take_profit_percent?: number;
   prev_strategy?: string;
   prev_risk_level?: string;
   timestamp?: string;
+  focus_sectors?: string[];
+  focus_symbols?: string[];
+  daily_target?: string;
+  daily_pnl?: string;
+  account_type?: string;
+  /** AI regime sub-scores (war/earnings/fed/gold/crypto/others) */
+  market_level?: string;
+  market_score?: number;
+  ai_market_score?: number;
+  ai_raw_market_score?: number;
+  market_scores?: Record<string, number>;
+  /** Quantitative regime sub-scores (vix/bonds/dxy/gold/energy/crypto/spy) */
+  quant_scores?: Record<string, number>;
+  quant_changes_5d_pct?: Record<string, number | null>;
+  vix_proxy_level?: number;
+  sector_tilt?: string | null;
+  blackout?: boolean;
+  blackout_reason?: string;
+  news_score?: number;
+  news_headline_count?: number;
+  news_symbols?: string[];
+  ai_risk_level?: string;
+  /** LLM causal bullets (news themes → score), bilingual from Gemini */
+  rationale_points_en?: string[];
+  rationale_points_ko?: string[];
+  /** Currently enabled playbooks in engine (AUTO or MANUAL routing) */
+  active_playbooks?: string[];
+  playbook_mode?: 'auto' | 'manual';
+  /** SPY 1m/5m realized vol → entry threshold delta (refreshed each ET minute) */
+  entry_vol_regime?: {
+    proxy?: string;
+    rv_1m_pct?: number | null;
+    rv_5m_pct?: number | null;
+    delta_1m?: number;
+    delta_5m?: number;
+    vol_entry_delta?: number;
+    minute_et?: string;
+  };
+  /** Preset threshold after vol + session adjustments */
+  entry_score_threshold_effective?: number;
+  /** HistGradientBoosting: train metadata + last drift z */
+  ml_signal?: Record<string, unknown>;
 }
 
-export type PageId = 'dashboard' | 'chart' | 'agent' | 'trading' | 'portfolio' | 'history';
+/** `/api/trading/playbooks` payload */
+export interface PlaybookConfig {
+  auto: boolean;
+  manual: string[];
+  active: string[];
+  playbooks: Array<{
+    id: string;
+    name: string;
+    description: string;
+    manual_enabled: boolean;
+    active_now: boolean;
+  }>;
+}
+
+/** Alpaca REST rate-limit snapshot (broker + optional market-data host). */
+export interface AlpacaRateLimitWindow {
+  limit?: number | null;
+  remaining?: number | null;
+  used?: number | null;
+  reset_epoch?: number | null;
+  reset_in_seconds?: number | null;
+  percent_used?: number | null;
+}
+
+export interface AlpacaApiUsage {
+  ok: boolean;
+  connected?: boolean;
+  error?: string;
+  note?: string;
+  http_probe_error?: string;
+  limit?: number | null;
+  remaining?: number | null;
+  used?: number | null;
+  reset_epoch?: number | null;
+  reset_in_seconds?: number | null;
+  percent_used?: number | null;
+  /** False when Alpaca responded OK but sent no rate-limit headers */
+  headers_available?: boolean;
+  /** Broker (paper-api / live) host — same as top-level limit/remaining when present */
+  trading_api?: AlpacaRateLimitWindow | null;
+  /** data.alpaca.markets host — often a higher per-minute bucket than broker */
+  data_api?: AlpacaRateLimitWindow | null;
+  data_probe_error?: string | null;
+  usage_scope_note?: string | null;
+}
+
+export interface ComplianceStatus {
+  /** T+1: sale proceeds not yet available in settled-cash model */
+  unsettled_sale_proceeds?: number;
+  open_tax_lots?: number;
+  unsettled_cash: number;
+  open_unsettled_lots: number;
+  gfv_count_12mo: number;
+  gfv_level: 'OK' | 'NOTICE' | 'WARNING' | 'RESTRICTED';
+  loss_streak: number;
+  cooling_down: boolean;
+  cooldown_remaining_s: number;
+  wash_sale_cooldowns: Record<string, string>;
+  t_plus_one_settlement_days?: number;
+}
+
+export interface BotStatusResponse {
+  active: boolean;
+  strategy?: string;
+  regime_data?: RegimeData;
+  regime_reason?: string;
+}
+
+export type PageId =
+  | 'dashboard'
+  | 'chart'
+  | 'agent'
+  | 'trading'
+  | 'portfolio'
+  | 'history'
+  | 'auth'
+  | 'settings';

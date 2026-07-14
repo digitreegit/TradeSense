@@ -3,6 +3,7 @@ import { useAppStore } from '../../stores/useAppStore';
 import { formatCurrency, formatPercent } from '../../utils/helpers';
 import type { BarData } from '../../stores/types';
 import api from '../../services/api';
+import { useI18n } from '../../i18n';
 
 const TF_MAP: Record<string, string> = {
   '1Min': '1Min', '5Min': '5Min', '15Min': '15Min',
@@ -10,7 +11,8 @@ const TF_MAP: Record<string, string> = {
 };
 
 const ChartView: React.FC = () => {
-  const { selectedSymbol, setSelectedSymbol, watchlist } = useAppStore();
+  const { selectedSymbol, setSelectedSymbol, watchlist, colorTheme } = useAppStore();
+  const { t } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [timeframe, setTimeframe] = useState('1D');
   const [searchInput, setSearchInput] = useState(selectedSymbol);
@@ -39,8 +41,8 @@ const ChartView: React.FC = () => {
       }
     };
     fetchBars();
-    // Refresh every 30s
-    const interval = setInterval(fetchBars, 30000);
+    // Refresh every 60s (reduces API pressure / UI jank)
+    const interval = setInterval(fetchBars, 60000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [selectedSymbol, timeframe]);
 
@@ -64,8 +66,22 @@ const ChartView: React.FC = () => {
     const volumeHeight = height * 0.2;
     const volumeTop = chartHeight + 10;
 
+    const cs = getComputedStyle(document.documentElement);
+    const chartBg = (cs.getPropertyValue('--chart-canvas-bg').trim() || '#060a13');
+    const gridCol = (cs.getPropertyValue('--chart-grid').trim() || 'rgba(148, 163, 184, 0.08)');
+    const axisLbl = (cs.getPropertyValue('--chart-axis-label').trim() || '#64748b');
+    const maFast = (cs.getPropertyValue('--chart-ma-fast').trim() || 'rgba(68, 151, 130, 0.6)');
+    const maSlow = (cs.getPropertyValue('--chart-ma-slow').trim() || 'rgba(69, 120, 237, 0.6)');
+    const candleUp = (cs.getPropertyValue('--chart-candle-up').trim() || '#2eb899');
+    const candleDown = (cs.getPropertyValue('--chart-candle-down').trim() || '#ef3e48');
+    const candleUpDim = (cs.getPropertyValue('--chart-candle-up-dim').trim() || 'rgba(68, 151, 130, 0.2)');
+    const candleDownDim = (cs.getPropertyValue('--chart-candle-down-dim').trim() || 'rgba(223, 72, 76, 0.2)');
+    const candleUpLine = (cs.getPropertyValue('--chart-candle-up-line').trim() || 'rgba(68, 151, 130, 0.5)');
+    const candleDownLine = (cs.getPropertyValue('--chart-candle-down-line').trim() || 'rgba(223, 72, 76, 0.5)');
+    const textOnAccent = (cs.getPropertyValue('--on-accent').trim() || '#ffffff');
+
     // Clear
-    ctx.fillStyle = '#060a13';
+    ctx.fillStyle = chartBg;
     ctx.fillRect(0, 0, width, height);
 
     // Calculate price range
@@ -83,7 +99,7 @@ const ChartView: React.FC = () => {
     const bodyWidth = Math.max(candleWidth * 0.6, 2);
 
     // Grid lines
-    ctx.strokeStyle = 'rgba(148, 163, 184, 0.06)';
+    ctx.strokeStyle = gridCol;
     ctx.lineWidth = 1;
     const gridLines = 6;
     for (let i = 0; i <= gridLines; i++) {
@@ -95,7 +111,7 @@ const ChartView: React.FC = () => {
 
       // Price labels
       const price = adjustedMax - (i / gridLines) * adjustedRange;
-      ctx.fillStyle = '#64748b';
+      ctx.fillStyle = axisLbl;
       ctx.font = '11px Inter, sans-serif';
       ctx.textAlign = 'right';
       ctx.fillText(price.toFixed(2), width - 4, y + 3);
@@ -140,8 +156,8 @@ const ChartView: React.FC = () => {
       ctx.stroke();
     };
 
-    if (indicators.ma20) drawMA(ma20, 'rgba(0, 212, 170, 0.6)');
-    if (indicators.ma50) drawMA(ma50, 'rgba(99, 102, 241, 0.6)');
+    if (indicators.ma20) drawMA(ma20, maFast);
+    if (indicators.ma50) drawMA(ma50, maSlow);
 
     // Draw candles
     visibleData.forEach((candle, i) => {
@@ -154,7 +170,7 @@ const ChartView: React.FC = () => {
       const lowY = ((adjustedMax - candle.low) / adjustedRange) * chartHeight;
 
       // Wick
-      ctx.strokeStyle = isUp ? '#10b981' : '#ef4444';
+      ctx.strokeStyle = isUp ? candleUp : candleDown;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(x, highY);
@@ -162,7 +178,7 @@ const ChartView: React.FC = () => {
       ctx.stroke();
 
       // Body
-      ctx.fillStyle = isUp ? '#10b981' : '#ef4444';
+      ctx.fillStyle = isUp ? candleUp : candleDown;
       const top = Math.min(openY, closeY);
       const bodyHeight = Math.max(Math.abs(closeY - openY), 1);
       ctx.fillRect(x - bodyWidth / 2, top, bodyWidth, bodyHeight);
@@ -177,7 +193,7 @@ const ChartView: React.FC = () => {
         const volHeight = (vol / maxVol) * volumeHeight;
         const isUp = candle.close >= candle.open;
 
-        ctx.fillStyle = isUp ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)';
+        ctx.fillStyle = isUp ? candleUpDim : candleDownDim;
         ctx.fillRect(x + 1, volumeTop + volumeHeight - volHeight, candleWidth - 2, volHeight);
       });
     }
@@ -188,7 +204,7 @@ const ChartView: React.FC = () => {
       const lastY = ((adjustedMax - lastCandle.close) / adjustedRange) * chartHeight;
       const isUp = lastCandle.close >= lastCandle.open;
 
-      ctx.strokeStyle = isUp ? 'rgba(16, 185, 129, 0.5)' : 'rgba(239, 68, 68, 0.5)';
+      ctx.strokeStyle = isUp ? candleUpLine : candleDownLine;
       ctx.setLineDash([4, 4]);
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -198,14 +214,14 @@ const ChartView: React.FC = () => {
       ctx.setLineDash([]);
 
       // Price label
-      ctx.fillStyle = isUp ? '#10b981' : '#ef4444';
+      ctx.fillStyle = isUp ? candleUp : candleDown;
       ctx.fillRect(width - 52, lastY - 10, 52, 20);
-      ctx.fillStyle = 'white';
+      ctx.fillStyle = textOnAccent;
       ctx.font = 'bold 11px Inter, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(lastCandle.close.toFixed(2), width - 26, lastY + 4);
     }
-  }, [candleData, indicators]);
+  }, [candleData, indicators, colorTheme]);
 
   useEffect(() => {
     drawChart();
@@ -238,7 +254,26 @@ const ChartView: React.FC = () => {
         <div className="card-header" style={{ gap: '16px', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
             <div className="chart-symbol-search">
-              <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>🔍</span>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={1.5}
+                stroke="currentColor"
+                aria-hidden
+                style={{
+                  width: 18,
+                  height: 18,
+                  flexShrink: 0,
+                  color: 'var(--text-muted)',
+                }}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+                />
+              </svg>
               <input
                 type="text"
                 value={searchInput}
@@ -338,11 +373,11 @@ const ChartView: React.FC = () => {
             <div style={{
               position: 'absolute', inset: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'rgba(6,10,19,0.8)', zIndex: 10, gap: '12px',
+              background: 'var(--chart-loading-bg)', zIndex: 10, gap: '12px',
               fontSize: '13px', color: 'var(--text-tertiary)',
             }}>
               <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span>
-              Alpaca에서 차트 데이터 로딩 중...
+              {t('loadingChart')}
             </div>
           )}
           {!loading && candleData.length === 0 && (
@@ -353,7 +388,7 @@ const ChartView: React.FC = () => {
               fontSize: '13px', color: 'var(--text-tertiary)',
             }}>
               <span style={{ fontSize: '32px' }}>📭</span>
-              <span>이 종목의 차트 데이터가 없습니다</span>
+              <span>{t('noChartData')}</span>
             </div>
           )}
           <canvas
@@ -394,7 +429,12 @@ const ChartView: React.FC = () => {
           >
             {item.symbol}
             <span style={{
-              color: item.change >= 0 ? 'var(--profit)' : 'var(--loss)',
+              color:
+                selectedSymbol === item.symbol
+                  ? 'var(--on-accent)'
+                  : item.change >= 0
+                    ? 'var(--profit)'
+                    : 'var(--loss)',
               marginLeft: '4px',
             }}>
               {formatPercent(item.changePercent)}

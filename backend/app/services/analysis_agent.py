@@ -1,9 +1,12 @@
 """
 TradeSense - AI Analysis Agent
-Uses Gemini 2.0 Flash for stock analysis and trading insights.
+Uses OpenAI or Gemini (see AI_PROVIDER / models in settings) for analysis.
 """
-import logging
 import asyncio
+import json
+import logging
+import re
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -21,6 +24,20 @@ class AnalysisAgent:
         self._last_gemini_call = 0.0
         self._min_call_interval = 1.0
         self._last_response_cache: dict = {}  # prompt_hash -> response
+        self._active_gemini_model: str | None = None  # set after first successful Gemini call
+
+    def ai_model_display(self) -> str:
+        """Human-readable model id for health/UI (OpenAI from env; Gemini from last success or top candidate)."""
+        prov = (settings.ai_provider or "openai").strip().lower()
+        if prov == "openai":
+            return (settings.openai_model or "gpt-4o").strip() or "OpenAI"
+        if prov == "gemini":
+            if self._active_gemini_model:
+                return self._active_gemini_model
+            if self.GEMINI_MODEL_CANDIDATES:
+                return self.GEMINI_MODEL_CANDIDATES[0]
+            return "Gemini"
+        return (settings.ai_provider or "unknown").strip()
 
     def initialize(self):
         """Initialize the AI provider."""
@@ -41,6 +58,9 @@ class AnalysisAgent:
                     self.gemini_version = "legacy"
                     self.gemini_client = None  # Will be set on first successful call
                     self._initialized = True
+                    # Refresh candidate list from the live API so retired models
+                    # (e.g. gemini-1.5-*) don't produce 404s at call time.
+                    self._discover_gemini_models()
                     logger.info("✅ AI Agent initialized with Google Gemini (Legacy SDK)")
                 except ImportError:
                     try:
@@ -57,15 +77,70 @@ class AnalysisAgent:
         except Exception as e:
             logger.error(f"❌ Failed to initialize AI Agent: {e}")
 
-    # Models to try in order — newest verified first
+    # Models to try in order — newest generally-available first.
+    # NOTE: gemini-1.5-* was retired from v1beta in late 2025, so we prefer
+    # 2.5 / 2.0 families. The live list is also fetched dynamically via
+    # list_models() (see _discover_gemini_models) when the SDK supports it.
     GEMINI_MODEL_CANDIDATES = [
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-pro",
         "gemini-2.0-flash-001",
         "gemini-2.0-flash",
-        "gemini-1.5-flash-002",
-        "gemini-1.5-flash-001",
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
+        "gemini-2.0-flash-lite",
     ]
+
+    def _discover_gemini_models(self) -> None:
+        """Query the Gemini API for models that actually support generateContent
+        and prepend them to the candidate list. Fails silently on errors."""
+        try:
+            genai = getattr(self, "_gemini_genai", None)
+            if not genai or not hasattr(genai, "list_models"):
+                return
+            available: list[str] = []
+            for m in genai.list_models():
+                methods = getattr(m, "supported_generation_methods", None) or []
+                if "generateContent" not in methods:
+                    continue
+                raw = getattr(m, "name", "") or ""
+                short = raw.split("/")[-1] if "/" in raw else raw
+                if not short or "embedding" in short.lower():
+                    continue
+                available.append(short)
+
+            if not available:
+                return
+
+            def rank(name: str) -> tuple:
+                n = name.lower()
+                fam = 3
+                if "2.5" in n:
+                    fam = 0
+                elif "2.0" in n:
+                    fam = 1
+                elif "1.5" in n:
+                    fam = 2
+                tier = 2
+                if "flash" in n and "lite" not in n:
+                    tier = 0
+                elif "flash-lite" in n or "flash_lite" in n or "lite" in n:
+                    tier = 1
+                elif "pro" in n:
+                    tier = 2
+                return (fam, tier, name)
+
+            available.sort(key=rank)
+            merged: list[str] = []
+            for name in available + self.GEMINI_MODEL_CANDIDATES:
+                if name not in merged:
+                    merged.append(name)
+            self.GEMINI_MODEL_CANDIDATES = merged
+            logger.info(
+                "Gemini model candidates (live): %s",
+                ", ".join(self.GEMINI_MODEL_CANDIDATES[:6]),
+            )
+        except Exception as e:
+            logger.warning(f"Could not list Gemini models: {e}")
 
     @property
     def is_ready(self) -> bool:
@@ -100,7 +175,7 @@ class AnalysisAgent:
                 for p in pos[:5]:
                     context_str += f"\n  • {p.get('symbol','?')}: {p.get('qty','?')} shares, P&L ${p.get('unrealized_pl','?')}"
 
-        prompt = f"{system_prompt}{context_str}\n\nUser Question: {message}\n\nProvide a helpful, detailed, context-aware response in Korean. Use emojis and formatting."
+        prompt = f"{system_prompt}{context_str}\n\nUser Question: {message}\n\nProvide a helpful, detailed, context-aware response in English. Use emojis and formatting."
 
         if self.openai_client:
             return await self._query_openai(message, system_prompt)
@@ -141,7 +216,7 @@ class AnalysisAgent:
             return response.choices[0].message.content
         except Exception as e:
             logger.error(f"OpenAI query error: {e}")
-            return f"AI 분석 중 오류가 발생했습니다: {str(e)}"
+            return f"AI analysis error: {str(e)}"
 
     async def _query_gemini(self, prompt: str) -> str:
         """Query Google Gemini with auto model detection and rate limiting."""
@@ -181,32 +256,46 @@ class AnalysisAgent:
             error_str = str(e)
             if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str or "quota" in error_str.lower():
                 logger.warning("Gemini API quota exhausted, returning friendly message")
-                return "⚠️ 현재 AI 사용량이 많아 할당량이 일시적으로 소진되었습니다. 잠시 후(약 1분 뒤) 다시 질문해 주세요."
+                return "⚠️ AI quota is temporarily exhausted. Please try again in about a minute."
             logger.error(f"Gemini query error: {error_str}")
-            return f"AI 분석 중 오류가 발생했습니다: {error_str}"
+            return f"AI analysis error: {error_str}"
 
     def _call_legacy_sdk(self, prompt: str) -> str:
         """Call Gemini using the legacy google-generativeai SDK with auto model fallback."""
-        # If we already found a working model, use it
+        # If we already found a working model, try it once; on 404 fall back.
         if self.gemini_client:
-            response = self.gemini_client.generate_content(prompt)
-            return response.text
-        
-        # Otherwise try each model candidate
+            try:
+                response = self.gemini_client.generate_content(prompt)
+                return response.text
+            except Exception as e:
+                err = str(e)
+                if "404" in err or "NOT_FOUND" in err.upper() or "is not supported" in err:
+                    logger.warning(
+                        "Cached Gemini model returned 404; re-discovering models."
+                    )
+                    self.gemini_client = None
+                    self._discover_gemini_models()
+                else:
+                    raise
+
         last_error = None
         for model_name in self.GEMINI_MODEL_CANDIDATES:
             try:
                 model = self._gemini_genai.GenerativeModel(model_name)
                 response = model.generate_content(prompt)
-                # Success! Save this model for future calls
                 self.gemini_client = model
+                self._active_gemini_model = model_name
                 logger.info(f"✅ Found working Gemini model: {model_name}")
                 return response.text
             except Exception as e:
                 last_error = e
+                err = str(e)
+                if "404" in err or "NOT_FOUND" in err.upper() or "is not supported" in err:
+                    logger.warning(f"Model {model_name} not available, trying next...")
+                    continue
                 logger.warning(f"Model {model_name} failed: {e}")
                 continue
-        
+
         raise last_error or Exception("No working Gemini model found")
 
     def _call_new_sdk(self, prompt: str) -> str:
@@ -218,6 +307,7 @@ class AnalysisAgent:
                     model=model_name,
                     contents=prompt,
                 )
+                self._active_gemini_model = model_name
                 logger.info(f"✅ Found working Gemini model: {model_name}")
                 return response.text
             except Exception as e:
@@ -236,19 +326,19 @@ class AnalysisAgent:
         return """You are TradeSense AI, a micro-scalping specialist for US stocks.
 
 Portfolio Context:
-- Capital: $3,000 (Cash Account — NO margin)
-- Strategy: Micro-scalp, daily +1% compounding target
+- Capital: scale varies (cash account — NO margin unless user states otherwise)
+- Strategy: Micro-scalp — default **+1.5% / day** compounding objective, **−1% / day** portfolio loss guard
 - Account type: Cash (PDT-exempt, but must avoid Good Faith Violations)
 - T+1 settlement: funds from sells settle next business day
 
 Your core mission:
-1. Capital Preservation FIRST: With only $3,000, every dollar matters. Never risk more than 0.3% per trade.
-2. Scalp small, consistent gains: Target 0.5-1.0% per trade, accumulate to daily +1%.
+1. Capital preservation first: size positions so a bad day does not breach the **~1% daily loss guard**; keep per-trade risk modest.
+2. Asymmetric daily goals: work toward **~+1.5% / day** on strong setups; use stops and sizing so losing days stay near the **~1%** guard (defaults — adjust if the user specifies other targets).
 3. Macro awareness: Monitor geopolitical risks, earnings, and Fed events to AVOID trading during high-volatility periods.
 4. GFV awareness: Remind users about cash settlement rules when relevant.
 
 Guidelines:
-- Respond in Korean when the user writes in Korean.
+- Respond in English unless the user explicitly asks for another language.
 - Be specific: give exact entry prices, stop losses, and targets.
 - Use emojis for readability.
 - Focus on the most liquid stocks (AAPL, MSFT, NVDA, AMD, META, TSLA, SPY, QQQ) for tight spreads.
@@ -266,7 +356,7 @@ Guidelines:
 
 Market Data: {data_str}
 
-Please provide the analysis in Korean with clear formatting and emojis."""
+Please provide the analysis in English with clear formatting and emojis."""
 
     def _build_signal_prompt(self, symbols: list, market_data: dict) -> str:
         return f"""Based on the following market data, generate trading signals for these stocks:
@@ -284,30 +374,27 @@ Market Data: {str(market_data)}"""
 
     # ─── Template fallbacks ────────────────────────────────────
     def _template_analysis(self, symbol: str, market_data: dict) -> str:
-        return f"""📊 **{symbol} 분석 리포트** (Template Mode)
+        return f"""📊 **{symbol} analysis** (Template Mode)
 
-🔹 기술적 분석:
-  • RSI (14): 분석을 위해 AI API 키를 설정해주세요
-  • MACD: API 연결 후 실시간 분석 가능
+🔹 Technical analysis:
+  • RSI (14): set OPENAI_API_KEY or GOOGLE_API_KEY in .env for live AI analysis
+  • MACD: available after API is connected
 
-💡 AI 분석을 활성화하려면:
-  1. .env 파일에 OPENAI_API_KEY 또는 GOOGLE_API_KEY를 설정하세요
-  2. 서버를 재시작하세요
+💡 To enable AI:
+  1. Add OPENAI_API_KEY or GOOGLE_API_KEY to .env
+  2. Restart the server
 
-⚠️ 현재 Paper Trading 모드로 실행 중입니다."""
+⚠️ Running in Paper Trading mode."""
 
     def _template_chat(self, message: str) -> str:
-        return f"""알겠습니다! "{message}"에 대해 답변드립니다.
+        return f"""Thanks for your message about "{message}".
 
-현재 AI API가 연결되지 않아 템플릿 모드로 응답합니다.
+The AI API is not connected — this is a template response.
 
-💡 OpenAI GPT-4o 또는 Google Gemini API 키를 .env 파일에 설정하면
-더 정확한 AI 분석을 받으실 수 있습니다.
-
-설정 방법:
-1. OPENAI_API_KEY=sk-... 또는
-2. GOOGLE_API_KEY=... 를 .env에 추가
-3. AI_PROVIDER=openai 또는 gemini로 선택"""
+💡 Add OpenAI or Google Gemini keys to .env for full analysis:
+1. OPENAI_API_KEY=sk-...
+2. GOOGLE_API_KEY=...
+3. AI_PROVIDER=openai or gemini"""
 
     def _parse_signals(self, response: str, symbols: list) -> list:
         """Parse trading signals from LLM response."""
@@ -347,59 +434,214 @@ Market Data: {str(market_data)}"""
 
     DEFAULT_REGIME = {
         "strategy": "momentum",
-        "reasoning": "뉴스가 충분하지 않아 기본 대형 기술주 중심으로 운용합니다.",
+        "reasoning": "Insufficient news; defaulting to large-cap tech-focused universe.",
         "risk_level": "moderate",
         "market_score": 50.0,
         "market_level": "NORMAL",
         "market_scores": {"war": 50, "earnings": 50, "fed": 50, "gold": 50, "crypto": 50, "others": 50},
+        "news_score": 0.0,
+        "rationale_points_en": [],
+        "rationale_points_ko": [],
         "max_position_percent": 15,
         "stop_loss_percent": 0.3,
         "focus_sectors": ["tech_software", "tech_ai"],
         "focus_symbols": ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AMD", "TSLA"],
     }
 
+    @staticmethod
+    def _clamp_float(value, default: float, lo: float, hi: float) -> float:
+        try:
+            n = float(value)
+        except (TypeError, ValueError):
+            return default
+        return max(lo, min(hi, n))
+
+    @staticmethod
+    def _normalize_risk_level(raw: str) -> str:
+        value = str(raw or "").strip().lower()
+        aliases = {
+            "low": "conservative",
+            "safe": "conservative",
+            "defensive": "conservative",
+            "normal": "moderate",
+            "medium": "moderate",
+            "balanced": "moderate",
+            "high": "aggressive",
+            "risk-on": "aggressive",
+            "risk_on": "aggressive",
+        }
+        value = aliases.get(value, value)
+        return value if value in {"conservative", "moderate", "aggressive"} else "moderate"
+
+    def _sanitize_focus(self, data: dict) -> tuple[list[str], list[str]]:
+        all_valid = set()
+        for syms in self.SECTOR_UNIVERSE.values():
+            all_valid.update(syms)
+
+        focus_sectors = []
+        for sector in data.get("focus_sectors", []):
+            sector = str(sector or "").strip()
+            if sector in self.SECTOR_UNIVERSE and sector not in focus_sectors:
+                focus_sectors.append(sector)
+        if not focus_sectors:
+            focus_sectors = list(self.DEFAULT_REGIME["focus_sectors"])
+
+        focus_symbols = []
+        for sym in data.get("focus_symbols", []):
+            sym = str(sym or "").strip().upper()
+            if sym in all_valid and sym not in focus_symbols:
+                focus_symbols.append(sym)
+
+        for sector in focus_sectors:
+            for sym in self.SECTOR_UNIVERSE[sector]:
+                if sym not in focus_symbols:
+                    focus_symbols.append(sym)
+
+        for sym in self.DEFAULT_REGIME["focus_symbols"]:
+            if sym not in focus_symbols:
+                focus_symbols.append(sym)
+
+        return focus_symbols[:12], focus_sectors[:3]
+
+    @staticmethod
+    def _market_level_for_score(score: float) -> str:
+        if score >= 80:
+            return "EXCELLENT"
+        if score >= 60:
+            return "GOOD"
+        if score >= 40:
+            return "NORMAL"
+        if score >= 20:
+            return "BAD"
+        return "DANGEROUS"
+
+    @staticmethod
+    def _is_trading_goal_noise_bullet(s: str) -> bool:
+        """Strip lines that echo capital scale / daily targets — not market regime evidence."""
+        t = (s or "").lower()
+        if not t.strip():
+            return True
+        markers = (
+            "3k-scale",
+            "10k-scale",
+            "30k-scale",
+            "-scale scalp",
+            "scale scalp",
+            "+1%/day",
+            "+1.0%/day",
+            "+1.5%/day",
+            "+1.50%/day",
+            "+2%/day",
+            "+2.0%/day",
+            "compounding target",
+            "daily +1",
+            "daily +1.5",
+            "daily +2",
+            "loss guard",
+            "daily loss",
+            "micro-scalp",
+            "$3,000",
+            "$3000",
+            "3,000 cash",
+            "good faith",
+            "gfv",
+            "일일 +1",
+            "일일 +1.5",
+            "일일 +2",
+            "목표 +1",
+            "목표 +1.5",
+            "목표 +2",
+            "스캘프 목표",
+            "손실 한도",
+        )
+        if any(m in t for m in markers):
+            return True
+        if re.search(r"\d+k-scale", t):
+            return True
+        if re.search(r"\$\s*[\d,]+\s*[→\-]\s*\+", t):
+            return True
+        if re.search(r"\+\s*[\d.]+\s*%\s*/\s*day", t):
+            return True
+        return False
+
+    @classmethod
+    def _sanitize_rationale_bullets(cls, raw, max_n: int = 6) -> list:
+        if not isinstance(raw, list):
+            return []
+        out: list = []
+        for x in raw:
+            s = str(x or "").strip()
+            if not s or len(s) < 4:
+                continue
+            if cls._is_trading_goal_noise_bullet(s):
+                continue
+            if s not in out:
+                out.append(s)
+            if len(out) >= max_n:
+                break
+        return out
+
     async def determine_market_regime(self, news: list[dict]) -> dict:
         """Analyze news and quantify 6 key indicators into a market score."""
         if not self.is_ready or not news:
             return dict(self.DEFAULT_REGIME)
 
-        news_text = "\n".join([f"- {n['headline']}" for n in news[:15]])
+        news_lines = []
+        for n in news[:20]:
+            headline = str(n.get("headline") or "").strip()
+            summary = str(n.get("summary") or "").strip()
+            source = str(n.get("source") or "").strip()
+            if not headline:
+                continue
+            detail = f" — {summary[:220]}" if summary else ""
+            src = f" ({source})" if source else ""
+            news_lines.append(f"- {headline}{src}{detail}")
+        news_text = "\n".join(news_lines)
         
-        prompt = f"""당신은 세계 최고의 매크로 퀀트 전략가입니다. 아래 뉴스를 분석하여 현재 시장의 리스크를 6가지 항목으로 계량화하고 최적의 전략을 제안하세요.
+        prompt = f"""You are a senior macro quant strategist assessing US equities from headlines. Read the news below, quantify current market risk across six dimensions (0–100 each; higher = more favorable/safer for risk-on equities), and propose an optimal tactical tilt.
 
-핵심 분석 항목 (각 0~100점, 100점일수록 시장에 긍정적/안전):
-1. Geopolitical (전쟁/정치적 상황): 평화로우면 100, 전쟁/위기 시 0
-2. Earnings (기업 실적/실적발표): 어닝 서프라이즈 시 100, 어닝 쇼크 시 0
-3. Fed Policy (금리/연준 정책): 금리 인하/완화 시 100, 인상/긴축 시 0
-4. Gold (금값 동향): 금값 안정 시 100, 폭등(불안 시) 시 0
-5. Crypto (크립토 시장): 상승/활기 시 100, 폭락 시 0
-6. Others (기타 경제지표): 고용/소비가 안정적이면 100, 불안하면 0
+Dimensions (0–100 each):
+1. Geopolitical: peaceful/stable = 100, war/crisis = 0
+2. Earnings: positive surprises = 100, major misses = 0
+3. Fed Policy: easing/dovish = 100, tightening/hawkish = 0
+4. Gold: calm/stable gold = 100, fear-driven spike = 0
+5. Crypto: risk-on / strong = 100, crash / risk-off = 0
+6. Others (macro data): stable jobs/consumption = 100, deterioration = 0
 
-상세 섹터 가이드:
-- 전쟁 위기 → defense, energy_oil, gold_safe 집중
-- 금리 인하 → tech_software, tech_cloud, ev_auto 집중
-- 실적 호재 → 해당 섹터 집중
+Sector playbook:
+- War / geopolitical stress → tilt defense, energy_oil, gold_safe
+- Fed easing → tilt tech_software, tech_cloud, ev_auto
+- Positive earnings theme → tilt that sector
+- Panic / overreaction headlines with no systemic risk → negative news_score so the news-fade playbook can buy exhaustion
+- Systemic crisis / broad risk-off → low market_score, conservative risk, and defensive symbols
 
-사용 가능한 섹터: {list(self.SECTOR_UNIVERSE.keys())}
+Available sectors: {list(self.SECTOR_UNIVERSE.keys())}
 
-뉴스 데이터:
+News headlines:
 {news_text}
 
-반드시 아래 JSON 형식으로만 응답하세요:
+Also include human-readable **causal bullets** tied to the headlines (not just abstract scores):
+- "rationale_points_en": 3–5 short strings in English. Each bullet names a **concrete** market theme implied by the news (e.g. Mideast conflict / Iran tensions, crude oil supply & price regime, Fed rate path, dollar, major earnings, systemic risk-off). Say briefly whether it supports or caps risk-on equities.
+- "rationale_points_ko": the **same ideas** in natural Korean (3–5 bullets). Example style: "미·이란 긴장 장기화로 지정학 프리미엄이 유지되며 에너지 비용 부담이 커짐", "국제 유가가 고보합이어서 인플레·마진 압박 우려", "연준의 금리 인하 기대가 자산가격에 일부 완충" 등.
+
+Reply with ONLY valid JSON in this exact shape:
 {{
-    "strategy": "momentum" 또는 "mean-reversion",
-    "reasoning": "분석 근거를 한 문장으로 기술",
-    "risk_level": "low" (안전) / "moderate" (보통) / "aggressive" (위험),
+    "strategy": "momentum" or "mean-reversion",
+    "reasoning": "one-sentence executive summary in English",
+    "risk_level": "conservative" / "moderate" / "aggressive",
     "market_scores": {{
-        "war": 점수,
-        "earnings": 점수,
-        "fed": 점수,
-        "gold": 점수,
-        "crypto": 점수,
-        "others": 점수
+        "war": <number>,
+        "earnings": <number>,
+        "fed": <number>,
+        "gold": <number>,
+        "crypto": <number>,
+        "others": <number>
     }},
-    "max_position_percent": 10~25,
-    "stop_loss_percent": 0.2~1.0,
+    "news_score": <number from -1.0 to 1.0; negative = panic/exhaustion fade candidate, positive = constructive momentum>,
+    "rationale_points_en": ["...", "...", "..."],
+    "rationale_points_ko": ["...", "...", "..."],
+    "max_position_percent": <10-25>,
+    "stop_loss_percent": <0.2-1.0>,
     "focus_sectors": ["sector1", "sector2"],
     "focus_symbols": ["SYM1", "SYM2", "SYM3", "SYM4", "SYM5", "SYM6", "SYM7", "SYM8"]
 }}"""
@@ -410,44 +652,39 @@ Market Data: {str(market_data)}"""
             else:
                 response_text = await self._query_gemini(prompt)
 
-            import json
-            import re
             match = re.search(r'\{.*\}', response_text, re.DOTALL)
             if match:
                 data = json.loads(match.group(0))
-                
-                # Cleanup symbols and sectors
-                all_valid = set()
-                for syms in self.SECTOR_UNIVERSE.values():
-                    all_valid.update(syms)
-                
-                focus_symbols = [s for s in data.get("focus_symbols", []) if s in all_valid]
-                if len(focus_symbols) < 4:
-                    focus_symbols = list(self.DEFAULT_REGIME["focus_symbols"])
-                    
-                focus_sectors = [s for s in data.get("focus_sectors", []) if s in self.SECTOR_UNIVERSE]
-                if not focus_sectors:
-                    focus_sectors = list(self.DEFAULT_REGIME["focus_sectors"])
+                focus_symbols, focus_sectors = self._sanitize_focus(data)
 
                 # Calculate Aggregate Market Score (Quantify!)
-                scores = data.get("market_scores", self.DEFAULT_REGIME["market_scores"])
+                raw_scores = data.get("market_scores", self.DEFAULT_REGIME["market_scores"])
+                if not isinstance(raw_scores, dict):
+                    raw_scores = self.DEFAULT_REGIME["market_scores"]
+                scores = {
+                    key: round(self._clamp_float(raw_scores.get(key), 50.0, 0.0, 100.0), 1)
+                    for key in self.DEFAULT_REGIME["market_scores"]
+                }
                 avg_score = sum(scores.values()) / len(scores)
+                level = self._market_level_for_score(avg_score)
 
-                if avg_score >= 80: level = "EXCELLENT"
-                elif avg_score >= 60: level = "GOOD"
-                elif avg_score >= 40: level = "NORMAL"
-                elif avg_score >= 20: level = "BAD"
-                else: level = "DANGEROUS"
+                r_en = self._sanitize_rationale_bullets(
+                    data.get("rationale_points_en") or data.get("rationale_points")
+                )
+                r_ko = self._sanitize_rationale_bullets(data.get("rationale_points_ko"))
 
                 return {
                     "strategy": data.get("strategy", "momentum"),
-                    "reasoning": data.get("reasoning", "시장 흐름에 따라 전략을 운용합니다."),
-                    "risk_level": data.get("risk_level", "moderate"),
+                    "reasoning": data.get("reasoning", "Operating tactically per current market conditions."),
+                    "risk_level": self._normalize_risk_level(data.get("risk_level", "moderate")),
                     "market_score": round(avg_score, 1),
                     "market_level": level,
                     "market_scores": scores,
-                    "max_position_percent": data.get("max_position_percent", 15),
-                    "stop_loss_percent": data.get("stop_loss_percent", 0.3),
+                    "news_score": round(self._clamp_float(data.get("news_score"), 0.0, -1.0, 1.0), 2),
+                    "rationale_points_en": r_en,
+                    "rationale_points_ko": r_ko,
+                    "max_position_percent": self._clamp_float(data.get("max_position_percent"), 15.0, 5.0, 25.0),
+                    "stop_loss_percent": self._clamp_float(data.get("stop_loss_percent"), 0.3, 0.1, 1.5),
                     "focus_sectors": focus_sectors,
                     "focus_symbols": focus_symbols,
                 }

@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import { formatCurrency } from '../../utils/helpers';
+import { useI18n } from '../../i18n';
 
 // Heroicons v2 Outline SVGs
 const ListBulletIcon = (props: React.ComponentProps<'svg'>) => (
@@ -17,16 +18,17 @@ const HistoryIcon = (props: React.ComponentProps<'svg'>) => (
 
 const History: React.FC = () => {
   const { orders } = useAppStore();
+  const { t } = useI18n();
 
   return (
     <div className="page-enter">
       <div className="card">
         <div className="card-header">
           <span className="card-title">
-            <ListBulletIcon className="card-icon" /> Trade History
+            <ListBulletIcon className="card-icon" /> {t('tradeHistory')}
           </span>
           <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
-            {orders.length} order{orders.length !== 1 ? 's' : ''}
+            {orders.length} {t('tradeHistory')}
           </span>
         </div>
         <div>
@@ -35,22 +37,22 @@ const History: React.FC = () => {
               <div className="empty-state-icon">
                 <HistoryIcon style={{ width: '48px', height: '48px', color: 'var(--text-tertiary)' }} />
               </div>
-              <div className="empty-state-title">No Trade History</div>
+              <div className="empty-state-title">{t('noTradeHistory')}</div>
               <div className="empty-state-text">
-                Your trade history will appear here once the bot starts executing trades in paper trading mode.
+                {t('noTradeHistoryText')}
               </div>
             </div>
           ) : (
             <table className="positions-table">
               <thead>
                 <tr>
-                  <th>Date</th>
-                  <th>Symbol</th>
-                  <th>Side</th>
-                  <th>Type</th>
-                  <th>Qty</th>
-                  <th>Price</th>
-                  <th>Status</th>
+                  <th>{t('date')}</th>
+                  <th>{t('symbol')}</th>
+                  <th>{t('side')}</th>
+                  <th>{t('type')}</th>
+                  <th>{t('qty')}</th>
+                  <th>{t('price')}</th>
+                  <th>{t('status')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -62,10 +64,11 @@ const History: React.FC = () => {
                     <td className="symbol">{order.symbol}</td>
                     <td>
                       <span style={{
-                        padding: '2px 8px',
+                        padding: '1px 6px',
                         borderRadius: 'var(--radius-full)',
-                        fontSize: '12px',
+                        fontSize: '10px',
                         fontWeight: 600,
+                        letterSpacing: '0.02em',
                         textTransform: 'uppercase',
                         background: order.side === 'buy' ? 'var(--profit-dim)' : 'var(--loss-dim)',
                         color: order.side === 'buy' ? 'var(--profit)' : 'var(--loss)',
@@ -82,10 +85,11 @@ const History: React.FC = () => {
                     </td>
                     <td>
                       <span style={{
-                        padding: '2px 8px',
+                        padding: '1px 6px',
                         borderRadius: 'var(--radius-full)',
-                        fontSize: '12px',
+                        fontSize: '10px',
                         fontWeight: 600,
+                        letterSpacing: '0.02em',
                         textTransform: 'uppercase',
                         background: order.status === 'filled' ? 'var(--profit-dim)' :
                                    order.status === 'cancelled' ? 'var(--loss-dim)' : 'var(--accent-gold-dim)',

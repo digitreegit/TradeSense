@@ -1,115 +1,311 @@
-// API service for communicating with FastAPI backend
+import type {
+  AlpacaApiUsage,
+  BotStatusResponse,
+  ComplianceStatus,
+  PlaybookConfig,
+  RegimeData,
+} from '../stores/types';
+import { getToken } from '../auth/token';
 
-const isDev = import.meta.env.DEV;
-const BASE_URL = isDev ? '/api' : '/quant/api';
+/**
+ * HTTP client for the FastAPI backend.
+ *
+ * - Local dev: Vite proxies `/api` → http://localhost:8000 (see vite.config.ts).
+ * - Production: set `VITE_API_BASE` to the public API prefix (e.g. `/quant/api`).
+ */
+const API_PREFIX =
+  (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ??
+  (import.meta.env.DEV ? '/api' : '/quant/api');
 
-class ApiService {
-  private baseUrl: string;
+type ErrorBody = { detail?: string; message?: string };
 
-  constructor(baseUrl: string = BASE_URL) {
-    this.baseUrl = baseUrl;
+async function parseError(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as ErrorBody;
+    if (typeof body.detail === 'string') return body.detail;
+    if (Array.isArray(body.detail)) return JSON.stringify(body.detail);
+    if (typeof body.message === 'string') return body.message;
+  } catch {
+    /* ignore */
+  }
+  return `HTTP ${response.status}`;
+}
+
+function authHeaders(): Record<string, string> {
+  const t = getToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const url = `${API_PREFIX}${path.startsWith('/') ? path : `/${path}`}`;
+  const response = await fetch(url, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(),
+      ...options?.headers,
+    },
+    ...options,
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseError(response));
   }
 
-  private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
-      ...options,
-    });
+  return response.json() as Promise<T>;
+}
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-      throw new Error(error.detail || `HTTP ${response.status}`);
-    }
-
-    return response.json();
+async function downloadBlob(path: string, fallbackFilename: string): Promise<void> {
+  const url = `${API_PREFIX}${path.startsWith('/') ? path : `/${path}`}`;
+  const response = await fetch(url, {
+    headers: {
+      ...authHeaders(),
+    },
+  });
+  if (!response.ok) {
+    throw new Error(await parseError(response));
   }
-
-  // Account
-  async getAccount() {
-    return this.request('/account');
+  const blob = await response.blob();
+  const cd = response.headers.get('Content-Disposition');
+  let filename = fallbackFilename;
+  if (cd) {
+    const m = /filename="([^"]+)"/i.exec(cd) ?? /filename=([^;\s]+)/i.exec(cd);
+    if (m) filename = m[1].trim();
   }
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = objectUrl;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(objectUrl);
+}
 
-  // Positions
-  async getPositions() {
-    return this.request('/portfolio/positions');
-  }
+export const api = {
+  getAccount: () => request<Record<string, unknown>>('/account'),
 
-  // Orders
-  async getOrders() {
-    return this.request('/trading/orders');
-  }
+  getPositions: () => request<{ positions?: unknown[] }>('/portfolio/positions'),
 
-  async submitOrder(order: {
+  getOrders: () => request<{ orders?: unknown[] }>('/trading/orders'),
+
+  submitOrder: (order: {
     symbol: string;
     qty: number;
     side: 'buy' | 'sell';
     type: 'market' | 'limit';
     limit_price?: number;
-  }) {
-    return this.request('/trading/order', {
+  }) =>
+    request<unknown>('/trading/order', {
       method: 'POST',
       body: JSON.stringify(order),
-    });
-  }
+    }),
 
-  // Market Data
-  async getBars(symbol: string, timeframe: string = '1Day', limit: number = 100) {
-    return this.request(`/market/bars?symbol=${symbol}&timeframe=${timeframe}&limit=${limit}`);
-  }
+  getBars: (symbol: string, timeframe = '1Day', limit = 100) =>
+    request<unknown>(`/market/bars?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`),
 
-  async getQuote(symbol: string) {
-    return this.request(`/market/quote?symbol=${symbol}`);
-  }
+  getQuote: (symbol: string) =>
+    request<unknown>(`/market/quote?symbol=${encodeURIComponent(symbol)}`),
 
-  async getSnapshot(symbol: string) {
-    return this.request(`/market/snapshot?symbol=${symbol}`);
-  }
+  getSnapshot: (symbol: string) =>
+    request<unknown>(`/market/snapshot?symbol=${encodeURIComponent(symbol)}`),
 
-  // AI Agent
-  async analyzeStock(symbol: string) {
-    return this.request(`/agent/analyze?symbol=${symbol}`);
-  }
+  analyzeStock: (symbol: string) =>
+    request<unknown>(`/agent/analyze?symbol=${encodeURIComponent(symbol)}`),
 
-  async chat(message: string) {
-    return this.request('/agent/chat', {
+  chat: (message: string) =>
+    request<unknown>('/agent/chat', {
       method: 'POST',
       body: JSON.stringify({ message }),
-    });
-  }
+    }),
 
-  // Trading Bot
-  async startBot(strategy: string, riskSettings?: { stop_loss?: number; take_profit?: number; max_position?: number }) {
-    return this.request('/trading/bot/start', {
+  startBot: (
+    strategy: string,
+    riskSettings?: {
+      stop_loss?: number;
+      take_profit?: number;
+      max_position?: number;
+      risk_level?: string;
+    },
+  ) =>
+    request<unknown>('/trading/bot/start', {
       method: 'POST',
       body: JSON.stringify({ strategy, ...riskSettings }),
-    });
-  }
+    }),
 
-  async stopBot() {
-    return this.request('/trading/bot/stop', {
+  stopBot: () =>
+    request<unknown>('/trading/bot/stop', {
       method: 'POST',
-    });
-  }
+    }),
 
-  async getBotStatus() {
-    return this.request('/trading/bot/status');
-  }
+  getBotStatus: () => request<BotStatusResponse>('/trading/bot/status'),
 
-  // Strategies
-  async getStrategies() {
-    return this.request('/trading/strategies');
-  }
+  getRegimeStatus: () =>
+    request<{
+      regime: RegimeData;
+      active_preset: Record<string, unknown>;
+      compliance: ComplianceStatus;
+    }>('/regime/status'),
 
-  async backtestStrategy(strategy: string, params: Record<string, unknown>) {
-    return this.request('/trading/backtest', {
+  getRiskPresets: () => request<Record<string, Record<string, unknown>>>('/regime/presets'),
+
+  /** Prefer health path so SPA catch-all in production never returns HTML here */
+  getAlpacaUsage: () => request<AlpacaApiUsage>('/health/alpaca-usage'),
+
+  /** `/api/health` — ai_model matches backend analysis_agent */
+  getHealth: () =>
+    request<{
+      ai_provider?: string;
+      ai_model?: string;
+      ai_ready?: boolean;
+      status?: string;
+    }>('/health'),
+
+  getStrategies: () =>
+    request<{
+      auto?: boolean;
+      manual?: string[];
+      active?: string[];
+      strategies: Array<{
+        id: string;
+        name: string;
+        description: string;
+        enabled?: boolean;
+        manual_enabled?: boolean;
+      }>;
+    }>('/trading/strategies'),
+
+  getPlaybookConfig: () => request<PlaybookConfig>('/trading/playbooks'),
+
+  getMlSignal: () =>
+    request<{ global: Record<string, unknown>; regime_snapshot?: unknown }>('/trading/ml-signal'),
+
+  setPlaybookConfig: (body: { auto?: boolean; manual?: string[] }) =>
+    request<PlaybookConfig>('/trading/playbooks', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  getCapitalScale: () =>
+    request<{
+      scale: '3k' | '10k' | '30k';
+      level: string;
+      auto: boolean;
+      available: Array<'3k' | '10k' | '30k'>;
+      preset: Record<string, unknown>;
+      paper_trading?: boolean;
+      initial_capital?: number;
+    }>('/trading/scale'),
+
+  setCapitalScale: (scale: '3k' | '10k' | '30k') =>
+    request<{
+      scale: '3k' | '10k' | '30k';
+      level: string;
+      preset: Record<string, unknown>;
+      paper_trading?: boolean;
+      initial_capital?: number;
+    }>('/trading/scale', {
+      method: 'POST',
+      body: JSON.stringify({ scale }),
+    }),
+
+  setTradingMode: (paper: boolean) =>
+    request<{
+      scale: '3k' | '10k' | '30k';
+      level: string;
+      preset: Record<string, unknown>;
+      paper_trading: boolean;
+      initial_capital?: number;
+    }>('/trading/mode', {
+      method: 'POST',
+      body: JSON.stringify({ paper }),
+    }),
+
+  backtestStrategy: (strategy: string, params: Record<string, unknown>) =>
+    request<unknown>('/trading/backtest', {
       method: 'POST',
       body: JSON.stringify({ strategy, params }),
-    });
-  }
-}
+    }),
 
-export const api = new ApiService();
+  /** Tick-level event simulator (Alpaca trades / CSV / Polygon) */
+  backtestTick: (body: Record<string, unknown>) =>
+    request<unknown>('/trading/backtest/tick', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  /** Walk-forward IS/OOS folds; optional in-sample threshold tuning */
+  backtestWalkForward: (body: Record<string, unknown>) =>
+    request<unknown>('/trading/backtest/walkforward', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  validateInvitation: (code: string) =>
+    request<{ valid: boolean }>('/auth/validate-invitation', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+
+  getMe: () =>
+    request<{
+      authenticated: boolean;
+      user_id?: number;
+      email?: string;
+      alpaca_configured?: boolean;
+      alpaca_paper_trading?: boolean;
+      notify_telegram?: boolean;
+      telegram_chat_id?: string;
+      telegram_bot_configured?: boolean;
+      notify_whatsapp?: boolean;
+      whatsapp_e164?: string;
+      whatsapp_configured?: boolean;
+    }>('/auth/me'),
+
+  getNotificationPrefs: () =>
+    request<{
+      notify_telegram: boolean;
+      telegram_chat_id: string;
+      telegram_bot_configured: boolean;
+      notify_whatsapp: boolean;
+      whatsapp_e164: string;
+      whatsapp_configured: boolean;
+    }>('/auth/notification-prefs'),
+
+  setNotificationPrefs: (body: {
+    notify_telegram: boolean;
+    telegram_chat_id: string;
+    notify_whatsapp: boolean;
+    whatsapp_e164: string;
+  }) =>
+    request<{
+      notify_telegram: boolean;
+      telegram_chat_id: string;
+      telegram_bot_configured: boolean;
+      notify_whatsapp: boolean;
+      whatsapp_e164: string;
+      whatsapp_configured: boolean;
+    }>('/auth/notification-prefs', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  testNotification: () =>
+    request<{ ok: boolean; message: string }>('/auth/notification-test', {
+      method: 'POST',
+    }),
+
+  saveAlpacaKeys: (api_key: string, secret_key: string) =>
+    request<{ ok: boolean; message: string }>('/auth/alpaca-keys', {
+      method: 'POST',
+      body: JSON.stringify({ api_key, secret_key }),
+    }),
+
+  deleteAlpacaKeys: () =>
+    request<{ ok: boolean; message: string }>('/auth/alpaca-keys', {
+      method: 'DELETE',
+    }),
+
+  /** Compliance logs → CSV (8949/Schedule D workbook helper; not a broker substitute). */
+  downloadTaxExportCsv: (year: number) =>
+    downloadBlob(`/tax/export/csv?year=${encodeURIComponent(String(year))}`, `tradesense-tax-${year}.csv`),
+} as const;
+
 export default api;
