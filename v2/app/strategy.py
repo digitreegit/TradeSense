@@ -5,8 +5,8 @@ Three sleeves:
    positive absolute momentum required, wide ATR trailing stop).
 2. Dip-buy            — buy short-term panic (RSI(2) < 10) in long-term
    uptrends, sell the bounce.
-3. Crypto trend       — long BTC/ETH while above the 50-day EMA with the
-   20-day EMA confirming; flat otherwise.
+3. Macro trend        — long BTC/ETH (where licensed) OR GLD/TLT/IEF when
+   crypto is disabled (e.g. NJ). Above 50-day EMA with 20-day confirming.
 """
 from __future__ import annotations
 
@@ -69,10 +69,15 @@ def dip_exit(row: pd.Series, held_days: int) -> bool:
     return bool(not pd.isna(r) and r > config.DIP_RSI_EXIT)
 
 
-def crypto_long(row: pd.Series) -> bool:
+def trend_long(row: pd.Series) -> bool:
+    """EMA trend filter shared by crypto and defensive macro sleeves."""
     if pd.isna(row.get("ema_slow")):
         return False
     return bool(row["close"] > row["ema_slow"] and row["ema_fast"] > row["ema_slow"])
+
+
+def crypto_long(row: pd.Series) -> bool:
+    return trend_long(row)
 
 
 @dataclass

@@ -8,7 +8,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app import config, regime, strategy
-from app.decisions import CRYPTO, DIP, MOMENTUM, PosMeta, decide
+from app.decisions import CRYPTO, DEFENSIVE, DIP, MOMENTUM, PosMeta, decide
 from app.indicators import atr, rsi, sma
 from app.risk import DrawdownBrake, position_dollars
 
@@ -132,3 +132,12 @@ def test_decide_buys_momentum_on_rollover():
 def test_decide_crypto_trend_on():
     orders = decide(_rows(), {}, [], ["BTC/USD"], regime.BEAR, week_rollover=False)
     assert any(o.symbol == "BTC/USD" and o.side == "buy" and o.sleeve == CRYPTO for o in orders)
+
+
+def test_decide_defensive_when_no_crypto():
+    rows = _rows()
+    gld = strategy.compute_features(make_df(np.linspace(100, 160, 260))).iloc[-1]
+    rows["GLD"] = gld
+    orders = decide(rows, {}, [], [], regime.BEAR, week_rollover=False,
+                    defensive_syms=["GLD", "TLT"])
+    assert any(o.symbol == "GLD" and o.side == "buy" and o.sleeve == DEFENSIVE for o in orders)

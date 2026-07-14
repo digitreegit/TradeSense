@@ -35,12 +35,27 @@
   #chart { width: 100%; height: 220px; }
   .empty { color: var(--dim); font-size: 13px; padding: 8px; }
   .err { background: #3d1d1d; color: var(--red); padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; display: none; }
+  .briefing { background: linear-gradient(135deg, #161b22 0%, #1a2332 100%); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; margin-bottom: 20px; }
+  .briefing h2 { font-size: 15px; font-weight: 700; margin-bottom: 14px; color: var(--text); }
+  .briefing .headline { font-size: 13px; color: var(--blue); margin-bottom: 14px; font-weight: 600; }
+  .briefing-section { margin-bottom: 12px; }
+  .briefing-section h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin-bottom: 6px; }
+  .briefing-section ul { list-style: none; padding: 0; }
+  .briefing-section li { font-size: 13px; line-height: 1.55; color: var(--text); padding: 2px 0; }
+  .briefing-section li::before { content: "· "; color: var(--dim); }
+  .pill.defensive { background: #1f3a2f; color: #56d364; }
 </style>
 </head>
 <body>
 <h1>TradeSense <span class="blue">v2</span></h1>
-<div class="sub">buy low, sell high — momentum rotation · dip buy · crypto trend <span id="mode"></span></div>
+<div class="sub" id="subtitle">buy low, sell high — momentum · dip · macro trend <span id="mode"></span></div>
 <div class="err" id="err"></div>
+
+<div class="briefing" id="briefing">
+  <h2>오늘의 액티비티</h2>
+  <div class="headline" id="brief-headline">불러오는 중…</div>
+  <div id="brief-sections"></div>
+</div>
 
 <div class="grid">
   <div class="card"><div class="label">Equity</div><div class="value" id="equity">—</div></div>
@@ -91,13 +106,26 @@ function drawChart(curve) {
   ctx.fillText(usd(max), 10, 12); ctx.fillText(usd(min), 10, h - 6);
 }
 
+function renderBriefing(b) {
+  if (!b) return;
+  $('brief-headline').textContent = b.headline || '';
+  const html = (b.sections || []).map(s =>
+    `<div class="briefing-section"><h3>${s.title}</h3><ul>` +
+    s.lines.map(l => `<li>${l}</li>`).join('') + '</ul></div>'
+  ).join('');
+  $('brief-sections').innerHTML = html;
+}
+
 async function refresh() {
   try {
     const r = await fetch('/api/snapshot');
     const d = await r.json();
     if (d.error) { $('err').style.display = 'block'; $('err').textContent = d.error; return; }
     $('err').style.display = 'none';
+    const sleeves = (d.sleeves || []).join(' · ');
+    $('subtitle').innerHTML = sleeves + ' <span id="mode"></span>';
     $('mode').textContent = '· ' + (d.mode || '').toUpperCase();
+    renderBriefing(d.briefing);
     $('equity').textContent = usd(d.equity);
     $('cash').textContent = usd(d.cash);
     const reg = d.regime?.regime || '—';

@@ -28,8 +28,12 @@ EQUITY_UNIVERSE: list[str] = [
     "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "AVGO",
 ]
 
-# Alpaca crypto symbols (24/7, no PDT, no settlement wait).
+# Alpaca crypto — NOT available in NJ and many US states. See:
+# https://alpaca.markets/support/alpaca-cryptocurrency
 CRYPTO_UNIVERSE: list[str] = ["BTC/USD", "ETH/USD"]
+
+# Third sleeve when crypto is disabled: macro/defensive trend (GLD/TLT/IEF).
+DEFENSIVE_UNIVERSE: list[str] = ["GLD", "TLT", "IEF"]
 
 # Symbols used only for regime detection.
 REGIME_SYMBOL = "SPY"
@@ -53,6 +57,7 @@ DIP_MAX_POSITIONS = 2
 CRYPTO_FAST_EMA = 20
 CRYPTO_SLOW_EMA = 50
 CRYPTO_MAX_WEIGHT = 0.25        # crypto sleeve cap as fraction of equity
+DEFENSIVE_MAX_WEIGHT = 0.25     # defensive sleeve cap (replaces crypto when disabled)
 
 # ---------------------------------------------------------------------------
 # Regime -> gross exposure
@@ -92,6 +97,8 @@ class Settings(BaseSettings):
     trading_mode: str = "paper"          # paper | live
     initial_capital: float = 3000.0
     timezone: str = "America/New_York"
+    # NJ and many US states cannot trade crypto on Alpaca — default off.
+    crypto_enabled: bool = False
 
     # Optional LLM news overlay
     openai_api_key: str = ""

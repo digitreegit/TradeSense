@@ -15,6 +15,7 @@ from . import config, regime, strategy
 MOMENTUM = "momentum"
 DIP = "dip"
 CRYPTO = "crypto"
+DEFENSIVE = "defensive"
 
 
 @dataclass
@@ -43,6 +44,7 @@ def decide(
     crypto_syms: list[str],
     reg: str,
     week_rollover: bool,
+    defensive_syms: list[str] | None = None,
 ) -> list[PendingOrder]:
     pending: list[PendingOrder] = []
     expo = regime.exposure(reg)
@@ -94,19 +96,27 @@ def decide(
                     slot_weight=0.25 * expo, stop_mult=config.DIP_STOP_ATR,
                 ))
 
-    # 4) crypto trend sleeve (own filter, not gated by the equity regime)
-    slot = config.CRYPTO_MAX_WEIGHT / max(len(crypto_syms), 1)
-    for sym in crypto_syms:
-        row = rows.get(sym)
-        if row is None:
-            continue
-        long_ok = strategy.crypto_long(row)
-        if long_ok and sym not in positions and sym not in pending_sells:
-            pending.append(PendingOrder(
-                sym, CRYPTO, "buy",
-                slot_weight=slot, stop_mult=config.MOMENTUM_STOP_ATR,
-            ))
-        elif not long_ok and sym in positions and sym not in pending_sells:
-            pending.append(PendingOrder(sym, CRYPTO, "sell", reason="trend-off"))
+    # 4) third sleeve: crypto (licensed regions) or defensive macro ETFs (NJ-safe)
+    if crypto_syms:
+        trend_syms, sleeve, max_w = crypto_syms, CRYPTO, config.CRYPTO_MAX_WEIGHT
+    elif defensive_syms:
+        trend_syms, sleeve, max_w = defensive_syms, DEFENSIVE, config.DEFENSIVE_MAX_WEIGHT
+    else:
+        trend_syms, sleeve, max_w = [], "", 0.0
+
+    if trend_syms:
+        slot = max_w / max(len(trend_syms), 1)
+        for sym in trend_syms:
+            row = rows.get(sym)
+            if row is None:
+                continue
+            long_ok = strategy.trend_long(row)
+            if long_ok and sym not in positions and sym not in pending_sells:
+                pending.append(PendingOrder(
+                    sym, sleeve, "buy",
+                    slot_weight=slot, stop_mult=config.MOMENTUM_STOP_ATR,
+                ))
+            elif not long_ok and sym in positions and sym not in pending_sells:
+                pending.append(PendingOrder(sym, sleeve, "sell", reason="trend-off"))
 
     return pending

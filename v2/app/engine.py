@@ -5,7 +5,8 @@ Daily rhythm (America/New_York):
   09:31  execute pending orders queued after yesterday's close
   every 30 min in RTH: intraday stop check (wide ATR stops, rarely fires)
   16:35  compute signals on today's closed bars -> queue orders for tomorrow
-  hourly: crypto sleeve (24/7 market, acts immediately)
+  hourly (crypto only): 24/7 crypto sleeve when CRYPTO_ENABLED=true
+  defensive macro sleeve queues with stocks when crypto disabled (NJ-safe)
 """
 from __future__ import annotations
 
@@ -17,7 +18,9 @@ import pandas as pd
 
 from . import config, news_overlay, regime, strategy
 from .broker import Broker
-from .decisions import CRYPTO, PendingOrder, PosMeta, decide
+from .briefing import build_briefing, log_activity
+from .config import settings
+from .decisions import CRYPTO, DEFENSIVE, PendingOrder, PosMeta, decide
 from .notify import send
 from .risk import DrawdownBrake, position_dollars
 from .state import store
@@ -54,6 +57,15 @@ class Engine:
 
     def _save_brake(self, brake: DrawdownBrake) -> None:
         store.set("brake", {"peak_equity": brake.peak_equity, "halted": brake.halted})
+
+    def _trend_universe(self) -> tuple[list[str], list[str]]:
+        """Return (crypto_syms, defensive_syms) based on account licensing."""
+        if settings.crypto_enabled:
+            return list(config.CRYPTO_UNIVERSE), []
+        return [], list(config.DEFENSIVE_UNIVERSE)
+
+    def _immediate_sleeves(self) -> set[str]:
+        return {CRYPTO} if settings.crypto_enabled else set()
 
     def _pos_metas(self, broker_positions: dict[str, dict]) -> dict[str, PosMeta]:
         """Merge broker positions with local stop/sleeve metadata.
@@ -131,7 +143,8 @@ class Engine:
     # ------------------------------------------------------------------
     def job_daily_decision(self) -> None:
         """16:35 ET — compute signals on closed daily bars, queue orders."""
-        symbols = config.EQUITY_UNIVERSE + config.CRYPTO_UNIVERSE
+        crypto_syms, defensive_syms = self._trend_universe()
+        symbols = config.EQUITY_UNIVERSE + crypto_syms + defensive_syms
         features = self._features(symbols)
         if config.REGIME_SYMBOL not in features:
             log.error("no SPY data; skipping decision")
@@ -182,22 +195,26 @@ class Engine:
         orders = decide(
             rows=rows, positions=metas,
             stock_syms=[s for s in config.EQUITY_UNIVERSE if s in rows],
-            crypto_syms=[s for s in config.CRYPTO_UNIVERSE if s in rows],
+            crypto_syms=[s for s in crypto_syms if s in rows],
+            defensive_syms=[s for s in defensive_syms if s in rows],
             reg=reg, week_rollover=week_rollover,
         )
-        # crypto acts immediately in its own hourly job; queue only stock orders
-        stock_orders = [o for o in orders if o.sleeve != CRYPTO]
+        immediate = self._immediate_sleeves()
+        stock_orders = [o for o in orders if o.sleeve not in immediate]
         store.pending_replace(stock_orders)
         store.log_equity(equity, cash, reg)
 
         summary = ", ".join(f"{o.side} {o.symbol}({o.reason or o.sleeve})" for o in stock_orders) or "none"
-        send(f"📊 close {datetime.now().date()} | equity ${equity:,.0f} | {reg} "
-             f"| dd {brake.drawdown(equity):.1%}\nqueued: {summary}")
+        msg = (f"📊 close {datetime.now().date()} | equity ${equity:,.0f} | {reg} "
+               f"| dd {brake.drawdown(equity):.1%}\nqueued: {summary}")
+        send(msg)
+        log_activity("decision", msg)
 
     def job_execute_open(self) -> None:
         """09:31 ET — execute orders queued after yesterday's close."""
         pending = store.pending_all()
         if not pending:
+            log_activity("open", "장 시작 — 예약 주문 없음")
             return
         if not self.broker.market_open_now():
             log.info("market closed; keeping pending orders")
@@ -217,10 +234,14 @@ class Engine:
             spent = self._execute_buy(o, features, equity, cash, brake)
             cash -= spent
         store.pending_clear()
+        log_activity("open", f"장 시작 — {len(pending)}건 예약 주문 처리 완료")
 
     def job_crypto(self) -> None:
-        """Hourly — crypto trend sleeve, executes immediately (24/7)."""
-        features = self._features(config.CRYPTO_UNIVERSE)
+        """Hourly — crypto trend sleeve (only when CRYPTO_ENABLED=true)."""
+        if not settings.crypto_enabled:
+            return
+        crypto_syms, _ = self._trend_universe()
+        features = self._features(crypto_syms)
         if not features:
             return
         equity = self.broker.equity()
@@ -230,16 +251,16 @@ class Engine:
         self._save_brake(brake)
         broker_positions = self.broker.positions()
         metas = {s: m for s, m in self._pos_metas(broker_positions).items()
-                 if s in config.CRYPTO_UNIVERSE}
+                 if s in crypto_syms}
 
-        slot = config.CRYPTO_MAX_WEIGHT / max(len(config.CRYPTO_UNIVERSE), 1)
-        for sym in config.CRYPTO_UNIVERSE:
+        slot = config.CRYPTO_MAX_WEIGHT / max(len(crypto_syms), 1)
+        for sym in crypto_syms:
             feats = features.get(sym)
             if feats is None or feats.empty:
                 continue
             row = feats.iloc[-1]
             held = sym in metas
-            long_ok = strategy.crypto_long(row)
+            long_ok = strategy.trend_long(row)
             price = self.broker.latest_price(sym) or float(row["close"])
             if held:
                 meta = metas[sym]
@@ -252,25 +273,35 @@ class Engine:
                          "stop_mult": config.MOMENTUM_STOP_ATR, "reason": "trend-on"}
                 spent = self._execute_buy(order, features, equity, cash, brake)
                 cash -= spent
+        log_activity("crypto", "크립토 슬리브 점검 완료")
 
     def job_intraday_stops(self) -> None:
         """Every 30 min in RTH — sell stock positions that breached their stop."""
         if not self.broker.market_open_now():
             return
+        crypto_syms, _ = self._trend_universe()
         broker_positions = self.broker.positions()
         metas = self._pos_metas(broker_positions)
+        sold = []
         for sym, meta in metas.items():
-            if sym in config.CRYPTO_UNIVERSE or meta.stop_level is None:
+            if sym in crypto_syms or meta.stop_level is None:
                 continue
             price = broker_positions[sym]["current_price"]
             if price <= meta.stop_level:
                 self._execute_sell(sym, meta.sleeve, "intraday-stop", broker_positions)
+                sold.append(sym)
+        if sold:
+            log_activity("stops", f"장중 손절: {', '.join(sold)}")
 
     def job_news_overlay(self) -> None:
         """08:45 ET — optional LLM tilt from headlines."""
         result = news_overlay.run_overlay(self.broker)
         if result.get("summary"):
-            send(f"📰 {result['summary']} (tilt {result['tilt']:.2f})")
+            msg = f"📰 {result['summary']} (tilt {result['tilt']:.2f})"
+            send(msg)
+            log_activity("news", msg)
+        else:
+            log_activity("news", "뉴스 오버레이 — 특이 헤드라인 없음")
 
     def snapshot(self) -> dict:
         """Current state for the dashboard."""
@@ -292,7 +323,7 @@ class Engine:
                 "stop_level": m.get("stop_level"),
             })
         brake = self._brake()
-        return {
+        snap = {
             "mode": settings_mode(),
             "equity": equity, "cash": cash,
             "drawdown": brake.drawdown(equity), "halted": brake.halted,
@@ -302,7 +333,14 @@ class Engine:
             "pending": store.pending_all(),
             "trades": store.recent_trades(50),
             "equity_curve": store.equity_curve(),
+            "crypto_enabled": settings.crypto_enabled,
+            "sleeves": (
+                ["momentum", "dip", "crypto"] if settings.crypto_enabled
+                else ["momentum", "dip", "defensive (GLD/TLT/IEF)"]
+            ),
         }
+        snap["briefing"] = build_briefing(snap)
+        return snap
 
 
 def settings_mode() -> str:
