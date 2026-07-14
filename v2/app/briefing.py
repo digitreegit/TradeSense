@@ -85,14 +85,14 @@ def build_briefing(snapshot: dict) -> dict:
     crypto_on = snapshot.get("crypto_enabled", False)
 
     today_trades = _today_trades(snapshot.get("trades", []), now)
-    activities = _today_activities(now)
+    activities = [a for a in _today_activities(now) if a.get("job") != "cron"]
     pending = snapshot.get("pending", [])
     positions = snapshot.get("positions", [])
 
     # --- 오늘 한 일 ---
     today_lines: list[str] = []
     if not activities and not today_trades:
-        today_lines.append("오늘 아직 자동 실행 기록이 없습니다. cron-job이 15분마다 호출 중이면 곧 표시됩니다.")
+        today_lines.append("오늘 아직 기록된 활동이 없습니다.")
     for a in activities[-8:]:
         t = datetime.fromisoformat(a["ts"]).strftime("%H:%M")
         today_lines.append(f"{t} [{a['job']}] {a['message']}")

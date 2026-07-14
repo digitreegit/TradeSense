@@ -14,6 +14,9 @@ from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel
+
+from .alpaca_config import clear_keys, save_keys, set_trading_mode, status_dict
 
 from .config import settings
 from .engine import Engine
@@ -154,7 +157,50 @@ def dashboard():
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "mode": settings.trading_mode, "vercel": settings.on_vercel}
+    from .alpaca_config import get_trading_mode
+    return {"ok": True, "mode": get_trading_mode(), "vercel": settings.on_vercel}
+
+
+class AlpacaKeysBody(BaseModel):
+    api_key: str
+    secret_key: str
+
+
+class TradingModeBody(BaseModel):
+    trading_mode: str  # paper | live
+
+
+@app.get("/api/settings")
+def get_settings():
+    return JSONResponse(status_dict())
+
+
+@app.post("/api/settings/keys")
+def post_settings_keys(body: AlpacaKeysBody):
+    if not body.api_key.strip() or not body.secret_key.strip():
+        return JSONResponse({"ok": False, "error": "api_key and secret_key required"}, status_code=400)
+    save_keys(body.api_key, body.secret_key)
+    engine.reset_broker()
+    return JSONResponse({"ok": True, **status_dict()})
+
+
+@app.delete("/api/settings/keys")
+def delete_settings_keys():
+    clear_keys()
+    engine.reset_broker()
+    return JSONResponse({"ok": True, **status_dict()})
+
+
+@app.post("/api/settings/mode")
+def post_settings_mode(body: TradingModeBody):
+    mode = body.trading_mode.lower()
+    if mode not in ("paper", "live"):
+        return JSONResponse({"ok": False, "error": "trading_mode must be paper or live"}, status_code=400)
+    if not status_dict()["configured"]:
+        return JSONResponse({"ok": False, "error": "save Alpaca keys first"}, status_code=400)
+    set_trading_mode(mode)
+    engine.reset_broker()
+    return JSONResponse({"ok": True, **status_dict()})
 
 
 @app.get("/api/snapshot")

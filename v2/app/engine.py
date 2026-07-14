@@ -41,6 +41,9 @@ class Engine:
             self._broker = Broker()
         return self._broker
 
+    def reset_broker(self) -> None:
+        self._broker = None
+
     # ------------------------------------------------------------------
     # shared helpers
     # ------------------------------------------------------------------
@@ -369,5 +372,5 @@ class Engine:
 
 
 def settings_mode() -> str:
-    from .config import settings
-    return settings.trading_mode
+    from .alpaca_config import get_trading_mode
+    return get_trading_mode()

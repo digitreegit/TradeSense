@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
-from .config import settings
+from .alpaca_config import get_credentials
 
 log = logging.getLogger(__name__)
 
@@ -37,18 +37,14 @@ class Broker:
         from alpaca.data.historical import CryptoHistoricalDataClient, StockHistoricalDataClient
         from alpaca.trading.client import TradingClient
 
-        if not settings.alpaca_api_key or not settings.alpaca_secret_key:
+        api_key, secret_key, paper = get_credentials()
+        if not api_key or not secret_key:
             raise RuntimeError(
-                "Alpaca API keys not configured (set ALPACA_API_KEY / ALPACA_SECRET_KEY)"
+                "Alpaca API keys not configured (set ALPACA_API_KEY / ALPACA_SECRET_KEY "
+                "or save keys in Settings)"
             )
-        self.trading = TradingClient(
-            settings.alpaca_api_key,
-            settings.alpaca_secret_key,
-            paper=not settings.is_live,
-        )
-        self.stock_data = StockHistoricalDataClient(
-            settings.alpaca_api_key, settings.alpaca_secret_key
-        )
+        self.trading = TradingClient(api_key, secret_key, paper=paper)
+        self.stock_data = StockHistoricalDataClient(api_key, secret_key)
         self.crypto_data = CryptoHistoricalDataClient()
 
     # -- account ------------------------------------------------------------
