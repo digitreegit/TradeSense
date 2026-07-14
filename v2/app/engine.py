@@ -67,6 +67,24 @@ class Engine:
     def _immediate_sleeves(self) -> set[str]:
         return {CRYPTO} if settings.crypto_enabled else set()
 
+    def _is_crypto_symbol(self, sym: str) -> bool:
+        return "/" in sym
+
+    def _liquidate_crypto_positions(self) -> int:
+        """Sell crypto holdings when CRYPTO_ENABLED=false (e.g. NJ)."""
+        if settings.crypto_enabled:
+            return 0
+        broker_positions = self.broker.positions()
+        crypto_syms = [s for s in broker_positions if self._is_crypto_symbol(s)]
+        if not crypto_syms:
+            return 0
+        sold = []
+        for sym in crypto_syms:
+            self._execute_sell(sym, "crypto", "crypto-disabled", broker_positions)
+            sold.append(sym)
+        log_activity("crypto", f"크립토 미지원 지역 — 청산 시도: {', '.join(sold)}")
+        return len(sold)
+
     def _pos_metas(self, broker_positions: dict[str, dict]) -> dict[str, PosMeta]:
         """Merge broker positions with local stop/sleeve metadata.
 
@@ -76,6 +94,8 @@ class Engine:
         metas = store.pos_meta_all()
         out: dict[str, PosMeta] = {}
         for sym in broker_positions:
+            if not settings.crypto_enabled and self._is_crypto_symbol(sym):
+                continue  # legacy crypto — do not adopt; liquidate instead
             m = metas.get(sym)
             if m is None:
                 store.pos_meta_upsert(sym, "momentum", None, config.MOMENTUM_STOP_ATR,
@@ -237,8 +257,11 @@ class Engine:
         log_activity("open", f"장 시작 — {len(pending)}건 예약 주문 처리 완료")
 
     def job_crypto(self) -> None:
-        """Hourly — crypto trend sleeve (only when CRYPTO_ENABLED=true)."""
+        """Hourly — crypto trend, or liquidate when disabled (NJ)."""
         if not settings.crypto_enabled:
+            n = self._liquidate_crypto_positions()
+            if n:
+                log.info("liquidated %d crypto position(s)", n)
             return
         crypto_syms, _ = self._trend_universe()
         features = self._features(crypto_syms)
@@ -315,8 +338,10 @@ class Engine:
         positions = []
         for sym, p in broker_positions.items():
             m = metas.get(sym, {})
+            is_legacy_crypto = not settings.crypto_enabled and "/" in sym
             positions.append({
-                "symbol": sym, "sleeve": m.get("sleeve", "?"),
+                "symbol": sym,
+                "sleeve": "crypto (청산 대기)" if is_legacy_crypto else m.get("sleeve", "?"),
                 "qty": p["qty"], "market_value": p["market_value"],
                 "avg_entry": p["avg_entry"], "current_price": p["current_price"],
                 "unrealized_pl": p["unrealized_pl"],

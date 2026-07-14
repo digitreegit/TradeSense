@@ -29,6 +29,7 @@
   .pill.momentum { background: #1f3a5f; color: var(--blue); }
   .pill.dip { background: #3b2e1a; color: var(--amber); }
   .pill.crypto { background: #2a1f3f; color: #bc8cff; }
+  .pill.legacy { background: #3d1d1d; color: var(--amber); }
   .pill.BULL { background: #12351f; color: var(--green); }
   .pill.CHOP { background: #3b2e1a; color: var(--amber); }
   .pill.BEAR { background: #3d1d1d; color: var(--red); }
@@ -82,7 +83,10 @@ function table(rows, cols) {
   const body = rows.map(r => '<tr>' + cols.map(c => `<td>${c.f(r)}</td>`).join('') + '</tr>').join('');
   return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
-const sleevePill = s => `<span class="pill ${s}">${s}</span>`;
+const sleevePill = s => {
+  const cls = s.includes('청산') ? 'legacy' : s.replace(/[^a-z]/gi, '').toLowerCase() || s;
+  return `<span class="pill ${cls}">${s}</span>`;
+};
 const plClass = v => v >= 0 ? 'green' : 'red';
 
 function drawChart(curve) {
