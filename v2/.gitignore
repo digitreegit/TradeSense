@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.local
+.env.vercel
+.vercel/
+data/cache/
+data/*.db
+data/backtest_equity.csv
+.pytest_cache/
+.vercel
+.env*
