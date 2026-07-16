@@ -155,6 +155,11 @@ def dashboard():
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/favicon.svg", include_in_schema=False)
+def favicon():
+    return FileResponse(STATIC_DIR / "favicon.svg", media_type="image/svg+xml")
+
+
 @app.get("/api/health")
 def health():
     from .alpaca_config import get_trading_mode
