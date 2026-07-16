@@ -231,6 +231,12 @@
 
     <ul class="acct-list" id="acct-summary" style="display:none"></ul>
     <p class="msg" id="settings-msg"></p>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:18px 0 14px">
+    <span class="field-label">상태 리셋</span>
+    <p class="field-hint">계좌를 바꾼 뒤 이전 드로다운 기준점 때문에 거래가 중단되면 여기서 초기화하세요.
+      드로다운·레짐·포지션 메타·예약 주문·에쿼티 곡선·거래 기록이 지워지고, Alpaca 키는 유지됩니다.</p>
+    <button type="button" class="btn btn-ghost" id="btn-reset-state">드로다운·상태 리셋</button>
   </div>
 </div>
 
@@ -393,6 +399,21 @@ async function deleteKeys() {
   }
 }
 
+async function resetState() {
+  if (!confirm('드로다운 기준점과 포지션·주문·거래 기록을 초기화할까요? Alpaca 키는 유지됩니다.')) return;
+  setSettingsMsg('초기화 중…', true);
+  try {
+    const r = await fetch('/api/settings/reset', {method: 'POST'});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || '초기화 실패');
+    renderConnection(d);
+    setSettingsMsg('상태를 초기화했습니다. 드로다운이 0%로 리셋됩니다.', true);
+    refresh();
+  } catch (e) {
+    setSettingsMsg(String(e.message || e), false);
+  }
+}
+
 async function setMode(mode) {
   if (!settingsState?.configured) return;
   setSettingsMsg('모드 변경 중…', true);
@@ -500,6 +521,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAllOver
 
 $('btn-save-keys').addEventListener('click', saveKeys);
 $('btn-delete-keys').addEventListener('click', deleteKeys);
+$('btn-reset-state').addEventListener('click', resetState);
 $('mode-paper').addEventListener('click', () => setMode('paper'));
 $('mode-live').addEventListener('click', () => setMode('live'));
 

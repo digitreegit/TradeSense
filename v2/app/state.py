@@ -183,6 +183,16 @@ class Store:
     def recent_trades(self, limit: int = 200) -> list[dict]:
         return self._query("SELECT * FROM trades ORDER BY id DESC LIMIT ?", (limit,))
 
+    def reset_trading_state(self) -> None:
+        """Wipe account-specific state (drawdown peak, regime, positions,
+        pending orders, equity curve, trades). Keeps Alpaca keys + activity log."""
+        self._exec("DELETE FROM pos_meta")
+        self._exec("DELETE FROM pending_orders")
+        self._exec("DELETE FROM equity_curve")
+        self._exec("DELETE FROM trades")
+        self._exec("DELETE FROM kv WHERE key IN ('brake','regime') OR key LIKE 'job_ran:%'")
+
+
 class BlobStore:
     """Whole state as one JSON document in Vercel Blob.
 
@@ -348,6 +358,20 @@ class BlobStore:
 
     def recent_trades(self, limit: int = 200) -> list[dict]:
         return list(reversed(self._load().get("trades", [])[-limit:]))
+
+    def reset_trading_state(self) -> None:
+        """Wipe account-specific state (drawdown peak, regime, positions,
+        pending orders, equity curve, trades). Keeps Alpaca keys + activity log."""
+        st = self._load(force=True)
+        st["pos_meta"] = {}
+        st["pending"] = []
+        st["equity_curve"] = []
+        st["trades"] = []
+        kv = st.setdefault("kv", {})
+        for k in list(kv.keys()):
+            if k in ("brake", "regime") or k.startswith("job_ran:"):
+                kv.pop(k, None)
+        self._save()
 
 
 def _make_store():

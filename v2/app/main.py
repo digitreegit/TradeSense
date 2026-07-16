@@ -181,6 +181,9 @@ def post_settings_keys(body: AlpacaKeysBody):
         return JSONResponse({"ok": False, "error": "api_key and secret_key required"}, status_code=400)
     save_keys(body.api_key, body.secret_key)
     engine.reset_broker()
+    # New keys = potentially a different account: reset drawdown baseline,
+    # regime, positions and history so the new balance starts clean.
+    store.reset_trading_state()
     return JSONResponse({"ok": True, **status_dict()})
 
 
@@ -198,7 +201,21 @@ def post_settings_mode(body: TradingModeBody):
         return JSONResponse({"ok": False, "error": "trading_mode must be paper or live"}, status_code=400)
     if not status_dict()["configured"]:
         return JSONResponse({"ok": False, "error": "save Alpaca keys first"}, status_code=400)
+    prev_mode = status_dict()["trading_mode"]
     set_trading_mode(mode)
+    engine.reset_broker()
+    # Paper and live are separate accounts with different balances: switching
+    # must reset the drawdown baseline so the brake doesn't falsely trip.
+    if mode != prev_mode:
+        store.reset_trading_state()
+    return JSONResponse({"ok": True, **status_dict()})
+
+
+@app.post("/api/settings/reset")
+def post_settings_reset():
+    """Manually reset drawdown baseline / regime / positions / history.
+    Useful after switching accounts to clear a stale drawdown brake."""
+    store.reset_trading_state()
     engine.reset_broker()
     return JSONResponse({"ok": True, **status_dict()})
 
