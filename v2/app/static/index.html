@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TradeSense v2</title>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml">
 <style>
   :root {
     --bg: #0d1117; --panel: #161b22; --border: #21262d;
@@ -26,6 +26,8 @@
   }
   .icon-btn:hover { background: #1c2128; border-color: #30363d; }
   .icon-btn svg { width: 20px; height: 20px; }
+  .hero-icon { width: 18px; height: 18px; flex: 0 0 auto; vertical-align: -3px; }
+  .inline-icon { display: inline-block; margin-left: 5px; }
   .badge {
     position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px;
     padding: 0 5px; border-radius: 999px; background: var(--blue); color: #fff;
@@ -74,8 +76,9 @@
   .modal-head h2 { font-size: 16px; font-weight: 700; }
   .modal-close {
     width: 32px; height: 32px; border: none; border-radius: 8px; background: transparent;
-    color: var(--dim); cursor: pointer; font-size: 20px; line-height: 1;
+    color: var(--dim); cursor: pointer; display: flex; align-items: center; justify-content: center;
   }
+  .modal-close svg { width: 20px; height: 20px; }
   .modal-close:hover { background: #21262d; color: var(--text); }
   .briefing .headline { font-size: 13px; color: var(--blue); margin-bottom: 14px; font-weight: 600; }
   .briefing-section { margin-bottom: 12px; }
@@ -83,6 +86,9 @@
   .briefing-section ul { list-style: none; padding: 0; }
   .briefing-section li { font-size: 13px; line-height: 1.55; color: var(--text); padding: 2px 0; }
   .briefing-section li::before { content: "· "; color: var(--dim); }
+  .briefing-section li.with-icon { display: flex; align-items: flex-start; gap: 6px; }
+  .briefing-section li.with-icon::before { content: none; }
+  .briefing-section li.with-icon .hero-icon { margin-top: 2px; color: var(--blue); }
 
   /* settings */
   .status-row {
@@ -146,14 +152,15 @@
   </div>
   <div class="icon-bar">
     <button type="button" class="icon-btn" id="btn-activity" title="오늘의 액티비티" aria-label="오늘의 액티비티">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022 23.848 23.848 0 0 0 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"/>
       </svg>
       <span class="badge" id="activity-badge">0</span>
     </button>
     <button type="button" class="icon-btn" id="btn-settings" title="설정" aria-label="설정">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247c.275.476.183 1.079-.23 1.442l-.977.86c-.284.25-.415.624-.408 1.002a6.759 6.759 0 0 1 0 .255c-.007.378.124.753.408 1.003l.977.86c.413.363.505.966.23 1.442l-1.296 2.247a1.125 1.125 0 0 1-1.37.49l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.542-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.37-.49l-1.296-2.247a1.125 1.125 0 0 1 .23-1.442l.977-.86c.284-.25.415-.624.408-1.002a6.932 6.932 0 0 1 0-.255c.007-.378-.124-.753-.408-1.003l-.977-.86a1.125 1.125 0 0 1-.23-1.442L5.34 6.252a1.125 1.125 0 0 1 1.37-.49l1.217.456c.355.133.75.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.213-1.281Z"/>
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>
       </svg>
     </button>
   </div>
@@ -179,7 +186,11 @@
   <div class="modal wide">
     <div class="modal-head">
       <h2 id="activity-title">오늘의 액티비티</h2>
-      <button type="button" class="modal-close" data-close="overlay-activity" aria-label="닫기">×</button>
+      <button type="button" class="modal-close" data-close="overlay-activity" aria-label="닫기">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/>
+        </svg>
+      </button>
     </div>
     <div class="briefing">
       <div class="headline" id="brief-headline">불러오는 중…</div>
@@ -193,7 +204,11 @@
   <div class="modal wide">
     <div class="modal-head">
       <h2 id="settings-title">설정</h2>
-      <button type="button" class="modal-close" data-close="overlay-settings" aria-label="닫기">×</button>
+      <button type="button" class="modal-close" data-close="overlay-settings" aria-label="닫기">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/>
+        </svg>
+      </button>
     </div>
     <p class="field-hint" style="margin-bottom:14px">
       Alpaca API 키를 연결하세요.
@@ -252,7 +267,11 @@
   <div class="modal">
     <div class="modal-head">
       <h2 id="confirm-title"></h2>
-      <button type="button" class="modal-close" id="btn-confirm-close" aria-label="닫기">×</button>
+      <button type="button" class="modal-close" id="btn-confirm-close" aria-label="닫기">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/>
+        </svg>
+      </button>
     </div>
     <p class="confirm-copy" id="confirm-copy"></p>
     <div class="confirm-actions">
@@ -282,6 +301,30 @@ const sleevePill = s => {
   return `<span class="pill ${cls}">${s}</span>`;
 };
 const plClass = v => v >= 0 ? 'green' : 'red';
+const heroChartBar = `
+  <svg class="hero-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"/>
+  </svg>`;
+const heroExclamationTriangle = `
+  <svg class="hero-icon inline-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9.303 3.376c.866 1.5-.217 3.374-1.948 3.374H4.645c-1.73 0-2.813-1.874-1.948-3.374L10.052 3.38c.865-1.5 3.03-1.5 3.896 0l7.355 12.746ZM12 15.75h.008v.008H12v-.008Z"/>
+  </svg>`;
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function briefingLine(line) {
+  const raw = String(line);
+  const icon = raw.includes('📊') || raw.includes('[decision]') ? heroChartBar : '';
+  const clean = raw.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]\uFE0F?/gu, '').trim();
+  return `<li${icon ? ' class="with-icon"' : ''}>${icon}<span>${escapeHtml(clean)}</span></li>`;
+}
 
 function openOverlay(id) {
   $(id).classList.add('open');
@@ -345,7 +388,7 @@ function renderBriefing(b) {
   $('brief-headline').textContent = b.headline || '';
   const html = (b.sections || []).map(s =>
     `<div class="briefing-section"><h3>${s.title}</h3><ul>` +
-    s.lines.map(l => `<li>${l}</li>`).join('') + '</ul></div>'
+    s.lines.map(briefingLine).join('') + '</ul></div>'
   ).join('');
   $('brief-sections').innerHTML = html;
   updateBadge();
@@ -528,7 +571,7 @@ async function refresh() {
     $('regime').innerHTML = `<span class="pill ${reg}">${reg}</span> <span style="font-size:13px;color:var(--dim)">${pct(d.regime?.exposure ?? 0)} 노출</span>`;
     $('dd').textContent = pct(d.drawdown || 0);
     $('dd').className = 'value ' + (d.halted ? 'red' : (d.drawdown > 0.15 ? 'amber' : ''));
-    if (d.halted) $('dd').textContent += ' ⛔';
+    if (d.halted) $('dd').innerHTML = `${pct(d.drawdown || 0)}${heroExclamationTriangle}`;
     $('tilt').textContent = (d.news_overlay?.tilt ?? 1).toFixed(2);
     drawChart(d.equity_curve);
     $('positions').innerHTML = table(d.positions, [

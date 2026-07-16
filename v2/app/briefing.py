@@ -110,7 +110,7 @@ def build_briefing(snapshot: dict) -> dict:
     market_lines = [
         f"SPY 레짐: {regime_name} — {REGIME_KO.get(regime_name, '')}",
         f"목표 노출 비중: {exposure:.0%}",
-        f"현재 드로다운: {dd:.1%}" + (" ⛔ 거래 중단" if halted else ""),
+        f"현재 드로다운: {dd:.1%}" + (" — 거래 중단" if halted else ""),
     ]
     tilt = snapshot.get("news_overlay", {}).get("tilt", 1.0)
     news = snapshot.get("news_overlay", {}).get("summary", "")

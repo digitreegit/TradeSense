@@ -125,7 +125,7 @@ class Engine:
             store.pos_meta_delete(sym)
             store.log_trade(sym, meta_sleeve, "sell", pos["market_value"], reason,
                             detail=f"pnl={pos['unrealized_pl']:+.2f}")
-            send(f"🔻 SELL {sym} ({meta_sleeve}, {reason}) "
+            send(f"SELL {sym} ({meta_sleeve}, {reason}) "
                  f"${pos['market_value']:,.0f} pnl {pos['unrealized_pl']:+.2f}")
 
     def _execute_buy(self, order: dict, features: dict[str, pd.DataFrame],
@@ -158,7 +158,7 @@ class Engine:
         store.pos_meta_upsert(sym, order["sleeve"], stop, order["stop_mult"],
                               datetime.now(timezone.utc).isoformat())
         store.log_trade(sym, order["sleeve"], "buy", dollars, order.get("reason", "signal"))
-        send(f"🟢 BUY {sym} ({order['sleeve']}) ${dollars:,.0f} stop≈{stop:,.2f}")
+        send(f"BUY {sym} ({order['sleeve']}) ${dollars:,.0f} stop≈{stop:,.2f}")
         return dollars
 
     # ------------------------------------------------------------------
@@ -204,7 +204,7 @@ class Engine:
                              "ts": datetime.now(timezone.utc).isoformat()})
 
         if brake.halted:
-            send(f"⛔ drawdown hard brake active (dd {brake.drawdown(equity):.1%}) — liquidating")
+            send(f"Drawdown hard brake active (dd {brake.drawdown(equity):.1%}) — liquidating")
             for sym, meta in metas.items():
                 self._execute_sell(sym, meta.sleeve, "dd-halt", broker_positions)
             store.pending_clear()
@@ -228,7 +228,7 @@ class Engine:
         store.log_equity(equity, cash, reg)
 
         summary = ", ".join(f"{o.side} {o.symbol}({o.reason or o.sleeve})" for o in stock_orders) or "none"
-        msg = (f"📊 close {datetime.now().date()} | equity ${equity:,.0f} | {reg} "
+        msg = (f"close {datetime.now().date()} | equity ${equity:,.0f} | {reg} "
                f"| dd {brake.drawdown(equity):.1%}\nqueued: {summary}")
         send(msg)
         log_activity("decision", msg)
@@ -323,7 +323,7 @@ class Engine:
         """08:45 ET — optional LLM tilt from headlines."""
         result = news_overlay.run_overlay(self.broker)
         if result.get("summary"):
-            msg = f"📰 {result['summary']} (tilt {result['tilt']:.2f})"
+            msg = f"{result['summary']} (tilt {result['tilt']:.2f})"
             send(msg)
             log_activity("news", msg)
         else:
