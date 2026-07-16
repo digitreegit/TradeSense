@@ -219,7 +219,7 @@
 
     <div id="keys-form-wrap">
       <span class="field-label">API Key ID</span>
-      <input type="password" class="input" id="api-key" autocomplete="off" placeholder="PK…">
+      <input type="password" class="input" id="api-key" autocomplete="off" placeholder="PK… (페이퍼) / AK… (라이브)">
       <span class="field-label">Secret Key</span>
       <input type="password" class="input" id="api-secret" autocomplete="off" placeholder="Secret">
       <div class="btn-row">
@@ -314,15 +314,14 @@ function renderConnection(st) {
   $('mode-paper').disabled = modeDisabled;
   $('mode-live').disabled = modeDisabled;
 
-  const locked = st?.configured;
-  $('api-key').disabled = locked;
-  $('api-secret').disabled = locked;
-  $('btn-save-keys').style.display = locked ? 'none' : 'inline-block';
-  $('btn-delete-keys').style.display = locked && st.keys_source === 'dashboard' ? 'inline-block' : 'none';
-  $('keys-locked').style.display = locked ? 'block' : 'none';
-  if (locked) {
+  // Key inputs stay editable: saving new keys overrides whatever is active
+  // (needed when switching paper <-> live, which use different key pairs).
+  $('btn-delete-keys').style.display = st?.keys_source === 'dashboard' ? 'inline-block' : 'none';
+  $('keys-locked').style.display = st?.configured ? 'block' : 'none';
+  if (st?.configured) {
     const src = st.keys_source === 'env' ? 'Vercel 환경변수' : '대시보드에 저장됨';
-    $('keys-locked').textContent = `키가 설정되어 있습니다 (${src}, ${st.key_hint}). 새 키를 입력하려면 먼저 삭제하세요.`;
+    $('keys-locked').textContent = `현재 키: ${st.key_hint} (${src}). 새 키를 저장하면 이 키를 덮어씁니다. `
+      + `페이퍼 키는 PK…, 라이브 키는 AK…로 시작합니다.`;
   }
 
   const acct = $('acct-summary');
