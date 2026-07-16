@@ -120,7 +120,15 @@
   .btn-primary { background: var(--green); color: #0d1117; }
   .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
   .btn-danger { background: transparent; border: 1px solid var(--red); color: var(--red); }
+  .btn-danger-fill { background: var(--red); color: #fff; }
   .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .confirm-panel {
+    display: none; margin-top: 12px; padding: 14px; border-radius: 10px;
+    border: 1px solid #6e3632; background: #281716;
+  }
+  .confirm-panel.open { display: block; }
+  .confirm-panel strong { display: block; font-size: 13px; color: var(--text); margin-bottom: 4px; }
+  .confirm-panel p { color: var(--dim); font-size: 12px; line-height: 1.5; margin-bottom: 12px; }
   .msg { font-size: 13px; margin: 8px 0; }
   .msg.ok { color: var(--green); }
   .msg.err { color: var(--red); }
@@ -226,6 +234,14 @@
         <button type="button" class="btn btn-primary" id="btn-save-keys">키 저장</button>
         <button type="button" class="btn btn-danger" id="btn-delete-keys" style="display:none">키 삭제</button>
       </div>
+      <div class="confirm-panel" id="confirm-delete-keys">
+        <strong>저장된 API 키를 삭제할까요?</strong>
+        <p>대시보드에 저장된 키만 삭제됩니다. Vercel 환경변수의 키가 있으면 해당 키로 다시 연결됩니다.</p>
+        <div class="btn-row">
+          <button type="button" class="btn btn-danger-fill" id="btn-confirm-delete">삭제</button>
+          <button type="button" class="btn btn-ghost" id="btn-cancel-delete">취소</button>
+        </div>
+      </div>
       <p class="keys-locked" id="keys-locked" style="display:none"></p>
     </div>
 
@@ -237,6 +253,14 @@
     <p class="field-hint">계좌를 바꾼 뒤 이전 드로다운 기준점 때문에 거래가 중단되면 여기서 초기화하세요.
       드로다운·레짐·포지션 메타·예약 주문·에쿼티 곡선·거래 기록이 지워지고, Alpaca 키는 유지됩니다.</p>
     <button type="button" class="btn btn-ghost" id="btn-reset-state">드로다운·상태 리셋</button>
+    <div class="confirm-panel" id="confirm-reset-state">
+      <strong>트레이딩 상태를 초기화할까요?</strong>
+      <p>드로다운 기준점, 레짐, 포지션 메타, 예약 주문, 에쿼티 곡선과 거래 기록이 삭제됩니다. Alpaca 키와 실제 계좌 자산은 변경되지 않습니다.</p>
+      <div class="btn-row">
+        <button type="button" class="btn btn-danger-fill" id="btn-confirm-reset">초기화</button>
+        <button type="button" class="btn btn-ghost" id="btn-cancel-reset">취소</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -273,6 +297,37 @@ function closeAllOverlays() {
   document.body.style.overflow = '';
 }
 
+// Unread badge: shows only items added since the bell was last opened.
+// Last-seen count is kept per-day in localStorage.
+const SEEN_KEY = 'activitySeen';
+
+function seenCount(date) {
+  try {
+    const s = JSON.parse(localStorage.getItem(SEEN_KEY) || '{}');
+    return s.date === date ? (s.count || 0) : 0;
+  } catch { return 0; }
+}
+
+function markSeen() {
+  if (!lastBriefing) return;
+  const total = (lastBriefing.activities_today || 0) + (lastBriefing.trades_today || 0);
+  localStorage.setItem(SEEN_KEY, JSON.stringify({date: lastBriefing.date, count: total}));
+  updateBadge();
+}
+
+function updateBadge() {
+  const badge = $('activity-badge');
+  if (!lastBriefing) { badge.classList.remove('show'); return; }
+  const total = (lastBriefing.activities_today || 0) + (lastBriefing.trades_today || 0);
+  const unread = total - seenCount(lastBriefing.date);
+  if (unread > 0) {
+    badge.textContent = unread > 99 ? '99+' : String(unread);
+    badge.classList.add('show');
+  } else {
+    badge.classList.remove('show');
+  }
+}
+
 function renderBriefing(b) {
   if (!b) return;
   $('brief-headline').textContent = b.headline || '';
@@ -281,14 +336,7 @@ function renderBriefing(b) {
     s.lines.map(l => `<li>${l}</li>`).join('') + '</ul></div>'
   ).join('');
   $('brief-sections').innerHTML = html;
-  const n = (b.activities_today || 0) + (b.trades_today || 0);
-  const badge = $('activity-badge');
-  if (n > 0) {
-    badge.textContent = n > 99 ? '99+' : String(n);
-    badge.classList.add('show');
-  } else {
-    badge.classList.remove('show');
-  }
+  updateBadge();
 }
 
 function renderConnection(st) {
@@ -385,12 +433,12 @@ async function saveKeys() {
 }
 
 async function deleteKeys() {
-  if (!confirm('저장된 Alpaca 키를 삭제할까요?')) return;
   setSettingsMsg('삭제 중…', true);
   try {
     const r = await fetch('/api/settings/keys', {method: 'DELETE'});
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || '삭제 실패');
+    $('confirm-delete-keys').classList.remove('open');
     renderConnection(d);
     setSettingsMsg('키가 삭제되었습니다.', true);
     refresh();
@@ -400,12 +448,12 @@ async function deleteKeys() {
 }
 
 async function resetState() {
-  if (!confirm('드로다운 기준점과 포지션·주문·거래 기록을 초기화할까요? Alpaca 키는 유지됩니다.')) return;
   setSettingsMsg('초기화 중…', true);
   try {
     const r = await fetch('/api/settings/reset', {method: 'POST'});
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || '초기화 실패');
+    $('confirm-reset-state').classList.remove('open');
     renderConnection(d);
     setSettingsMsg('상태를 초기화했습니다. 드로다운이 0%로 리셋됩니다.', true);
     refresh();
@@ -506,6 +554,7 @@ async function refresh() {
 $('btn-activity').addEventListener('click', () => {
   if (lastBriefing) renderBriefing(lastBriefing);
   openOverlay('overlay-activity');
+  markSeen();
 });
 $('btn-settings').addEventListener('click', () => {
   loadSettings();
@@ -520,8 +569,12 @@ document.querySelectorAll('.overlay').forEach(ov => {
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAllOverlays(); });
 
 $('btn-save-keys').addEventListener('click', saveKeys);
-$('btn-delete-keys').addEventListener('click', deleteKeys);
-$('btn-reset-state').addEventListener('click', resetState);
+$('btn-delete-keys').addEventListener('click', () => $('confirm-delete-keys').classList.add('open'));
+$('btn-confirm-delete').addEventListener('click', deleteKeys);
+$('btn-cancel-delete').addEventListener('click', () => $('confirm-delete-keys').classList.remove('open'));
+$('btn-reset-state').addEventListener('click', () => $('confirm-reset-state').classList.add('open'));
+$('btn-confirm-reset').addEventListener('click', resetState);
+$('btn-cancel-reset').addEventListener('click', () => $('confirm-reset-state').classList.remove('open'));
 $('mode-paper').addEventListener('click', () => setMode('paper'));
 $('mode-live').addEventListener('click', () => setMode('live'));
 
