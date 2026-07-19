@@ -1,12 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 5 5">
-  <rect width="5" height="5" fill="#000"/>
-  <g fill="#3498db">
-    <rect x="0" y="0" width="5" height="1"/>
-    <rect x="2" y="1" width="1" height="1"/>
-    <rect x="4" y="1" width="1" height="1"/>
-    <rect x="0" y="2" width="5" height="1"/>
-    <rect x="0" y="3" width="1" height="1"/>
-    <rect x="2" y="3" width="1" height="1"/>
-    <rect x="0" y="4" width="5" height="1"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 341 341" fill="none">
+  <!-- TradeSense mark: blue shape on transparent background (matches favicon.png) -->
+  <g fill="#339ae3">
+    <rect x="38" y="40" width="263" height="45"/>
+    <rect x="146" y="85" width="44" height="26"/>
+    <rect x="38" y="111" width="263" height="45"/>
+    <rect x="38" y="156" width="45" height="28"/>
+    <rect x="146" y="156" width="44" height="28"/>
+    <rect x="38" y="184" width="263" height="44"/>
+    <rect x="146" y="228" width="44" height="28"/>
+    <rect x="256" y="228" width="45" height="28"/>
+    <rect x="38" y="256" width="263" height="44"/>
   </g>
 </svg>

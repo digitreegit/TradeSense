@@ -156,8 +156,19 @@ def dashboard():
 
 
 @app.get("/favicon.svg", include_in_schema=False)
-def favicon():
+def favicon_svg():
     return FileResponse(STATIC_DIR / "favicon.svg", media_type="image/svg+xml")
+
+
+@app.get("/favicon.png", include_in_schema=False)
+def favicon_png():
+    return FileResponse(STATIC_DIR / "favicon.png", media_type="image/png")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon_ico():
+    # Browsers often request /favicon.ico by default; serve the PNG mark.
+    return FileResponse(STATIC_DIR / "favicon.png", media_type="image/png")
 
 
 @app.get("/api/health")
