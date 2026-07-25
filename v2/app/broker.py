@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
-from .alpaca_config import get_credentials
+from .alpaca_config import get_credentials, is_paper_key
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +43,12 @@ class Broker:
             raise RuntimeError(
                 "Alpaca API keys not configured (set ALPACA_API_KEY / ALPACA_SECRET_KEY "
                 "or save keys in Settings)"
+            )
+        if is_paper_key(api_key):
+            # A paper key against the live endpoint returns an opaque 401.
+            raise RuntimeError(
+                "페이퍼 키(PK…)가 설정되어 있습니다 — 실거래 전용입니다. "
+                "설정에서 라이브 키(AK…)를 저장하세요."
             )
         self.trading = TradingClient(api_key, secret_key, paper=paper)
         self.stock_data = StockHistoricalDataClient(api_key, secret_key)

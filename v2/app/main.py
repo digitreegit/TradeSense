@@ -198,6 +198,9 @@ def post_settings_keys(body: AlpacaKeysBody):
         save_keys(body.api_key, body.secret_key)
     except ValueError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    except Exception as exc:
+        log.exception("key save failed")
+        return JSONResponse({"ok": False, "error": f"키 저장 실패: {exc}"}, status_code=502)
     engine.reset_broker()
     # New keys = potentially a different account: reset drawdown baseline,
     # regime, positions and history so the new balance starts clean.

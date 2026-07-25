@@ -192,6 +192,13 @@ class Store:
         self._exec("DELETE FROM trades")
         self._exec("DELETE FROM kv WHERE key IN ('brake','regime') OR key LIKE 'job_ran:%'")
 
+    # -- Alpaca credentials (kept apart from trading state) -----------------
+    def config_get(self) -> dict:
+        return self.get("alpaca_config", {}) or {}
+
+    def config_set(self, cfg: dict) -> None:
+        self.set("alpaca_config", cfg)
+
 
 class BlobStore:
     """Whole state as one JSON document in Vercel Blob.
@@ -202,6 +209,11 @@ class BlobStore:
     """
 
     PATH = "state/tradesense.json"
+    # Credentials live in their OWN document. The main state doc is rewritten
+    # by every cron tick; if a download transiently returns empty, that
+    # rewrite used to wipe the saved live keys. A separate doc that only the
+    # settings endpoints write can never be clobbered by trading-state saves.
+    CONFIG_PATH = "state/alpaca_config.json"
     API = "https://blob.vercel-storage.com"
     API_VERSION = "12"
     TTL_SECONDS = 10
@@ -213,6 +225,9 @@ class BlobStore:
         self._url: str | None = None
         self._lock = threading.Lock()
         self._load_ok = False
+        self._config: dict | None = None
+        self._config_at = 0.0
+        self._config_url: str | None = None
 
     # -- transport (Blob REST API, mirrors @vercel/blob headers) -----------
     def _headers(self, **extra: str) -> dict:
@@ -223,25 +238,40 @@ class BlobStore:
             **extra,
         }
 
-    def _download(self) -> bytes | None:
+    def _download_doc(self, path: str, url: str | None) -> tuple[bytes | None, str | None]:
+        """Fetch one JSON document. Retries once when the listing comes back
+        empty or the cached URL 404s — transient blips here must not be
+        mistaken for 'document does not exist'."""
         import httpx
 
-        if self._url is None:
-            resp = httpx.get(
-                f"{self.API}/?prefix={self.PATH}&limit=1",
-                headers=self._headers(), timeout=15,
-            )
+        for attempt in (0, 1):
+            if url is None:
+                resp = httpx.get(
+                    f"{self.API}/?prefix={path}&limit=1",
+                    headers=self._headers(), timeout=15,
+                )
+                resp.raise_for_status()
+                blobs = resp.json().get("blobs", [])
+                url = blobs[0]["url"] if blobs else None
+            if url is None:
+                if attempt == 0:
+                    time.sleep(1)
+                    continue
+                return None, None
+            resp = httpx.get(url, headers=self._headers(),
+                             timeout=15, follow_redirects=True)
+            if resp.status_code == 404:
+                url = None
+                if attempt == 0:
+                    continue
+                return None, None
             resp.raise_for_status()
-            blobs = resp.json().get("blobs", [])
-            if not blobs:
-                return None
-            self._url = blobs[0]["url"]
-        resp = httpx.get(self._url, headers=self._headers(),
-                         timeout=15, follow_redirects=True)
-        if resp.status_code == 404:
-            return None
-        resp.raise_for_status()
-        return resp.content
+            return resp.content, url
+        return None, None
+
+    def _download(self) -> bytes | None:
+        raw, self._url = self._download_doc(self.PATH, self._url)
+        return raw
 
     def _load(self, force: bool = False) -> dict:
         with self._lock:
@@ -381,6 +411,43 @@ class BlobStore:
             if k in ("brake", "regime") or k.startswith("job_ran:"):
                 kv.pop(k, None)
         self._save()
+
+    # -- Alpaca credentials (separate blob doc, never touched by _save) -----
+    def config_get(self) -> dict:
+        with self._lock:
+            fresh = self._config is not None and (time.time() - self._config_at) < self.TTL_SECONDS
+            if fresh:
+                return dict(self._config)
+            try:
+                raw, self._config_url = self._download_doc(self.CONFIG_PATH, self._config_url)
+                self._config = json.loads(raw) if raw else {}
+            except Exception as exc:
+                log.error("alpaca config load failed: %s", exc)
+                if self._config is None:
+                    self._config = {}
+            self._config_at = time.time()
+            return dict(self._config)
+
+    def config_set(self, cfg: dict) -> None:
+        import httpx
+
+        with self._lock:
+            resp = httpx.put(
+                f"{self.API}/?pathname={self.CONFIG_PATH}",
+                headers=self._headers(**{
+                    "x-vercel-blob-access": "private",
+                    "x-allow-overwrite": "1",
+                    "x-add-random-suffix": "0",
+                    "x-cache-control-max-age": "0",
+                    "x-content-type": "application/json",
+                }),
+                content=json.dumps(cfg).encode(),
+                timeout=15,
+            )
+            resp.raise_for_status()
+            self._config = dict(cfg)
+            self._config_at = time.time()
+            self._config_url = resp.json().get("url", self._config_url)
 
 
 def _make_store():

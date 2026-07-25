@@ -16,7 +16,13 @@ PAPER_KEY_PREFIX = "PK"
 
 
 def get_stored_config() -> dict:
-    return store.get(CONFIG_KEY, {}) or {}
+    cfg = store.config_get() or {}
+    if not cfg.get("api_key"):
+        # Migration: keys saved before the dedicated config doc existed.
+        legacy = store.get(CONFIG_KEY, {}) or {}
+        if legacy.get("api_key"):
+            return legacy
+    return cfg
 
 
 def get_credentials() -> tuple[str, str, bool]:
@@ -68,14 +74,14 @@ def save_keys(api_key: str, secret_key: str) -> None:
     stored["api_key"] = api_key
     stored["secret_key"] = secret_key
     stored["trading_mode"] = "live"
-    store.set(CONFIG_KEY, stored)
+    store.config_set(stored)
 
 
 def clear_keys() -> None:
     stored = get_stored_config()
     stored.pop("api_key", None)
     stored.pop("secret_key", None)
-    store.set(CONFIG_KEY, stored)
+    store.config_set(stored)
 
 
 def test_connection() -> dict:
