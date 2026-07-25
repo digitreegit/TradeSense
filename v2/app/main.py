@@ -16,7 +16,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
-from .alpaca_config import clear_keys, save_keys, set_trading_mode, status_dict
+from .alpaca_config import clear_keys, save_keys, status_dict
 
 from .config import settings
 from .engine import Engine
@@ -137,9 +137,9 @@ async def lifespan(app: FastAPI):
     sched = None
     if not settings.on_vercel:
         sched = _start_scheduler()
-        log.info("TradeSense v2 started with in-process scheduler (mode=%s)", settings.trading_mode)
+        log.info("TradeSense v2 started with in-process scheduler (mode=live)")
     else:
-        log.info("TradeSense v2 on Vercel — cron-job.org → /api/cron/run (mode=%s)", settings.trading_mode)
+        log.info("TradeSense v2 on Vercel — cron-job.org → /api/cron/run (mode=live)")
     yield
     if sched is not None:
         sched.shutdown(wait=False)
@@ -182,10 +182,6 @@ class AlpacaKeysBody(BaseModel):
     secret_key: str
 
 
-class TradingModeBody(BaseModel):
-    trading_mode: str  # paper | live
-
-
 @app.get("/api/settings")
 def get_settings():
     return JSONResponse(status_dict())
@@ -195,7 +191,10 @@ def get_settings():
 def post_settings_keys(body: AlpacaKeysBody):
     if not body.api_key.strip() or not body.secret_key.strip():
         return JSONResponse({"ok": False, "error": "api_key and secret_key required"}, status_code=400)
-    save_keys(body.api_key, body.secret_key)
+    try:
+        save_keys(body.api_key, body.secret_key)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
     engine.reset_broker()
     # New keys = potentially a different account: reset drawdown baseline,
     # regime, positions and history so the new balance starts clean.
@@ -207,23 +206,6 @@ def post_settings_keys(body: AlpacaKeysBody):
 def delete_settings_keys():
     clear_keys()
     engine.reset_broker()
-    return JSONResponse({"ok": True, **status_dict()})
-
-
-@app.post("/api/settings/mode")
-def post_settings_mode(body: TradingModeBody):
-    mode = body.trading_mode.lower()
-    if mode not in ("paper", "live"):
-        return JSONResponse({"ok": False, "error": "trading_mode must be paper or live"}, status_code=400)
-    if not status_dict()["configured"]:
-        return JSONResponse({"ok": False, "error": "save Alpaca keys first"}, status_code=400)
-    prev_mode = status_dict()["trading_mode"]
-    set_trading_mode(mode)
-    engine.reset_broker()
-    # Paper and live are separate accounts with different balances: switching
-    # must reset the drawdown baseline so the brake doesn't falsely trip.
-    if mode != prev_mode:
-        store.reset_trading_state()
     return JSONResponse({"ok": True, **status_dict()})
 
 

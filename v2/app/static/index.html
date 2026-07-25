@@ -107,15 +107,6 @@
     margin-bottom: 8px; display: block;
   }
   .field-hint { font-size: 12px; color: var(--dim); margin: -4px 0 10px; line-height: 1.45; }
-  .mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
-  .mode-btn {
-    text-align: left; padding: 12px 14px; border-radius: 10px; cursor: pointer;
-    border: 2px solid var(--border); background: #0d1117; color: var(--text);
-  }
-  .mode-btn:disabled { opacity: .45; cursor: not-allowed; }
-  .mode-btn.active { border-color: var(--blue); background: #132033; }
-  .mode-btn .title { font-size: 14px; font-weight: 700; }
-  .mode-btn .desc { font-size: 11px; color: var(--dim); margin-top: 4px; line-height: 1.35; }
   .input {
     display: block; width: 100%; margin: 6px 0 12px; padding: 10px 12px;
     border-radius: 8px; border: 1px solid var(--border); background: #0d1117; color: var(--text);
@@ -213,10 +204,8 @@
       </button>
     </div>
     <p class="field-hint" style="margin-bottom:14px">
-      Alpaca API 키를 연결하세요.
-      <a class="link" href="https://app.alpaca.markets/paper/dashboard/overview" target="_blank" rel="noreferrer">Paper</a>
-      ·
-      <a class="link" href="https://app.alpaca.markets/dashboard/overview" target="_blank" rel="noreferrer">Live</a>
+      실거래 전용입니다. 라이브 계좌의 API 키(AK…)를 연결하세요.
+      <a class="link" href="https://app.alpaca.markets/dashboard/overview" target="_blank" rel="noreferrer">Alpaca Live 대시보드</a>
     </p>
 
     <div class="status-row" id="conn-status">
@@ -227,22 +216,9 @@
       </div>
     </div>
 
-    <span class="field-label">트레이딩 모드</span>
-    <p class="field-hint">페이퍼(모의) 또는 실제 계좌 API를 선택합니다. 키 저장 후 변경할 수 있습니다.</p>
-    <div class="mode-grid" role="radiogroup" aria-label="Paper or live">
-      <button type="button" class="mode-btn" id="mode-paper" data-mode="paper">
-        <div class="title">페이퍼 머니</div>
-        <div class="desc">모의 거래 API — 테스트용</div>
-      </button>
-      <button type="button" class="mode-btn" id="mode-live" data-mode="live">
-        <div class="title">실제 머니</div>
-        <div class="desc">Live API — 실계좌 잔고</div>
-      </button>
-    </div>
-
     <div id="keys-form-wrap">
       <span class="field-label">API Key ID</span>
-      <input type="password" class="input" id="api-key" autocomplete="off" placeholder="PK… (페이퍼) / AK… (라이브)">
+      <input type="password" class="input" id="api-key" autocomplete="off" placeholder="AK… (라이브 키)">
       <span class="field-label">Secret Key</span>
       <input type="password" class="input" id="api-secret" autocomplete="off" placeholder="Secret">
       <div class="btn-row">
@@ -289,7 +265,6 @@ const usd = v => '$' + Number(v).toLocaleString(undefined, {maximumFractionDigit
 const pct = v => (v * 100).toFixed(1) + '%';
 
 let lastBriefing = null;
-let settingsState = null;
 let pendingConfirmAction = null;
 
 function table(rows, cols) {
@@ -397,7 +372,6 @@ function renderBriefing(b) {
 }
 
 function renderConnection(st) {
-  settingsState = st;
   const conn = st?.connection || {};
   const dot = $('conn-dot');
   const label = $('conn-label');
@@ -405,10 +379,14 @@ function renderConnection(st) {
   dot.className = 'status-dot';
   if (!st?.configured) {
     label.textContent = 'Alpaca 키 미설정';
-    detail.textContent = 'API 키를 저장하거나 Vercel 환경변수를 설정하세요.';
+    detail.textContent = '라이브 API 키(AK…)를 저장하거나 Vercel 환경변수를 설정하세요.';
+    dot.classList.add('err');
+  } else if (st.paper_key_detected) {
+    label.textContent = '페이퍼 키가 설정되어 있습니다';
+    detail.textContent = `키 ${st.key_hint} — 실거래 전용입니다. 라이브 키(AK…)로 교체하세요.`;
     dot.classList.add('err');
   } else if (conn.connected) {
-    label.textContent = st.paper_trading ? 'Alpaca Paper 연결됨' : 'Alpaca Live 연결됨';
+    label.textContent = 'Alpaca Live 연결됨';
     const acc = conn.account || {};
     detail.textContent = `키 ${st.key_hint} · 상태 ${acc.status || '—'}`;
     dot.classList.add('ok');
@@ -418,21 +396,13 @@ function renderConnection(st) {
     dot.classList.add('err');
   }
 
-  const paper = st?.paper_trading !== false;
-  $('mode-paper').classList.toggle('active', paper);
-  $('mode-live').classList.toggle('active', !paper);
-  const modeDisabled = !st?.configured;
-  $('mode-paper').disabled = modeDisabled;
-  $('mode-live').disabled = modeDisabled;
-
-  // Key inputs stay editable: saving new keys overrides whatever is active
-  // (needed when switching paper <-> live, which use different key pairs).
+  // Key inputs stay editable so a new live key pair can always be saved.
   $('btn-delete-keys').style.display = st?.keys_source === 'dashboard' ? 'inline-block' : 'none';
   $('keys-locked').style.display = st?.configured ? 'block' : 'none';
   if (st?.configured) {
     const src = st.keys_source === 'env' ? 'Vercel 환경변수' : '대시보드에 저장됨';
-    $('keys-locked').textContent = `현재 키: ${st.key_hint} (${src}). 새 키를 저장하면 이 키를 덮어씁니다. `
-      + `페이퍼 키는 PK…, 라이브 키는 AK…로 시작합니다.`;
+    $('keys-locked').textContent = `현재 키: ${st.key_hint} (${src}). `
+      + `새 키를 저장하면 덮어씁니다. 라이브 키(AK…)만 사용할 수 있습니다.`;
   }
 
   const acct = $('acct-summary');
@@ -511,24 +481,6 @@ async function resetState() {
     if (!r.ok) throw new Error(d.error || '초기화 실패');
     renderConnection(d);
     setSettingsMsg('상태를 초기화했습니다. 드로다운이 0%로 리셋됩니다.', true);
-    refresh();
-  } catch (e) {
-    setSettingsMsg(String(e.message || e), false);
-  }
-}
-
-async function setMode(mode) {
-  if (!settingsState?.configured) return;
-  setSettingsMsg('모드 변경 중…', true);
-  try {
-    const r = await fetch('/api/settings/mode', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({trading_mode: mode}),
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || '변경 실패');
-    renderConnection(d);
-    setSettingsMsg(mode === 'paper' ? '페이퍼 모드로 전환했습니다.' : '실제 계좌 모드로 전환했습니다.', true);
     refresh();
   } catch (e) {
     setSettingsMsg(String(e.message || e), false);
@@ -651,9 +603,6 @@ $('btn-confirm-action').addEventListener('click', async () => {
   closeConfirm();
   if (action) await action();
 });
-$('mode-paper').addEventListener('click', () => setMode('paper'));
-$('mode-live').addEventListener('click', () => setMode('live'));
-
 refresh();
 loadSettings();
 setInterval(refresh, 30000);

@@ -212,6 +212,7 @@ class BlobStore:
         self._loaded_at = 0.0
         self._url: str | None = None
         self._lock = threading.Lock()
+        self._load_ok = False
 
     # -- transport (Blob REST API, mirrors @vercel/blob headers) -----------
     def _headers(self, **extra: str) -> dict:
@@ -250,8 +251,10 @@ class BlobStore:
             try:
                 raw = self._download()
                 self._state = json.loads(raw) if raw else json.loads(json.dumps(self.EMPTY))
+                self._load_ok = True
             except Exception as exc:
                 log.error("blob state load failed: %s", exc)
+                self._load_ok = False
                 if self._state is None:
                     self._state = json.loads(json.dumps(self.EMPTY))
             self._loaded_at = time.time()
@@ -260,6 +263,11 @@ class BlobStore:
     def _save(self) -> None:
         import httpx
 
+        # Never persist an EMPTY fallback produced after a failed download —
+        # that is how live keys / trading_mode get wiped back to env paper.
+        if not self._load_ok:
+            log.error("blob state save skipped: last load failed")
+            return
         try:
             resp = httpx.put(
                 f"{self.API}/?pathname={self.PATH}",
@@ -283,7 +291,8 @@ class BlobStore:
         return self._load().get("kv", {}).get(key, default)
 
     def set(self, key: str, value) -> None:
-        st = self._load()
+        # Always re-read before write to reduce lost-update races with cron.
+        st = self._load(force=True)
         st.setdefault("kv", {})[key] = value
         self._save()
 
@@ -293,7 +302,7 @@ class BlobStore:
 
     def pos_meta_upsert(self, symbol: str, sleeve: str, stop_level: float | None,
                         stop_mult: float, entry_date: str, held_days: int = 0) -> None:
-        st = self._load()
+        st = self._load(force=True)
         st.setdefault("pos_meta", {})[symbol] = {
             "symbol": symbol, "sleeve": sleeve, "stop_level": stop_level,
             "stop_mult": stop_mult, "entry_date": entry_date, "held_days": held_days,
@@ -301,7 +310,7 @@ class BlobStore:
         self._save()
 
     def pos_meta_update_stop(self, symbol: str, stop_level: float, held_days: int) -> None:
-        st = self._load()
+        st = self._load(force=True)
         meta = st.get("pos_meta", {}).get(symbol)
         if meta:
             meta["stop_level"] = stop_level
@@ -309,13 +318,13 @@ class BlobStore:
             self._save()
 
     def pos_meta_delete(self, symbol: str) -> None:
-        st = self._load()
+        st = self._load(force=True)
         if st.get("pos_meta", {}).pop(symbol, None) is not None:
             self._save()
 
     # -- pending orders ---------------------------------------------------------
     def pending_replace(self, orders: list) -> None:
-        st = self._load()
+        st = self._load(force=True)
         st["pending"] = [
             {"id": i + 1, "symbol": o.symbol, "sleeve": o.sleeve, "side": o.side,
              "slot_weight": o.slot_weight, "stop_mult": o.stop_mult, "reason": o.reason,
@@ -328,14 +337,14 @@ class BlobStore:
         return list(self._load().get("pending", []))
 
     def pending_clear(self) -> None:
-        st = self._load()
+        st = self._load(force=True)
         if st.get("pending"):
             st["pending"] = []
             self._save()
 
     # -- logs ----------------------------------------------------------------
     def log_equity(self, equity: float, cash: float, reg: str) -> None:
-        st = self._load()
+        st = self._load(force=True)
         st.setdefault("equity_curve", []).append(
             {"ts": datetime.now(timezone.utc).isoformat(), "equity": equity,
              "cash": cash, "regime": reg})
@@ -344,7 +353,7 @@ class BlobStore:
 
     def log_trade(self, symbol: str, sleeve: str, side: str, notional: float,
                   reason: str, detail: str = "") -> None:
-        st = self._load()
+        st = self._load(force=True)
         trades = st.setdefault("trades", [])
         trades.append({"id": len(trades) + 1,
                        "ts": datetime.now(timezone.utc).isoformat(),

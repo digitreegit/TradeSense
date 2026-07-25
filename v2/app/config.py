@@ -88,13 +88,12 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Alpaca
+    # Alpaca — live trading only (paper mode removed)
     alpaca_api_key: str = ""
     alpaca_secret_key: str = ""
-    alpaca_paper: bool = True
 
     # Engine
-    trading_mode: str = "paper"          # paper | live
+    trading_mode: str = "live"           # live only; kept for logging/compat
     initial_capital: float = 3000.0
     timezone: str = "America/New_York"
     # NJ and many US states cannot trade crypto on Alpaca — default off.
@@ -126,7 +125,7 @@ class Settings(BaseSettings):
 
     @property
     def is_live(self) -> bool:
-        return self.trading_mode.lower() == "live"
+        return True
 
 
 settings = Settings()

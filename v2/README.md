@@ -32,7 +32,8 @@ SKYFACE 유료(`hoyong@skyface.com`)는 MyPasswordVault 전용.
 RuleFive와 **동일 패턴**. Vercel 내장 크론은 Hobby에서 제한이 있어서 쓰지 않음.
 
 ### 1) Alpaca 키
-- 페이퍼: https://app.alpaca.markets/paper/dashboard/overview → API Keys
+- **실거래 전용** — 라이브 키(`AK…`)만 사용. 페이퍼 키(`PK…`)는 거부됨
+- 발급: https://app.alpaca.markets/dashboard/overview → API Keys
 - **$99 데이터 구독 불필요** — IEX 무료 피드 사용
 
 ### 2) Vercel (digitreegit 팀)
@@ -42,7 +43,6 @@ npx vercel link --project tradesense --scope digitreegits-projects
 npx vercel env add ALPACA_API_KEY production
 npx vercel env add ALPACA_SECRET_KEY production
 npx vercel env add CRON_SECRET production      # openssl rand -hex 32
-npx vercel env add TRADING_MODE production     # paper
 npx vercel deploy --prod --yes
 ```
 
