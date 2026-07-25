@@ -105,8 +105,11 @@ def _should_run(job: str, now: datetime) -> str | None:
 
 def _run_job(job: str) -> dict:
     fn = JOBS[job]
-    fn()
-    return {"ok": True, "job": job}
+    # Jobs may return False to mean "could not complete yet, retry next tick"
+    # (e.g. execute_open called before the 09:30 bell). Only a non-False
+    # result may be deduped for the day.
+    done = fn() is not False
+    return {"ok": True, "job": job, "done": done}
 
 
 def cron_tick() -> dict:
@@ -119,10 +122,10 @@ def cron_tick() -> dict:
             results[job] = f"skipped: {skip}"
             continue
         try:
-            _run_job(job)
-            if GUARDS[job][2]:
+            result = _run_job(job)
+            if result["done"] and GUARDS[job][2]:
                 store.set(f"job_ran:{job}:{now.date().isoformat()}", True)
-            results[job] = "ok"
+            results[job] = "ok" if result["done"] else "deferred: will retry next tick"
         except Exception as exc:
             log.exception("job %s failed", job)
             results[job] = f"error: {exc}"
@@ -256,7 +259,7 @@ def cron_job(job: str, request: Request):
         return JSONResponse({"ok": True, "skipped": skip})
     try:
         result = _run_job(job)
-        if GUARDS[job][2]:
+        if result["done"] and GUARDS[job][2]:
             store.set(f"job_ran:{job}:{now.date().isoformat()}", True)
         return JSONResponse(result)
     except Exception as exc:

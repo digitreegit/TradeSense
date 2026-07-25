@@ -164,14 +164,17 @@ class Engine:
     # ------------------------------------------------------------------
     # scheduled jobs
     # ------------------------------------------------------------------
-    def job_daily_decision(self) -> None:
-        """16:35 ET — compute signals on closed daily bars, queue orders."""
+    def job_daily_decision(self) -> bool:
+        """16:35 ET — compute signals on closed daily bars, queue orders.
+
+        Returns False when the job could not complete and should be retried
+        on the next cron tick (the caller must NOT mark it as done)."""
         crypto_syms, defensive_syms = self._trend_universe()
         symbols = config.EQUITY_UNIVERSE + crypto_syms + defensive_syms
         features = self._features(symbols)
         if config.REGIME_SYMBOL not in features:
-            log.error("no SPY data; skipping decision")
-            return
+            log.error("no SPY data; will retry decision on next tick")
+            return False
 
         equity = self.broker.equity()
         cash = self.broker.cash()
@@ -209,7 +212,7 @@ class Engine:
                 self._execute_sell(sym, meta.sleeve, "dd-halt", broker_positions)
             store.pending_clear()
             store.log_equity(equity, cash, reg)
-            return
+            return True
 
         rows = {s: f.iloc[-1] for s, f in features.items()}
         from .config import settings
@@ -232,24 +235,33 @@ class Engine:
                f"| dd {brake.drawdown(equity):.1%}\nqueued: {summary}")
         send(msg)
         log_activity("decision", msg)
+        return True
 
-    def job_execute_open(self) -> None:
-        """09:31 ET — execute orders queued after yesterday's close."""
+    def job_execute_open(self) -> bool:
+        """09:31 ET — execute orders queued after yesterday's close.
+
+        Returns False when the market is not open yet so the cron caller
+        retries on the next tick instead of marking the job done for the day
+        (that bug silently dropped a whole day's queued orders)."""
         pending = store.pending_all()
         if not pending:
             log_activity("open", "장 시작 — 예약 주문 없음")
-            return
+            return True
         if not self.broker.market_open_now():
-            log.info("market closed; keeping pending orders")
-            return
+            log.info("market not open yet; keeping pending orders, will retry")
+            return False
         features = self._features(config.EQUITY_UNIVERSE)
         equity = self.broker.equity()
-        cash = self.broker.cash()
         brake = self._brake()
         broker_positions = self.broker.positions()
 
-        for o in [p for p in pending if p["side"] == "sell"]:
+        sells = [p for p in pending if p["side"] == "sell"]
+        for o in sells:
             self._execute_sell(o["symbol"], o["sleeve"], o["reason"], broker_positions)
+        if sells:
+            # Market sells take a few seconds to fill; without this wait the
+            # cash read below is stale and buys get skipped or undersized.
+            self.broker.wait_for_fills(timeout=45)
         cash = self.broker.cash()
         for o in [p for p in pending if p["side"] == "buy"]:
             if o["symbol"] in broker_positions:
@@ -258,6 +270,7 @@ class Engine:
             cash -= spent
         store.pending_clear()
         log_activity("open", f"장 시작 — {len(pending)}건 예약 주문 처리 완료")
+        return True
 
     def job_crypto(self) -> None:
         """Hourly — crypto trend, or liquidate when disabled (NJ)."""
@@ -318,6 +331,10 @@ class Engine:
                 sold.append(sym)
         if sold:
             log_activity("stops", f"장중 손절: {', '.join(sold)}")
+        # Intraday equity point so the dashboard curve moves during the day
+        # (previously only one point per day at the 16:35 decision).
+        reg = store.get("regime", {}).get("regime", "CHOP")
+        store.log_equity(self.broker.equity(), self.broker.cash(), reg)
 
     def job_news_overlay(self) -> None:
         """08:45 ET — optional LLM tilt from headlines."""

@@ -38,7 +38,10 @@ def fetch_headlines(broker) -> list[str]:
         from alpaca.data.historical.news import NewsClient
         from alpaca.data.requests import NewsRequest
 
-        client = NewsClient(settings.alpaca_api_key, settings.alpaca_secret_key)
+        from .alpaca_config import get_credentials
+
+        api_key, secret_key, _ = get_credentials()
+        client = NewsClient(api_key, secret_key)
         req = NewsRequest(symbols="SPY,QQQ,BTC/USD", limit=25)
         news = client.get_news(req)
         return [n.headline for n in news.data.get("news", [])]

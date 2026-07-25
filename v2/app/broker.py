@@ -6,6 +6,7 @@ notional orders keep a $3K account fully investable.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
@@ -146,3 +147,24 @@ class Broker:
         except Exception as exc:
             log.error("sell %s failed: %s", symbol, exc)
             return False
+
+    def open_orders_count(self) -> int:
+        from alpaca.trading.enums import QueryOrderStatus
+        from alpaca.trading.requests import GetOrdersRequest
+
+        try:
+            orders = self.trading.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))
+            return len(orders)
+        except Exception as exc:
+            log.warning("open_orders_count failed: %s", exc)
+            return 0
+
+    def wait_for_fills(self, timeout: float = 30.0) -> None:
+        """Block until no open orders remain (or timeout). Used between the
+        morning sells and buys so freed-up cash is actually available."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self.open_orders_count() == 0:
+                return
+            time.sleep(2)
+        log.warning("wait_for_fills: open orders still pending after %.0fs", timeout)
