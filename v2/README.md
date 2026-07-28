@@ -11,8 +11,9 @@
 | MyPasswordVault | `digitreegit/...` | `digitreegits-projects` | 개인, Supabase는 SKYFACE 유료 |
 | Iris ID | `hoyong-irisid/...` | 별도 | 회사 — 여기와 섞지 말 것 |
 
-**Supabase**: TradeSense는 Vercel Blob으로 상태 저장(무료, 이미 연결됨).
-RuleFive/MyPasswordVault처럼 Postgres가 필요하면 `hoyongsupa@gmail.com` 무료 Supabase를 쓰면 됨.
+**Supabase**: TradeSense 상태 저장은 **Supabase Postgres** (`tradesense` / `brrkttqxtacivbfaitbe`).
+Vercel에 `DATABASE_URL`(Transaction pooler URI)을 넣으면 Blob 대신 Postgres를 씁니다.
+(팀 Vercel Blob 스토어는 suspended — 사용하지 않음.)
 SKYFACE 유료(`hoyong@skyface.com`)는 MyPasswordVault 전용.
 
 ---
@@ -43,10 +44,12 @@ npx vercel link --project tradesense --scope digitreegits-projects
 npx vercel env add ALPACA_API_KEY production
 npx vercel env add ALPACA_SECRET_KEY production
 npx vercel env add CRON_SECRET production      # openssl rand -hex 32
+# Supabase → Project Settings → Database → URI (Transaction pooler, port 6543)
+npx vercel env add DATABASE_URL production
 npx vercel deploy --prod --yes
 ```
 
-`BLOB_READ_WRITE_TOKEN`은 Vercel Blob 스토어 연결 시 자동 주입됨.
+`DATABASE_URL`이 있으면 Postgres를 쓰고, 없을 때만 Blob으로 폴백합니다.
 
 ### 3) 스케줄러 — cron-job.org (무료, RuleFive와 동일)
 - https://cron-job.org → Create cronjob

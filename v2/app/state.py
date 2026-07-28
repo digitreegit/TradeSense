@@ -2,9 +2,8 @@
 equity curve, trade log, and key-value state (drawdown peak, regime, etc.).
 
 Three backends behind one interface, picked automatically:
-- Postgres     when DATABASE_URL is set (needs psycopg installed)
-- Vercel Blob  when BLOB_READ_WRITE_TOKEN is set (default on Vercel — the
-               serverless filesystem is ephemeral; one small JSON document)
+- Postgres     when DATABASE_URL is set (preferred — Supabase free tier)
+- Vercel Blob  when BLOB_READ_WRITE_TOKEN is set and no DATABASE_URL
 - SQLite       otherwise (local dev / single-box Docker)
 """
 from __future__ import annotations
@@ -22,7 +21,8 @@ from .config import settings
 
 log = logging.getLogger(__name__)
 
-_SCHEMA = """
+_TABLES = (
+    """
 CREATE TABLE IF NOT EXISTS pos_meta (
     symbol TEXT PRIMARY KEY,
     sleeve TEXT NOT NULL,
@@ -30,7 +30,9 @@ CREATE TABLE IF NOT EXISTS pos_meta (
     stop_mult DOUBLE PRECISION,
     entry_date TEXT,
     held_days INTEGER DEFAULT 0
-);
+)
+""",
+    """
 CREATE TABLE IF NOT EXISTS pending_orders (
     id {autoinc},
     symbol TEXT NOT NULL,
@@ -40,13 +42,17 @@ CREATE TABLE IF NOT EXISTS pending_orders (
     stop_mult DOUBLE PRECISION DEFAULT 0,
     reason TEXT DEFAULT '',
     created_at TEXT NOT NULL
-);
+)
+""",
+    """
 CREATE TABLE IF NOT EXISTS equity_curve (
     ts TEXT PRIMARY KEY,
     equity DOUBLE PRECISION NOT NULL,
     cash DOUBLE PRECISION,
     regime TEXT
-);
+)
+""",
+    """
 CREATE TABLE IF NOT EXISTS trades (
     id {autoinc},
     ts TEXT NOT NULL,
@@ -56,12 +62,25 @@ CREATE TABLE IF NOT EXISTS trades (
     notional DOUBLE PRECISION,
     reason TEXT,
     detail TEXT
-);
+)
+""",
+    """
 CREATE TABLE IF NOT EXISTS kv (
     key TEXT PRIMARY KEY,
     value TEXT
-);
-"""
+)
+""",
+)
+
+# Lock down PostgREST exposure: enable RLS with no anon/authenticated policies.
+# The app connects as the DB role (bypasses RLS as table owner / superuser).
+_PG_RLS = (
+    "ALTER TABLE pos_meta ENABLE ROW LEVEL SECURITY",
+    "ALTER TABLE pending_orders ENABLE ROW LEVEL SECURITY",
+    "ALTER TABLE equity_curve ENABLE ROW LEVEL SECURITY",
+    "ALTER TABLE trades ENABLE ROW LEVEL SECURITY",
+    "ALTER TABLE kv ENABLE ROW LEVEL SECURITY",
+)
 
 
 class Store:
@@ -69,13 +88,10 @@ class Store:
         self.pg = bool(settings.database_url)
         self.ephemeral = False
         self._lock = threading.Lock()
+        self._conn = None
         if self.pg:
-            import psycopg
-
-            self._conn = psycopg.connect(settings.database_url, autocommit=True)
-            schema = _SCHEMA.format(autoinc="BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY")
-            with self._lock, self._conn.cursor() as cur:
-                cur.execute(schema)
+            self._pg_connect()
+            self._pg_migrate()
         else:
             if settings.on_vercel:
                 # no DATABASE_URL on Vercel: fall back to ephemeral /tmp so the
@@ -86,15 +102,57 @@ class Store:
             db_path.parent.mkdir(parents=True, exist_ok=True)
             self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
-            schema = _SCHEMA.format(autoinc="INTEGER PRIMARY KEY AUTOINCREMENT")
+            schema = ";\n".join(
+                t.format(autoinc="INTEGER PRIMARY KEY AUTOINCREMENT") for t in _TABLES
+            )
             with self._lock:
                 self._conn.executescript(schema)
                 self._conn.commit()
+
+    def _pg_connect(self) -> None:
+        import psycopg
+
+        # prepare_threshold=None is required for Supabase transaction pooler
+        # (port 6543); prepared statements are not supported across clients.
+        url = settings.database_url
+        if "sslmode=" not in url:
+            url += ("&" if "?" in url else "?") + "sslmode=require"
+        self._conn = psycopg.connect(url, autocommit=True, prepare_threshold=None)
+
+    def _pg_migrate(self) -> None:
+        autoinc = "BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY"
+        with self._lock:
+            with self._conn.cursor() as cur:
+                for stmt in _TABLES:
+                    cur.execute(stmt.format(autoinc=autoinc))
+                for stmt in _PG_RLS:
+                    try:
+                        cur.execute(stmt)
+                    except Exception as exc:
+                        # Already enabled / insufficient privilege — non-fatal.
+                        log.debug("rls setup skipped: %s", exc)
+
+    def _pg_ensure(self) -> None:
+        """Reconnect if the pooled connection was closed between lambda invokes."""
+        try:
+            if self._conn is None or self._conn.closed:
+                self._pg_connect()
+                return
+            self._conn.execute("SELECT 1")
+        except Exception:
+            log.warning("postgres connection stale; reconnecting")
+            try:
+                if self._conn is not None and not self._conn.closed:
+                    self._conn.close()
+            except Exception:
+                pass
+            self._pg_connect()
 
     # -- backend-agnostic helpers ------------------------------------------
     def _exec(self, sql: str, params: tuple = ()) -> None:
         with self._lock:
             if self.pg:
+                self._pg_ensure()
                 with self._conn.cursor() as cur:
                     cur.execute(sql.replace("?", "%s"), params)
             else:
@@ -104,6 +162,7 @@ class Store:
     def _query(self, sql: str, params: tuple = ()) -> list[dict]:
         with self._lock:
             if self.pg:
+                self._pg_ensure()
                 with self._conn.cursor() as cur:
                     cur.execute(sql.replace("?", "%s"), params)
                     cols = [d.name for d in cur.description]

@@ -10,4 +10,4 @@ python-dotenv>=1.0
 pydantic>=2.7
 pydantic-settings>=2.3
 openai>=1.40
-# optional: install psycopg[binary] if you set DATABASE_URL instead of Vercel Blob
+psycopg[binary]>=3.2
