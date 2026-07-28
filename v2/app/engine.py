@@ -379,6 +379,7 @@ class Engine:
                 "stop_level": m.get("stop_level") if m else (ad.stop_level if ad else None),
             })
         brake = self._brake()
+        storage = store.storage_health()
         snap = {
             "mode": settings_mode(),
             "equity": equity, "cash": cash,
@@ -390,11 +391,17 @@ class Engine:
             "trades": store.recent_trades(50),
             "equity_curve": store.equity_curve(),
             "crypto_enabled": settings.crypto_enabled,
+            "storage": storage,
             "sleeves": (
                 ["momentum", "dip", "crypto"] if settings.crypto_enabled
                 else ["momentum", "dip", "defensive (GLD/TLT/IEF)"]
             ),
         }
+        if not storage.get("ok"):
+            snap["error"] = (
+                "상태 저장소 장애 — 주문/차트/활동이 저장되지 않습니다. "
+                f"{storage.get('error', '')}"
+            )
         snap["briefing"] = build_briefing(snap)
         return snap
 

@@ -192,6 +192,15 @@ class Store:
         self._exec("DELETE FROM trades")
         self._exec("DELETE FROM kv WHERE key IN ('brake','regime') OR key LIKE 'job_ran:%'")
 
+    def storage_health(self) -> dict:
+        try:
+            self.set("_heartbeat", datetime.now(timezone.utc).isoformat())
+            return {"ok": True, "backend": "postgres" if self.pg else "sqlite",
+                    "ephemeral": self.ephemeral}
+        except Exception as exc:
+            return {"ok": False, "backend": "postgres" if self.pg else "sqlite",
+                    "error": str(exc)}
+
     # -- Alpaca credentials (kept apart from trading state) -----------------
     def config_get(self) -> dict:
         return self.get("alpaca_config", {}) or {}
@@ -433,22 +442,47 @@ class BlobStore:
     def recent_trades(self, limit: int = 200) -> list[dict]:
         return list(reversed(self._load().get("trades", [])[-limit:]))
 
-    def reset_trading_state(self) -> None:
-        """Wipe account-specific state (drawdown peak, regime, positions,
-        pending orders, equity curve, trades). Keeps Alpaca keys + activity log."""
-        st = self._load(force=True)
-        st["pos_meta"] = {}
-        st["pending"] = []
-        st["equity_curve"] = []
-        st["trades"] = []
-        kv = st.setdefault("kv", {})
-        for k in list(kv.keys()):
-            if k in ("brake", "regime") or k.startswith("job_ran:"):
-                kv.pop(k, None)
-        self._save()
+    def storage_health(self) -> dict:
+        """Probe whether the blob backend can read/write. Surfaces billing
+        suspensions that otherwise look like a silent 'idle' bot."""
+        import httpx
 
-    # -- Alpaca credentials (separate blob doc, never touched by _save) -----
-    def config_get(self) -> dict:
+        try:
+            probe = {
+                "kv": {"_heartbeat": datetime.now(timezone.utc).isoformat()},
+                "pos_meta": {}, "pending": [], "equity_curve": [], "trades": [],
+            }
+            resp = httpx.put(
+                f"{self.API}/?pathname={self.PATH}",
+                headers=self._headers(**{
+                    "x-vercel-blob-access": "private",
+                    "x-allow-overwrite": "1",
+                    "x-add-random-suffix": "0",
+                    "x-cache-control-max-age": "0",
+                    "x-content-type": "application/json",
+                }),
+                content=json.dumps(probe).encode(),
+                timeout=15,
+            )
+            if resp.status_code >= 400:
+                body = (resp.text or "")[:300]
+                return {
+                    "ok": False, "backend": "blob",
+                    "error": f"Vercel Blob write failed ({resp.status_code}): {body}",
+                }
+            self._url = resp.json().get("url", self._url)
+            self._state = probe
+            self._load_ok = True
+            self._loaded_at = time.time()
+            # Confirm we can read it back
+            raw, self._url = self._download_doc(self.PATH, self._url)
+            if raw is None:
+                return {"ok": False, "backend": "blob",
+                        "error": "Vercel Blob write ok but read returned empty"}
+            return {"ok": True, "backend": "blob"}
+        except Exception as exc:
+            msg = str(exc)
+            return {"ok": False, "backend": "blob", "error": msg}
         with self._lock:
             fresh = self._config is not None and (time.time() - self._config_at) < self.TTL_SECONDS
             if fresh:
