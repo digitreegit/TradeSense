@@ -230,13 +230,49 @@ class BlobStore:
         self._config_url: str | None = None
 
     # -- transport (Blob REST API, mirrors @vercel/blob headers) -----------
+    def _token(self) -> str:
+        # Prefer the long-lived RW token. OIDC alone is short-lived and not
+        # always present in Python serverless; RW token works for list/put/get.
+        return (
+            os.environ.get("BLOB_READ_WRITE_TOKEN")
+            or os.environ.get("VERCEL_OIDC_TOKEN")
+            or ""
+        )
+
     def _headers(self, **extra: str) -> dict:
-        token = os.environ.get("BLOB_READ_WRITE_TOKEN", "")
         return {
-            "authorization": f"Bearer {token}",
+            "authorization": f"Bearer {self._token()}",
             "x-api-version": self.API_VERSION,
             **extra,
         }
+
+    def _get_private(self, url: str) -> "httpx.Response":
+        """GET a private blob URL, re-attaching Authorization on every hop.
+
+        httpx drops Authorization when following cross-host redirects. Private
+        blob CDN URLs redirect to origin, so a naive follow_redirects=True
+        yields a silent 403 and the bot can never persist state/orders."""
+        import httpx
+
+        # Only Authorization — x-api-version is for the Blob API host, not CDN.
+        headers = {"authorization": f"Bearer {self._token()}"}
+        # Bypass CDN so overwrite-after-write is immediately visible.
+        fetch_url = url
+        if "cache=" not in url:
+            sep = "&" if "?" in url else "?"
+            fetch_url = f"{url}{sep}cache=0"
+
+        current = fetch_url
+        for _ in range(5):
+            resp = httpx.get(current, headers=headers, timeout=15, follow_redirects=False)
+            if resp.status_code in (301, 302, 303, 307, 308):
+                loc = resp.headers.get("location")
+                if not loc:
+                    resp.raise_for_status()
+                current = str(httpx.URL(current).join(loc))
+                continue
+            return resp
+        return resp  # type: ignore[name-defined]
 
     def _download_doc(self, path: str, url: str | None) -> tuple[bytes | None, str | None]:
         """Fetch one JSON document. Retries once when the listing comes back
@@ -258,8 +294,7 @@ class BlobStore:
                     time.sleep(1)
                     continue
                 return None, None
-            resp = httpx.get(url, headers=self._headers(),
-                             timeout=15, follow_redirects=True)
+            resp = self._get_private(url)
             if resp.status_code == 404:
                 url = None
                 if attempt == 0:

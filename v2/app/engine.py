@@ -354,18 +354,29 @@ class Engine:
             broker_positions = self.broker.positions()
         except Exception as exc:
             return {"error": f"broker unavailable: {exc}"}
+        # Adopt unknown broker positions into local meta (sleeve/stop) so a
+        # reset doesn't leave the dashboard stuck on "?" forever.
+        try:
+            adopted = self._pos_metas(broker_positions)
+        except Exception:
+            adopted = {}
         metas = store.pos_meta_all()
         positions = []
         for sym, p in broker_positions.items():
-            m = metas.get(sym, {})
+            m = metas.get(sym) or {}
+            ad = adopted.get(sym)
             is_legacy_crypto = not settings.crypto_enabled and "/" in sym
+            sleeve = (
+                "crypto (청산 대기)" if is_legacy_crypto
+                else (m.get("sleeve") or (ad.sleeve if ad else "?"))
+            )
             positions.append({
                 "symbol": sym,
-                "sleeve": "crypto (청산 대기)" if is_legacy_crypto else m.get("sleeve", "?"),
+                "sleeve": sleeve,
                 "qty": p["qty"], "market_value": p["market_value"],
                 "avg_entry": p["avg_entry"], "current_price": p["current_price"],
                 "unrealized_pl": p["unrealized_pl"],
-                "stop_level": m.get("stop_level"),
+                "stop_level": m.get("stop_level") if m else (ad.stop_level if ad else None),
             })
         brake = self._brake()
         snap = {
