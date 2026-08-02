@@ -129,6 +129,18 @@ def test_decide_buys_momentum_on_rollover():
     assert buys == {"SPY", "QQQ"}
 
 
+def test_single_stocks_get_half_slot():
+    # Earnings-gap control: an ETF and a single stock with identical momentum
+    # must NOT get identical dollar slots — the single name takes half.
+    rows = _rows()
+    strong = strategy.compute_features(make_df(np.linspace(100, 160, 260))).iloc[-1]
+    rows["AAPL"] = strong
+    orders = decide(rows, {}, ["SPY", "QQQ", "AAPL"], [], regime.BULL, week_rollover=True)
+    slots = {o.symbol: o.slot_weight for o in orders if o.side == "buy" and o.sleeve == MOMENTUM}
+    assert "AAPL" in slots and "SPY" in slots
+    assert slots["AAPL"] == pytest.approx(slots["SPY"] * config.SINGLE_NAME_SCALE)
+
+
 def test_decide_crypto_trend_on():
     orders = decide(_rows(), {}, [], ["BTC/USD"], regime.BEAR, week_rollover=False)
     assert any(o.symbol == "BTC/USD" and o.side == "buy" and o.sleeve == CRYPTO for o in orders)

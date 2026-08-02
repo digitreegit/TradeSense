@@ -37,6 +37,12 @@ class PendingOrder:
     reason: str = ""
 
 
+def _name_scale(sym: str) -> float:
+    """Single stocks get a reduced slot: ATR stops don't protect against
+    overnight earnings gaps, so cap how much one gap can hurt."""
+    return config.SINGLE_NAME_SCALE if sym in config.SINGLE_STOCKS else 1.0
+
+
 def decide(
     rows: dict[str, pd.Series],
     positions: dict[str, PosMeta],
@@ -76,7 +82,8 @@ def decide(
                 if sym not in positions and sym not in pending_sells:
                     pending.append(PendingOrder(
                         sym, MOMENTUM, "buy",
-                        slot_weight=slot, stop_mult=config.MOMENTUM_STOP_ATR,
+                        slot_weight=slot * _name_scale(sym),
+                        stop_mult=config.MOMENTUM_STOP_ATR,
                     ))
 
     # 3) dip-buy entries daily (skipped in BEAR: no knife catching)
@@ -93,7 +100,8 @@ def decide(
             for sym in cands[:budget]:
                 pending.append(PendingOrder(
                     sym, DIP, "buy",
-                    slot_weight=0.25 * expo, stop_mult=config.DIP_STOP_ATR,
+                    slot_weight=0.25 * expo * _name_scale(sym),
+                    stop_mult=config.DIP_STOP_ATR,
                 ))
 
     # 4) third sleeve: crypto (licensed regions) or defensive macro ETFs (NJ-safe)

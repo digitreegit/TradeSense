@@ -12,8 +12,8 @@
 | Iris ID | `hoyong-irisid/...` | 별도 | 회사 — 여기와 섞지 말 것 |
 
 **Supabase**: TradeSense 상태 저장은 **Supabase Postgres** (`tradesense` / `brrkttqxtacivbfaitbe`).
-Vercel에 `DATABASE_URL`(Transaction pooler URI)을 넣으면 Blob 대신 Postgres를 씁니다.
-(팀 Vercel Blob 스토어는 suspended — 사용하지 않음.)
+Vercel에서는 `DATABASE_URL`(Transaction pooler URI)이 **필수** — 없으면 대시보드에
+저장소 오류가 표시되고 상태가 유지되지 않습니다. (Blob 백엔드는 제거됨.)
 SKYFACE 유료(`hoyong@skyface.com`)는 MyPasswordVault 전용.
 
 ---
@@ -44,12 +44,14 @@ npx vercel link --project tradesense --scope digitreegits-projects
 npx vercel env add ALPACA_API_KEY production
 npx vercel env add ALPACA_SECRET_KEY production
 npx vercel env add CRON_SECRET production      # openssl rand -hex 32
+npx vercel env add ADMIN_TOKEN production      # 대시보드 접속 토큰 (openssl rand -hex 16)
 # Supabase → Project Settings → Database → URI (Transaction pooler, port 6543)
 npx vercel env add DATABASE_URL production
 npx vercel deploy --prod --yes
 ```
 
-`DATABASE_URL`이 있으면 Postgres를 쓰고, 없을 때만 Blob으로 폴백합니다.
+`DATABASE_URL`은 Vercel에서 필수입니다 (로컬은 SQLite 자동 사용).
+대시보드·설정 API는 `ADMIN_TOKEN`으로 보호되며, 첫 접속 시 브라우저가 토큰을 물어봅니다.
 
 ### 3) 스케줄러 — cron-job.org (무료, RuleFive와 동일)
 - https://cron-job.org → Create cronjob
@@ -108,7 +110,7 @@ v2/
     engine.py     # 매매 잡
     decisions.py  # 백테스트·라이브 공용 의사결정
     broker.py     # Alpaca
-    state.py      # Vercel Blob (프로덕션) / SQLite (로컬)
+    state.py      # Supabase Postgres (프로덕션) / SQLite (로컬)
   api/index.py    # Vercel serverless 진입점
   vercel.json
   scripts/run_backtest.py

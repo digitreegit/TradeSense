@@ -124,6 +124,8 @@
   .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
   #overlay-confirm { z-index: 200; align-items: center; }
   #overlay-confirm .modal { width: min(420px, 100%); margin-top: 0; }
+  #overlay-token { z-index: 300; align-items: center; }
+  #overlay-token .modal { width: min(420px, 100%); margin-top: 0; }
   .confirm-copy { color: var(--dim); font-size: 13px; line-height: 1.6; margin-bottom: 18px; }
   .confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
   .msg { font-size: 13px; margin: 8px 0; }
@@ -259,6 +261,22 @@
   </div>
 </div>
 
+<!-- Admin token gate: shown when the API returns 401 -->
+<div class="overlay" id="overlay-token" role="dialog" aria-modal="true" aria-labelledby="token-title">
+  <div class="modal">
+    <div class="modal-head">
+      <h2 id="token-title">접속 토큰 입력</h2>
+    </div>
+    <p class="confirm-copy">이 대시보드는 보호되어 있습니다.
+      Vercel 환경변수 <b>ADMIN_TOKEN</b> 값을 입력하세요. 이 브라우저에 저장됩니다.</p>
+    <input type="password" class="input" id="token-input" autocomplete="off" placeholder="토큰">
+    <p class="msg" id="token-msg"></p>
+    <div class="confirm-actions" style="margin-top:12px">
+      <button type="button" class="btn btn-primary" id="btn-token-save">확인</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const $ = id => document.getElementById(id);
 const usd = v => '$' + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
@@ -314,6 +332,28 @@ function closeOverlay(id) {
 function closeAllOverlays() {
   document.querySelectorAll('.overlay.open').forEach(el => el.classList.remove('open'));
   document.body.style.overflow = '';
+}
+
+// ── Admin token: all API calls carry X-Admin-Token; 401 opens the gate ──
+const TOKEN_KEY = 'adminToken';
+
+function showTokenGate(msg) {
+  if (msg) { const m = $('token-msg'); m.textContent = msg; m.className = 'msg err'; }
+  if (!$('overlay-token').classList.contains('open')) {
+    openOverlay('overlay-token');
+    $('token-input').focus();
+  }
+}
+
+async function api(path, opts = {}) {
+  const t = localStorage.getItem(TOKEN_KEY) || '';
+  opts.headers = Object.assign({}, opts.headers, t ? {'X-Admin-Token': t} : {});
+  const r = await fetch(path, opts);
+  if (r.status === 401) {
+    showTokenGate(t ? '토큰이 올바르지 않습니다.' : '');
+    throw new Error('접속 토큰이 필요합니다');
+  }
+  return r;
 }
 
 function openConfirm(title, copy, actionLabel, action) {
@@ -422,7 +462,7 @@ function renderConnection(st) {
 
 async function loadSettings() {
   try {
-    const r = await fetch('/api/settings');
+    const r = await api('/api/settings');
     const st = await r.json();
     renderConnection(st);
   } catch (e) {
@@ -443,7 +483,7 @@ async function saveKeys() {
   if (!key || !secret) { setSettingsMsg('API Key와 Secret을 모두 입력하세요.', false); return; }
   setSettingsMsg('저장 중…', true);
   try {
-    const r = await fetch('/api/settings/keys', {
+    const r = await api('/api/settings/keys', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({api_key: key, secret_key: secret}),
     });
@@ -462,7 +502,7 @@ async function saveKeys() {
 async function deleteKeys() {
   setSettingsMsg('삭제 중…', true);
   try {
-    const r = await fetch('/api/settings/keys', {method: 'DELETE'});
+    const r = await api('/api/settings/keys', {method: 'DELETE'});
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || '삭제 실패');
     renderConnection(d);
@@ -476,7 +516,7 @@ async function deleteKeys() {
 async function resetState() {
   setSettingsMsg('초기화 중…', true);
   try {
-    const r = await fetch('/api/settings/reset', {method: 'POST'});
+    const r = await api('/api/settings/reset', {method: 'POST'});
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || '초기화 실패');
     renderConnection(d);
@@ -510,7 +550,7 @@ function drawChart(curve) {
 
 async function refresh() {
   try {
-    const r = await fetch('/api/snapshot');
+    const r = await api('/api/snapshot');
     const d = await r.json();
     if (d.error) { $('err').style.display = 'block'; $('err').textContent = d.error; return; }
     $('err').style.display = 'none';
@@ -573,15 +613,38 @@ document.querySelectorAll('.modal-close[data-close]').forEach(btn => {
 document.querySelectorAll('.overlay').forEach(ov => {
   ov.addEventListener('click', e => {
     if (e.target !== ov) return;
+    if (ov.id === 'overlay-token') return; // token gate must not be dismissed
     if (ov.id === 'overlay-confirm') closeConfirm();
     else closeOverlay(ov.id);
   });
 });
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
+  if ($('overlay-token').classList.contains('open')) return;
   if ($('overlay-confirm').classList.contains('open')) closeConfirm();
   else closeAllOverlays();
 });
+
+async function submitToken() {
+  const t = $('token-input').value.trim();
+  if (!t) return;
+  localStorage.setItem(TOKEN_KEY, t);
+  try {
+    const r = await fetch('/api/settings', {headers: {'X-Admin-Token': t}});
+    if (r.status === 401) {
+      showTokenGate('토큰이 올바르지 않습니다.');
+      return;
+    }
+    closeOverlay('overlay-token');
+    $('token-msg').textContent = '';
+    refresh();
+    loadSettings();
+  } catch (e) {
+    showTokenGate('서버에 연결할 수 없습니다.');
+  }
+}
+$('btn-token-save').addEventListener('click', submitToken);
+$('token-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitToken(); });
 
 $('btn-save-keys').addEventListener('click', saveKeys);
 $('btn-delete-keys').addEventListener('click', () => openConfirm(

@@ -33,3 +33,4 @@ Thumbs.db
 
 # Local SQLite (multi-user auth)
 data/
+.vercel

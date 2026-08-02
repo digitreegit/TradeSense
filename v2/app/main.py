@@ -7,6 +7,7 @@ Vercel         : cron-job.org hits /api/cron/run every ~15 min (RuleFive와 동�
 from __future__ import annotations
 
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -42,7 +43,9 @@ JOBS = {
 GUARDS = {
     "news": (True, lambda h, m: h == 8, True),
     "open": (True, lambda h, m: (h == 9 and m >= 25) or 10 <= h < 16, True),
-    "stops": (True, lambda h, m: 10 <= h < 16, False),
+    # from 09:31 so an opening gap through a stop is cut at the open,
+    # not 30-60 minutes later (2026-07-31 AAPL gap sat until 10:00)
+    "stops": (True, lambda h, m: (h == 9 and m >= 31) or 10 <= h < 16, False),
     "decision": (True, lambda h, m: (h == 16 and m >= 30) or h == 17, True),
     "crypto": (False, lambda h, m: True, False),
 }
@@ -68,6 +71,8 @@ def _start_scheduler() -> "object":
     sched.add_job(wrap(engine.job_execute_open),
                   CronTrigger(day_of_week="mon-fri", hour=9, minute=31, timezone=tz))
     sched.add_job(wrap(engine.job_intraday_stops),
+                  CronTrigger(day_of_week="mon-fri", hour=9, minute=32, timezone=tz))
+    sched.add_job(wrap(engine.job_intraday_stops),
                   CronTrigger(day_of_week="mon-fri", hour="10-15", minute="0,30", timezone=tz))
     sched.add_job(wrap(engine.job_daily_decision),
                   CronTrigger(day_of_week="mon-fri", hour=16, minute=35, timezone=tz))
@@ -85,7 +90,30 @@ def _authorized(request: Request) -> bool:
     bearer = header[7:] if header.startswith("Bearer ") else ""
     x_secret = request.headers.get("x-cron-secret", "")
     qs_secret = request.query_params.get("secret", "")
-    return bearer == secret or x_secret == secret or qs_secret == secret
+    return (
+        secrets.compare_digest(bearer, secret)
+        or secrets.compare_digest(x_secret, secret)
+        or secrets.compare_digest(qs_secret, secret)
+    )
+
+
+def _admin_authorized(request: Request) -> bool:
+    """Protects settings/snapshot routes. Uses ADMIN_TOKEN (or CRON_SECRET as
+    fallback). Without any token configured, only non-Vercel (local) is open."""
+    token = settings.admin_token or settings.cron_secret
+    if not token:
+        return not settings.on_vercel
+    supplied = request.headers.get("x-admin-token", "")
+    header = request.headers.get("authorization", "")
+    bearer = header[7:] if header.startswith("Bearer ") else ""
+    return (
+        secrets.compare_digest(supplied, token)
+        or secrets.compare_digest(bearer, token)
+    )
+
+
+def _unauthorized() -> JSONResponse:
+    return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
 
 
 def _should_run(job: str, now: datetime) -> str | None:
@@ -148,7 +176,8 @@ async def lifespan(app: FastAPI):
         sched.shutdown(wait=False)
 
 
-app = FastAPI(title="TradeSense v2", lifespan=lifespan)
+app = FastAPI(title="TradeSense v2", lifespan=lifespan,
+              docs_url=None, redoc_url=None, openapi_url=None)
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -186,12 +215,16 @@ class AlpacaKeysBody(BaseModel):
 
 
 @app.get("/api/settings")
-def get_settings():
+def get_settings(request: Request):
+    if not _admin_authorized(request):
+        return _unauthorized()
     return JSONResponse(status_dict())
 
 
 @app.post("/api/settings/keys")
-def post_settings_keys(body: AlpacaKeysBody):
+def post_settings_keys(body: AlpacaKeysBody, request: Request):
+    if not _admin_authorized(request):
+        return _unauthorized()
     if not body.api_key.strip() or not body.secret_key.strip():
         return JSONResponse({"ok": False, "error": "api_key and secret_key required"}, status_code=400)
     try:
@@ -209,23 +242,29 @@ def post_settings_keys(body: AlpacaKeysBody):
 
 
 @app.delete("/api/settings/keys")
-def delete_settings_keys():
+def delete_settings_keys(request: Request):
+    if not _admin_authorized(request):
+        return _unauthorized()
     clear_keys()
     engine.reset_broker()
     return JSONResponse({"ok": True, **status_dict()})
 
 
 @app.post("/api/settings/reset")
-def post_settings_reset():
+def post_settings_reset(request: Request):
     """Manually reset drawdown baseline / regime / positions / history.
     Useful after switching accounts to clear a stale drawdown brake."""
+    if not _admin_authorized(request):
+        return _unauthorized()
     store.reset_trading_state()
     engine.reset_broker()
     return JSONResponse({"ok": True, **status_dict()})
 
 
 @app.get("/api/snapshot")
-def snapshot():
+def snapshot(request: Request):
+    if not _admin_authorized(request):
+        return _unauthorized()
     return JSONResponse(engine.snapshot())
 
 

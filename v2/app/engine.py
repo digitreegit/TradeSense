@@ -116,21 +116,25 @@ class Engine:
         return out
 
     def _execute_sell(self, sym: str, meta_sleeve: str, reason: str,
-                      broker_positions: dict[str, dict]) -> None:
+                      broker_positions: dict[str, dict]) -> bool:
+        """Returns True when the position is gone (sold or already absent)."""
         pos = broker_positions.get(sym)
         if pos is None:
             store.pos_meta_delete(sym)
-            return
+            return True
         if self.broker.sell_all(sym):
             store.pos_meta_delete(sym)
             store.log_trade(sym, meta_sleeve, "sell", pos["market_value"], reason,
                             detail=f"pnl={pos['unrealized_pl']:+.2f}")
             send(f"SELL {sym} ({meta_sleeve}, {reason}) "
                  f"${pos['market_value']:,.0f} pnl {pos['unrealized_pl']:+.2f}")
+            return True
+        return False
 
     def _execute_buy(self, order: dict, features: dict[str, pd.DataFrame],
-                     equity: float, cash: float, brake: DrawdownBrake) -> float:
-        """Returns dollars spent (0 if skipped)."""
+                     equity: float, cash: float, brake: DrawdownBrake) -> float | None:
+        """Returns dollars spent. 0.0 means intentionally skipped (do not
+        retry); None means the order submit failed (caller may retry)."""
         sym = order["symbol"]
         overlay = news_overlay.current()
         if sym in overlay.get("avoid", []):
@@ -153,7 +157,7 @@ class Engine:
         if dollars < config.MIN_ORDER_NOTIONAL:
             return 0.0
         if self.broker.buy_notional(sym, dollars) is None:
-            return 0.0
+            return None
         stop = price - order["stop_mult"] * atr_val
         store.pos_meta_upsert(sym, order["sleeve"], stop, order["stop_mult"],
                               datetime.now(timezone.utc).isoformat())
@@ -250,14 +254,40 @@ class Engine:
         if not self.broker.market_open_now():
             log.info("market not open yet; keeping pending orders, will retry")
             return False
-        features = self._features(config.EQUITY_UNIVERSE)
+
         equity = self.broker.equity()
-        brake = self._brake()
         broker_positions = self.broker.positions()
+
+        # Re-evaluate the drawdown brake on opening equity. An overnight gap
+        # can breach the hard limit after yesterday's 16:35 check; without
+        # this, queued buys would still execute at half size.
+        brake = self._brake()
+        if brake.peak_equity <= 0:
+            brake.peak_equity = equity
+        brake.update(equity)
+        self._save_brake(brake)
+        if brake.halted:
+            send(f"Drawdown hard brake at open (dd {brake.drawdown(equity):.1%}) "
+                 f"— liquidating, queued buys cancelled")
+            metas = self._pos_metas(broker_positions)
+            for sym, meta in metas.items():
+                self._execute_sell(sym, meta.sleeve, "dd-halt", broker_positions)
+            store.pending_clear()
+            log_activity("open", "드로다운 하드 브레이크 — 전량 청산, 예약 매수 취소")
+            return True
+
+        features = self._features(config.EQUITY_UNIVERSE)
+        failed: list[dict] = []
 
         sells = [p for p in pending if p["side"] == "sell"]
         for o in sells:
-            self._execute_sell(o["symbol"], o["sleeve"], o["reason"], broker_positions)
+            try:
+                ok = self._execute_sell(o["symbol"], o["sleeve"], o["reason"], broker_positions)
+            except Exception:
+                log.exception("open sell %s failed", o["symbol"])
+                ok = False
+            if not ok:
+                failed.append(o)
         if sells:
             # Market sells take a few seconds to fill; without this wait the
             # cash read below is stale and buys get skipped or undersized.
@@ -266,8 +296,25 @@ class Engine:
         for o in [p for p in pending if p["side"] == "buy"]:
             if o["symbol"] in broker_positions:
                 continue
-            spent = self._execute_buy(o, features, equity, cash, brake)
-            cash -= spent
+            try:
+                spent = self._execute_buy(o, features, equity, cash, brake)
+            except Exception:
+                log.exception("open buy %s failed", o["symbol"])
+                spent = None
+            if spent is None:
+                failed.append(o)
+            else:
+                cash -= spent
+
+        if failed:
+            # Keep ONLY the failed orders queued and retry on the next tick.
+            # Previously pending_clear() ran unconditionally, so one broker
+            # error silently dropped the rest of the day's orders.
+            store.pending_replace_dicts(failed)
+            names = ", ".join(o["symbol"] for o in failed)
+            log_activity("open", f"장 시작 — {len(pending) - len(failed)}건 처리, "
+                                 f"실패 {len(failed)}건 재시도 예정: {names}")
+            return False
         store.pending_clear()
         log_activity("open", f"장 시작 — {len(pending)}건 예약 주문 처리 완료")
         return True
@@ -311,7 +358,7 @@ class Engine:
                 order = {"symbol": sym, "sleeve": CRYPTO, "slot_weight": slot,
                          "stop_mult": config.MOMENTUM_STOP_ATR, "reason": "trend-on"}
                 spent = self._execute_buy(order, features, equity, cash, brake)
-                cash -= spent
+                cash -= spent or 0.0  # None = submit failed; hourly job retries
         log_activity("crypto", "크립토 슬리브 점검 완료")
 
     def job_intraday_stops(self) -> None:

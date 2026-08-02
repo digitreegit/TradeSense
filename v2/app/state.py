@@ -1,19 +1,21 @@
 """State persistence: position metadata (stops/sleeves), pending orders,
 equity curve, trade log, and key-value state (drawdown peak, regime, etc.).
 
-Three backends behind one interface, picked automatically:
-- Postgres     when DATABASE_URL is set (preferred — Supabase free tier)
-- Vercel Blob  when BLOB_READ_WRITE_TOKEN is set and no DATABASE_URL
-- SQLite       otherwise (local dev / single-box Docker)
+Two backends behind one interface, picked automatically:
+- Postgres  when DATABASE_URL is set (Supabase — required on Vercel)
+- SQLite    otherwise (local dev / single-box Docker)
+
+The old Vercel Blob backend was removed: its health probe could overwrite
+the live state document, and the store itself got suspended. On Vercel
+without DATABASE_URL the app boots on ephemeral /tmp SQLite and the
+dashboard shows a loud storage error instead of silently losing state.
 """
 from __future__ import annotations
 
 import json
 import logging
-import os
 import sqlite3
 import threading
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -214,6 +216,19 @@ class Store:
                  datetime.now(timezone.utc).isoformat()),
             )
 
+    def pending_replace_dicts(self, orders: list[dict]) -> None:
+        """Rewrite the pending queue from row dicts (used to keep only the
+        orders that failed to execute at the open, so they retry next tick)."""
+        self._exec("DELETE FROM pending_orders")
+        for o in orders:
+            self._exec(
+                "INSERT INTO pending_orders(symbol,sleeve,side,slot_weight,stop_mult,reason,created_at) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (o["symbol"], o["sleeve"], o["side"], o.get("slot_weight", 0),
+                 o.get("stop_mult", 0), o.get("reason", ""),
+                 o.get("created_at") or datetime.now(timezone.utc).isoformat()),
+            )
+
     def pending_all(self) -> list[dict]:
         return self._query("SELECT * FROM pending_orders ORDER BY id")
 
@@ -252,13 +267,17 @@ class Store:
         self._exec("DELETE FROM kv WHERE key IN ('brake','regime') OR key LIKE 'job_ran:%'")
 
     def storage_health(self) -> dict:
+        backend = "postgres" if self.pg else "sqlite"
+        if self.ephemeral:
+            # /tmp SQLite on Vercel: works within one invocation but state is
+            # lost between lambdas. Treat as broken so the dashboard screams.
+            return {"ok": False, "backend": backend, "ephemeral": True,
+                    "error": "DATABASE_URL 미설정 — 상태가 요청 간에 유지되지 않습니다."}
         try:
             self.set("_heartbeat", datetime.now(timezone.utc).isoformat())
-            return {"ok": True, "backend": "postgres" if self.pg else "sqlite",
-                    "ephemeral": self.ephemeral}
+            return {"ok": True, "backend": backend, "ephemeral": False}
         except Exception as exc:
-            return {"ok": False, "backend": "postgres" if self.pg else "sqlite",
-                    "error": str(exc)}
+            return {"ok": False, "backend": backend, "error": str(exc)}
 
     # -- Alpaca credentials (kept apart from trading state) -----------------
     def config_get(self) -> dict:
@@ -268,322 +287,4 @@ class Store:
         self.set("alpaca_config", cfg)
 
 
-class BlobStore:
-    """Whole state as one JSON document in Vercel Blob.
-
-    Volumes are tiny (a few writes per day), and jobs never overlap in time,
-    so read-modify-write on a single document is safe. A short TTL cache
-    keeps the dashboard cheap while staying fresh across lambda instances.
-    """
-
-    PATH = "state/tradesense.json"
-    # Credentials live in their OWN document. The main state doc is rewritten
-    # by every cron tick; if a download transiently returns empty, that
-    # rewrite used to wipe the saved live keys. A separate doc that only the
-    # settings endpoints write can never be clobbered by trading-state saves.
-    CONFIG_PATH = "state/alpaca_config.json"
-    API = "https://blob.vercel-storage.com"
-    API_VERSION = "12"
-    TTL_SECONDS = 10
-    EMPTY = {"kv": {}, "pos_meta": {}, "pending": [], "equity_curve": [], "trades": []}
-
-    def __init__(self) -> None:
-        self._state: dict | None = None
-        self._loaded_at = 0.0
-        self._url: str | None = None
-        self._lock = threading.Lock()
-        self._load_ok = False
-        self._config: dict | None = None
-        self._config_at = 0.0
-        self._config_url: str | None = None
-
-    # -- transport (Blob REST API, mirrors @vercel/blob headers) -----------
-    def _token(self) -> str:
-        # Prefer the long-lived RW token. OIDC alone is short-lived and not
-        # always present in Python serverless; RW token works for list/put/get.
-        return (
-            os.environ.get("BLOB_READ_WRITE_TOKEN")
-            or os.environ.get("VERCEL_OIDC_TOKEN")
-            or ""
-        )
-
-    def _headers(self, **extra: str) -> dict:
-        return {
-            "authorization": f"Bearer {self._token()}",
-            "x-api-version": self.API_VERSION,
-            **extra,
-        }
-
-    def _get_private(self, url: str) -> "httpx.Response":
-        """GET a private blob URL, re-attaching Authorization on every hop.
-
-        httpx drops Authorization when following cross-host redirects. Private
-        blob CDN URLs redirect to origin, so a naive follow_redirects=True
-        yields a silent 403 and the bot can never persist state/orders."""
-        import httpx
-
-        # Only Authorization — x-api-version is for the Blob API host, not CDN.
-        headers = {"authorization": f"Bearer {self._token()}"}
-        # Bypass CDN so overwrite-after-write is immediately visible.
-        fetch_url = url
-        if "cache=" not in url:
-            sep = "&" if "?" in url else "?"
-            fetch_url = f"{url}{sep}cache=0"
-
-        current = fetch_url
-        for _ in range(5):
-            resp = httpx.get(current, headers=headers, timeout=15, follow_redirects=False)
-            if resp.status_code in (301, 302, 303, 307, 308):
-                loc = resp.headers.get("location")
-                if not loc:
-                    resp.raise_for_status()
-                current = str(httpx.URL(current).join(loc))
-                continue
-            return resp
-        return resp  # type: ignore[name-defined]
-
-    def _download_doc(self, path: str, url: str | None) -> tuple[bytes | None, str | None]:
-        """Fetch one JSON document. Retries once when the listing comes back
-        empty or the cached URL 404s — transient blips here must not be
-        mistaken for 'document does not exist'."""
-        import httpx
-
-        for attempt in (0, 1):
-            if url is None:
-                resp = httpx.get(
-                    f"{self.API}/?prefix={path}&limit=1",
-                    headers=self._headers(), timeout=15,
-                )
-                resp.raise_for_status()
-                blobs = resp.json().get("blobs", [])
-                url = blobs[0]["url"] if blobs else None
-            if url is None:
-                if attempt == 0:
-                    time.sleep(1)
-                    continue
-                return None, None
-            resp = self._get_private(url)
-            if resp.status_code == 404:
-                url = None
-                if attempt == 0:
-                    continue
-                return None, None
-            resp.raise_for_status()
-            return resp.content, url
-        return None, None
-
-    def _download(self) -> bytes | None:
-        raw, self._url = self._download_doc(self.PATH, self._url)
-        return raw
-
-    def _load(self, force: bool = False) -> dict:
-        with self._lock:
-            fresh = self._state is not None and (time.time() - self._loaded_at) < self.TTL_SECONDS
-            if fresh and not force:
-                return self._state
-            try:
-                raw = self._download()
-                self._state = json.loads(raw) if raw else json.loads(json.dumps(self.EMPTY))
-                self._load_ok = True
-            except Exception as exc:
-                log.error("blob state load failed: %s", exc)
-                self._load_ok = False
-                if self._state is None:
-                    self._state = json.loads(json.dumps(self.EMPTY))
-            self._loaded_at = time.time()
-            return self._state
-
-    def _save(self) -> None:
-        import httpx
-
-        # Never persist an EMPTY fallback produced after a failed download —
-        # that is how live keys / trading_mode get wiped back to env paper.
-        if not self._load_ok:
-            log.error("blob state save skipped: last load failed")
-            return
-        try:
-            resp = httpx.put(
-                f"{self.API}/?pathname={self.PATH}",
-                headers=self._headers(**{
-                    "x-vercel-blob-access": "private",
-                    "x-allow-overwrite": "1",
-                    "x-add-random-suffix": "0",
-                    "x-cache-control-max-age": "0",
-                    "x-content-type": "application/json",
-                }),
-                content=json.dumps(self._state).encode(),
-                timeout=15,
-            )
-            resp.raise_for_status()
-            self._url = resp.json().get("url", self._url)
-        except Exception as exc:
-            log.error("blob state save failed: %s", exc)
-
-    # -- kv -----------------------------------------------------------------
-    def get(self, key: str, default=None):
-        return self._load().get("kv", {}).get(key, default)
-
-    def set(self, key: str, value) -> None:
-        # Always re-read before write to reduce lost-update races with cron.
-        st = self._load(force=True)
-        st.setdefault("kv", {})[key] = value
-        self._save()
-
-    # -- position metadata ---------------------------------------------------
-    def pos_meta_all(self) -> dict[str, dict]:
-        return dict(self._load().get("pos_meta", {}))
-
-    def pos_meta_upsert(self, symbol: str, sleeve: str, stop_level: float | None,
-                        stop_mult: float, entry_date: str, held_days: int = 0) -> None:
-        st = self._load(force=True)
-        st.setdefault("pos_meta", {})[symbol] = {
-            "symbol": symbol, "sleeve": sleeve, "stop_level": stop_level,
-            "stop_mult": stop_mult, "entry_date": entry_date, "held_days": held_days,
-        }
-        self._save()
-
-    def pos_meta_update_stop(self, symbol: str, stop_level: float, held_days: int) -> None:
-        st = self._load(force=True)
-        meta = st.get("pos_meta", {}).get(symbol)
-        if meta:
-            meta["stop_level"] = stop_level
-            meta["held_days"] = held_days
-            self._save()
-
-    def pos_meta_delete(self, symbol: str) -> None:
-        st = self._load(force=True)
-        if st.get("pos_meta", {}).pop(symbol, None) is not None:
-            self._save()
-
-    # -- pending orders ---------------------------------------------------------
-    def pending_replace(self, orders: list) -> None:
-        st = self._load(force=True)
-        st["pending"] = [
-            {"id": i + 1, "symbol": o.symbol, "sleeve": o.sleeve, "side": o.side,
-             "slot_weight": o.slot_weight, "stop_mult": o.stop_mult, "reason": o.reason,
-             "created_at": datetime.now(timezone.utc).isoformat()}
-            for i, o in enumerate(orders)
-        ]
-        self._save()
-
-    def pending_all(self) -> list[dict]:
-        return list(self._load().get("pending", []))
-
-    def pending_clear(self) -> None:
-        st = self._load(force=True)
-        if st.get("pending"):
-            st["pending"] = []
-            self._save()
-
-    # -- logs ----------------------------------------------------------------
-    def log_equity(self, equity: float, cash: float, reg: str) -> None:
-        st = self._load(force=True)
-        st.setdefault("equity_curve", []).append(
-            {"ts": datetime.now(timezone.utc).isoformat(), "equity": equity,
-             "cash": cash, "regime": reg})
-        st["equity_curve"] = st["equity_curve"][-5000:]
-        self._save()
-
-    def log_trade(self, symbol: str, sleeve: str, side: str, notional: float,
-                  reason: str, detail: str = "") -> None:
-        st = self._load(force=True)
-        trades = st.setdefault("trades", [])
-        trades.append({"id": len(trades) + 1,
-                       "ts": datetime.now(timezone.utc).isoformat(),
-                       "symbol": symbol, "sleeve": sleeve, "side": side,
-                       "notional": notional, "reason": reason, "detail": detail})
-        st["trades"] = trades[-2000:]
-        self._save()
-
-    def equity_curve(self, limit: int = 5000) -> list[dict]:
-        return self._load().get("equity_curve", [])[-limit:]
-
-    def recent_trades(self, limit: int = 200) -> list[dict]:
-        return list(reversed(self._load().get("trades", [])[-limit:]))
-
-    def storage_health(self) -> dict:
-        """Probe whether the blob backend can read/write. Surfaces billing
-        suspensions that otherwise look like a silent 'idle' bot."""
-        import httpx
-
-        try:
-            probe = {
-                "kv": {"_heartbeat": datetime.now(timezone.utc).isoformat()},
-                "pos_meta": {}, "pending": [], "equity_curve": [], "trades": [],
-            }
-            resp = httpx.put(
-                f"{self.API}/?pathname={self.PATH}",
-                headers=self._headers(**{
-                    "x-vercel-blob-access": "private",
-                    "x-allow-overwrite": "1",
-                    "x-add-random-suffix": "0",
-                    "x-cache-control-max-age": "0",
-                    "x-content-type": "application/json",
-                }),
-                content=json.dumps(probe).encode(),
-                timeout=15,
-            )
-            if resp.status_code >= 400:
-                body = (resp.text or "")[:300]
-                return {
-                    "ok": False, "backend": "blob",
-                    "error": f"Vercel Blob write failed ({resp.status_code}): {body}",
-                }
-            self._url = resp.json().get("url", self._url)
-            self._state = probe
-            self._load_ok = True
-            self._loaded_at = time.time()
-            # Confirm we can read it back
-            raw, self._url = self._download_doc(self.PATH, self._url)
-            if raw is None:
-                return {"ok": False, "backend": "blob",
-                        "error": "Vercel Blob write ok but read returned empty"}
-            return {"ok": True, "backend": "blob"}
-        except Exception as exc:
-            msg = str(exc)
-            return {"ok": False, "backend": "blob", "error": msg}
-        with self._lock:
-            fresh = self._config is not None and (time.time() - self._config_at) < self.TTL_SECONDS
-            if fresh:
-                return dict(self._config)
-            try:
-                raw, self._config_url = self._download_doc(self.CONFIG_PATH, self._config_url)
-                self._config = json.loads(raw) if raw else {}
-            except Exception as exc:
-                log.error("alpaca config load failed: %s", exc)
-                if self._config is None:
-                    self._config = {}
-            self._config_at = time.time()
-            return dict(self._config)
-
-    def config_set(self, cfg: dict) -> None:
-        import httpx
-
-        with self._lock:
-            resp = httpx.put(
-                f"{self.API}/?pathname={self.CONFIG_PATH}",
-                headers=self._headers(**{
-                    "x-vercel-blob-access": "private",
-                    "x-allow-overwrite": "1",
-                    "x-add-random-suffix": "0",
-                    "x-cache-control-max-age": "0",
-                    "x-content-type": "application/json",
-                }),
-                content=json.dumps(cfg).encode(),
-                timeout=15,
-            )
-            resp.raise_for_status()
-            self._config = dict(cfg)
-            self._config_at = time.time()
-            self._config_url = resp.json().get("url", self._config_url)
-
-
-def _make_store():
-    if settings.database_url:
-        return Store()
-    if os.environ.get("BLOB_READ_WRITE_TOKEN"):
-        return BlobStore()
-    return Store()
-
-
-store = _make_store()
+store = Store()

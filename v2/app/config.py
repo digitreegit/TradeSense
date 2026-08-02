@@ -17,16 +17,24 @@ DATA_DIR = ROOT_DIR / "data"
 # ---------------------------------------------------------------------------
 # Mixed universe so momentum can rotate into defensive assets (gold, bonds)
 # in bad tape instead of being forced to sit 100% cash.
-EQUITY_UNIVERSE: list[str] = [
+EQUITY_ETFS: list[str] = [
     # Broad index ETFs
     "SPY", "QQQ", "IWM", "DIA",
     # Sector ETFs
     "XLK", "XLE", "XLF", "XLV", "XLI", "XLU", "XLP", "XLY",
     # Defensive / macro ETFs
     "GLD", "SLV", "TLT", "IEF",
-    # Liquid megacaps
+]
+# Liquid megacaps — carry earnings-gap risk that ETFs don't.
+SINGLE_STOCKS: list[str] = [
     "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "AVGO",
 ]
+EQUITY_UNIVERSE: list[str] = EQUITY_ETFS + SINGLE_STOCKS
+
+# Single stocks gap straight through ATR stops on earnings (2026-07-31:
+# AAPL -8.7% overnight on a ~27% slot cost the account 2.4% in one night).
+# Halving the slot halves the damage a single gap can do.
+SINGLE_NAME_SCALE = 0.5
 
 # Alpaca crypto — NOT available in NJ and many US states. See:
 # https://alpaca.markets/support/alpaca-cryptocurrency
@@ -117,6 +125,10 @@ class Settings(BaseSettings):
 
     # Cron endpoint protection (Vercel sends Authorization: Bearer $CRON_SECRET)
     cron_secret: str = ""
+
+    # Dashboard / settings API protection. Falls back to CRON_SECRET when
+    # unset. If neither is set, admin routes are open only outside Vercel.
+    admin_token: str = ""
 
     @property
     def on_vercel(self) -> bool:
