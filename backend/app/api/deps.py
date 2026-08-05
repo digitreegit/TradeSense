@@ -1,12 +1,13 @@
-"""FastAPI dependencies: JWT user + per-user trading engine."""
+"""FastAPI dependencies: Supabase bearer token + per-user trading engine."""
 from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.services.auth_service import decode_token
+from app.db import users_db
+from app.services.supabase_auth import verify_supabase_bearer
 from app.services.user_runtime import default_engine, get_or_create_engine
 
 security = HTTPBearer(auto_error=False)
@@ -26,8 +27,14 @@ def get_current_user_id_optional(
     if not token:
         return None
     try:
-        payload = decode_token(token)
-        return int(payload["sub"])
+        payload = verify_supabase_bearer(token)
+        email = str(payload.get("email") or "").strip().lower()
+        sub = str(payload.get("sub") or "").strip()
+        if not email or not sub:
+            return None
+        users_db.init_db()
+        row = users_db.ensure_user_for_supabase(email=email, supabase_user_id=sub)
+        return int(row["id"])
     except Exception:
         return None
 

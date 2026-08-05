@@ -35,12 +35,18 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 email TEXT NOT NULL UNIQUE COLLATE NOCASE,
                 password_hash TEXT NOT NULL,
+                supabase_user_id TEXT UNIQUE,
                 alpaca_key_enc BLOB,
                 alpaca_secret_enc BLOB,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
             """
         )
+        # Lightweight migration for existing DBs created before supabase_user_id
+        cols = conn.execute("PRAGMA table_info(users)").fetchall()
+        col_names = {str(c[1]) for c in cols}
+        if "supabase_user_id" not in col_names:
+            conn.execute("ALTER TABLE users ADD COLUMN supabase_user_id TEXT")
         conn.commit()
     finally:
         conn.close()
@@ -71,11 +77,59 @@ def get_user_by_email(email: str) -> Optional[dict[str, Any]]:
         conn.close()
 
 
+def get_user_by_supabase_id(supabase_user_id: str) -> Optional[dict[str, Any]]:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM users WHERE supabase_user_id = ?",
+            (supabase_user_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
 def get_user_by_id(user_id: int) -> Optional[dict[str, Any]]:
     conn = get_connection()
     try:
         row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def ensure_user_for_supabase(
+    email: str,
+    supabase_user_id: str,
+) -> dict[str, Any]:
+    """
+    Map Supabase-authenticated identity to local user row.
+    - Prefer direct supabase_user_id match
+    - Else match by email and bind supabase_user_id
+    - Else create new user row (password_hash kept empty for OAuth users)
+    """
+    user_row = get_user_by_supabase_id(supabase_user_id)
+    if user_row:
+        return user_row
+
+    existing = get_user_by_email(email)
+    conn = get_connection()
+    try:
+        if existing:
+            conn.execute(
+                "UPDATE users SET supabase_user_id = ? WHERE id = ?",
+                (supabase_user_id, int(existing["id"])),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM users WHERE id = ?", (int(existing["id"]),)).fetchone()
+            return dict(row)
+        cur = conn.execute(
+            "INSERT INTO users (email, password_hash, supabase_user_id) VALUES (?, ?, ?)",
+            (email.strip().lower(), "", supabase_user_id),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (int(cur.lastrowid),)).fetchone()
+        return dict(row)
     finally:
         conn.close()
 

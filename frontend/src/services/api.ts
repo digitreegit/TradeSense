@@ -147,18 +147,6 @@ export const api = {
       body: JSON.stringify({ strategy, params }),
     }),
 
-  register: (email: string, password: string) =>
-    request<{ user_id: number; email: string; access_token: string }>('/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    }),
-
-  login: (email: string, password: string) =>
-    request<{ user_id: number; email: string; access_token: string }>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    }),
-
   getMe: () =>
     request<{
       authenticated: boolean;

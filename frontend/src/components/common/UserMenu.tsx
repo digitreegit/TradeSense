@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import { clearToken } from '../../auth/token';
+import { supabase } from '../../auth/supabase';
 
 const UserIcon = (props: React.ComponentProps<'svg'>) => (
   <svg {...props} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -22,6 +23,7 @@ const UserMenu: React.FC = () => {
   }, []);
 
   const logout = () => {
+    void supabase.auth.signOut();
     clearToken();
     setAuthProfile(null, false);
     setAuthMethod(null);
