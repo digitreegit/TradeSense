@@ -67,8 +67,9 @@ def decide(
             pending.append(PendingOrder(sym, pos.sleeve, "sell", reason="dip-exit"))
 
     pending_sells = {o.symbol for o in pending if o.side == "sell"}
+    pending_buys: set[str] = set()
 
-    # 2) momentum rotation on week boundary (decide Friday, fill Monday)
+    # 2) momentum rotation on week boundary (decide before Monday, fill Monday)
     if week_rollover:
         stock_rows = {s: rows[s] for s in stock_syms if s in rows}
         targets = strategy.select_momentum(stock_rows)
@@ -85,6 +86,7 @@ def decide(
                         slot_weight=slot * _name_scale(sym),
                         stop_mult=config.MOMENTUM_STOP_ATR,
                     ))
+                    pending_buys.add(sym)
 
     # 3) dip-buy entries daily (skipped in BEAR: no knife catching)
     if reg != regime.BEAR:
@@ -93,7 +95,8 @@ def decide(
         if budget > 0:
             cands = [
                 s for s in stock_syms
-                if s in rows and s not in positions and s not in pending_sells
+                if s in rows and s not in positions
+                and s not in pending_sells and s not in pending_buys
                 and strategy.dip_entry(rows[s])
             ]
             cands.sort(key=lambda s: rows[s]["rsi2"])  # most oversold first
@@ -103,6 +106,7 @@ def decide(
                     slot_weight=0.25 * expo * _name_scale(sym),
                     stop_mult=config.DIP_STOP_ATR,
                 ))
+                pending_buys.add(sym)
 
     # 4) third sleeve: crypto (licensed regions) or defensive macro ETFs (NJ-safe)
     if crypto_syms:
@@ -119,11 +123,17 @@ def decide(
             if row is None:
                 continue
             long_ok = strategy.trend_long(row)
-            if long_ok and sym not in positions and sym not in pending_sells:
+            if (
+                long_ok
+                and sym not in positions
+                and sym not in pending_sells
+                and sym not in pending_buys
+            ):
                 pending.append(PendingOrder(
                     sym, sleeve, "buy",
                     slot_weight=slot, stop_mult=config.MOMENTUM_STOP_ATR,
                 ))
+                pending_buys.add(sym)
             elif not long_ok and sym in positions and sym not in pending_sells:
                 pending.append(PendingOrder(sym, sleeve, "sell", reason="trend-off"))
 

@@ -22,9 +22,9 @@ SKYFACE 유료(`hoyong@skyface.com`)는 MyPasswordVault 전용.
 
 | 슬리브 | 로직 | 빈도 |
 |---|---|---|
-| 모멘텀 로테이션 | ETF·메가캡·금·채권 유니버스 상위 3개 | 주 1회 |
+| 모멘텀 로테이션 | ETF·메가캡 3개월 수익률 상위 3개 | 주 1회 |
 | 딥바이 | 200일선 위 + RSI(2)<10 과매도 | 매일 |
-| 크립토 추세 | BTC/ETH 50EMA 위 | 매시간 |
+| 방어 추세 | GLD/TLT/IEF 50EMA 추세 (크립토 비활성 기본값) | 매일 |
 
 ---
 
@@ -81,23 +81,13 @@ cp .env.example .env
 
 ```bash
 .venv/bin/python scripts/run_backtest.py --start 2015-06-01 --trade-start 2016-06-01
+# 크립토 허용 지역의 대체 슬리브
+.venv/bin/python scripts/run_backtest.py --crypto
 ```
 
-2016~2026, $3K 시작: CAGR 27.3%, MDD -22.8%, Sharpe 1.37 (SPY 대비 우수).
-과거 성과 ≠ 미래 보장.
-
----
-
-## 현재 장애: `broker unavailable: unauthorized`
-
-Vercel에 올라간 Alpaca 키가 **만료/무효** 상태입니다.
-페이퍼 대시보드에서 키를 재발급한 뒤 Vercel env를 갱신하고 재배포하세요.
-
-```bash
-npx vercel env rm ALPACA_API_KEY production -y && npx vercel env add ALPACA_API_KEY production
-npx vercel env rm ALPACA_SECRET_KEY production -y && npx vercel env add ALPACA_SECRET_KEY production
-npx vercel deploy --prod --yes
-```
+기본 백테스트는 라이브 기본값과 동일하게 크립토 없이 방어 슬리브를 사용합니다.
+Yahoo 조정주가·현재 유니버스를 사용하므로 생존편향이 있고, 과거 성과는 미래를
+보장하지 않습니다. 배포 전 여러 시작 연도와 SPY 벤치마크를 함께 비교하세요.
 
 ---
 

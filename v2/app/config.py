@@ -42,6 +42,12 @@ CRYPTO_UNIVERSE: list[str] = ["BTC/USD", "ETH/USD"]
 
 # Third sleeve when crypto is disabled: macro/defensive trend (GLD/TLT/IEF).
 DEFENSIVE_UNIVERSE: list[str] = ["GLD", "TLT", "IEF"]
+# Keep defensive assets out of the momentum ranking. Previously GLD/TLT/IEF
+# could be selected by both sleeves on the same decision and the live executor
+# could submit duplicate buys for one symbol.
+MOMENTUM_UNIVERSE: list[str] = [
+    s for s in EQUITY_UNIVERSE if s not in DEFENSIVE_UNIVERSE
+]
 
 # Symbols used only for regime detection.
 REGIME_SYMBOL = "SPY"
@@ -52,6 +58,11 @@ REGIME_SYMBOL = "SPY"
 MOMENTUM_LOOKBACK = 63          # ~3 months of trading days
 MOMENTUM_TOP_N = 3              # concurrent momentum holdings
 MOMENTUM_REBALANCE_WEEKDAY = 0  # Monday
+# Rank by absolute return. The former return/volatility score systematically
+# preferred slow, low-beta names (DIA/XLF/XLV) during strong growth markets.
+# Cached walk-forward tests (2018/2020/2022/2024 starts) showed higher CAGR
+# and Sharpe for raw return after costs, without a worse recent max drawdown.
+MOMENTUM_VOL_PENALTY = 0.0      # 0=raw return; 1=return / annualized vol
 ATR_PERIOD = 14
 MOMENTUM_STOP_ATR = 3.0         # wide trailing stop: ride trends, absorb noise
 

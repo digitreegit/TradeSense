@@ -15,7 +15,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from . import config
-from .indicators import atr, ema, momentum_score, rsi, sma
+from .indicators import annualized_vol, atr, ema, momentum_score, rsi, sma
 
 
 def compute_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -28,6 +28,7 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     out["atr"] = atr(out, config.ATR_PERIOD)
     out["mom_score"] = momentum_score(close, config.MOMENTUM_LOOKBACK)
     out["mom_ret"] = close / close.shift(config.MOMENTUM_LOOKBACK) - 1.0
+    out["mom_vol"] = annualized_vol(close, config.MOMENTUM_LOOKBACK)
     out["rsi2"] = rsi(close, config.DIP_RSI_PERIOD)
     out["sma200"] = sma(close, 200)
     out["ema_fast"] = ema(close, config.CRYPTO_FAST_EMA)
@@ -36,7 +37,7 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def select_momentum(rows: dict[str, pd.Series], top_n: int | None = None) -> list[str]:
-    """Pick top-N symbols by risk-adjusted momentum, requiring positive
+    """Pick top-N symbols by configurable momentum rank, requiring positive
     absolute momentum (dual momentum: a slot with nothing strong stays cash).
 
     `rows` maps symbol -> feature row as of the decision date.
@@ -44,13 +45,15 @@ def select_momentum(rows: dict[str, pd.Series], top_n: int | None = None) -> lis
     top_n = top_n or config.MOMENTUM_TOP_N
     candidates = []
     for sym, row in rows.items():
-        score = row.get("mom_score")
         ret = row.get("mom_ret")
-        if score is None or pd.isna(score) or pd.isna(ret):
+        vol = row.get("mom_vol")
+        if ret is None or vol is None or pd.isna(ret) or pd.isna(vol) or vol <= 0:
             continue
         if ret <= 0:
             continue
-        candidates.append((sym, float(score)))
+        penalty = config.MOMENTUM_VOL_PENALTY
+        score = float(ret) / float(vol) ** penalty
+        candidates.append((sym, score))
     candidates.sort(key=lambda x: x[1], reverse=True)
     return [sym for sym, _ in candidates[:top_n]]
 

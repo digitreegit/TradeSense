@@ -28,6 +28,26 @@ from .state import store
 log = logging.getLogger(__name__)
 
 
+def _carry_unexecuted_sells(
+    new_orders: list[PendingOrder],
+    old_pending: list[dict],
+    broker_positions: dict[str, dict],
+) -> list[PendingOrder]:
+    """Carry held-position exits; discard stale buys and duplicate decisions."""
+    new_symbols = {o.symbol for o in new_orders}
+    carried = [
+        PendingOrder(
+            o["symbol"], o["sleeve"], "sell",
+            reason=o.get("reason") or "carried-exit",
+        )
+        for o in old_pending
+        if o["side"] == "sell"
+        and o["symbol"] in broker_positions
+        and o["symbol"] not in new_symbols
+    ]
+    return carried + new_orders
+
+
 class Engine:
     """Broker construction is lazy so the app can boot (and serve the
     dashboard with a clear error) before API keys are configured."""
@@ -47,8 +67,17 @@ class Engine:
     # ------------------------------------------------------------------
     # shared helpers
     # ------------------------------------------------------------------
-    def _features(self, symbols: list[str]) -> dict[str, pd.DataFrame]:
+    def _features(
+        self, symbols: list[str], *, completed_only: bool = False
+    ) -> dict[str, pd.DataFrame]:
         bars = self.broker.daily_bars(symbols)
+        if completed_only:
+            # At 09:31 Alpaca may include a partial bar for today. Using that
+            # bar's one-minute ATR/close to size an order is look-ahead versus
+            # the backtest and can create unstable stops. Opening orders must
+            # use indicators through the previous completed session.
+            today_et = pd.Timestamp(datetime.now(ZoneInfo(settings.timezone)).date())
+            bars = {s: df.loc[df.index < today_et] for s, df in bars.items()}
         return {s: strategy.compute_features(df) for s, df in bars.items() if len(df) >= 60}
 
     def _brake(self) -> DrawdownBrake:
@@ -219,18 +248,41 @@ class Engine:
             return True
 
         rows = {s: f.iloc[-1] for s, f in features.items()}
-        from .config import settings
         now_et = datetime.now(ZoneInfo(settings.timezone))
-        week_rollover = now_et.weekday() == 4  # Friday decision -> Monday fill
+        next_open = self.broker.next_market_open()
+        # Holiday-aware: rebalance on the session before Monday, which can be
+        # Thursday when Friday is a market holiday.
+        week_rollover = (
+            next_open.astimezone(ZoneInfo(settings.timezone)).weekday()
+            == config.MOMENTUM_REBALANCE_WEEKDAY
+            if next_open is not None
+            else now_et.weekday() == 4
+        )
         orders = decide(
             rows=rows, positions=metas,
-            stock_syms=[s for s in config.EQUITY_UNIVERSE if s in rows],
+            stock_syms=[s for s in config.MOMENTUM_UNIVERSE if s in rows],
             crypto_syms=[s for s in crypto_syms if s in rows],
             defensive_syms=[s for s in defensive_syms if s in rows],
             reg=reg, week_rollover=week_rollover,
         )
         immediate = self._immediate_sleeves()
         stock_orders = [o for o in orders if o.sleeve not in immediate]
+
+        # If the open executor was unavailable all day, do not let the close
+        # decision silently erase an unexecuted exit. Old buys are deliberately
+        # discarded (the signal is stale); sells for positions still held are
+        # carried forward unless today's fresh decision already covers them.
+        old_pending = store.pending_all()
+        merged_orders = _carry_unexecuted_sells(
+            stock_orders, old_pending, broker_positions
+        )
+        carried_sells = merged_orders[:len(merged_orders) - len(stock_orders)]
+        if carried_sells:
+            log_activity(
+                "decision",
+                "미체결 매도 승계: " + ", ".join(o.symbol for o in carried_sells),
+            )
+        stock_orders = merged_orders
         store.pending_replace(stock_orders)
         store.log_equity(equity, cash, reg)
 
@@ -247,14 +299,11 @@ class Engine:
         Returns False when the market is not open yet so the cron caller
         retries on the next tick instead of marking the job done for the day
         (that bug silently dropped a whole day's queued orders)."""
-        pending = store.pending_all()
-        if not pending:
-            log_activity("open", "장 시작 — 예약 주문 없음")
-            return True
         if not self.broker.market_open_now():
             log.info("market not open yet; keeping pending orders, will retry")
             return False
 
+        pending = store.pending_all()
         equity = self.broker.equity()
         broker_positions = self.broker.positions()
 
@@ -276,7 +325,32 @@ class Engine:
             log_activity("open", "드로다운 하드 브레이크 — 전량 청산, 예약 매수 취소")
             return True
 
-        features = self._features(config.EQUITY_UNIVERSE)
+        # Enforce stored stops immediately after the opening bell, even when
+        # there are no queued orders. The separate stops job may not be called
+        # until 09:45 with a 15-minute external scheduler.
+        queued_sells = {o["symbol"] for o in pending if o["side"] == "sell"}
+        opening_stops: list[str] = []
+        for sym, meta in self._pos_metas(broker_positions).items():
+            pos = broker_positions.get(sym)
+            if (
+                pos is not None
+                and meta.stop_level is not None
+                and pos["current_price"] <= meta.stop_level
+                and sym not in queued_sells
+            ):
+                if self._execute_sell(
+                    sym, meta.sleeve, "opening-stop", broker_positions
+                ):
+                    opening_stops.append(sym)
+        if opening_stops:
+            self.broker.wait_for_fills(timeout=45)
+            log_activity("stops", f"개장 손절: {', '.join(opening_stops)}")
+
+        if not pending:
+            log_activity("open", "장 시작 — 예약 주문 없음")
+            return True
+
+        features = self._features(config.EQUITY_UNIVERSE, completed_only=True)
         failed: list[dict] = []
 
         sells = [p for p in pending if p["side"] == "sell"]
@@ -291,7 +365,25 @@ class Engine:
         if sells:
             # Market sells take a few seconds to fill; without this wait the
             # cash read below is stale and buys get skipped or undersized.
-            self.broker.wait_for_fills(timeout=45)
+            fills_done = self.broker.wait_for_fills(timeout=45)
+            broker_positions = self.broker.positions()
+            unresolved = [
+                o for o in sells
+                if o["symbol"] in broker_positions
+                and not any(f.get("id") == o.get("id") for f in failed)
+            ]
+            failed.extend(unresolved)
+            if not fills_done or failed:
+                # Never spend against unconfirmed sale proceeds. Keep every
+                # buy plus unresolved sells for the next scheduler tick.
+                retry = failed + [p for p in pending if p["side"] == "buy"]
+                store.pending_replace_dicts(retry)
+                names = ", ".join(o["symbol"] for o in failed) or "fill confirmation"
+                log_activity(
+                    "open",
+                    f"매도 미완료({names}) — 예약 매수 {len(retry) - len(failed)}건 보류",
+                )
+                return False
         cash = self.broker.cash()
         for o in [p for p in pending if p["side"] == "buy"]:
             if o["symbol"] in broker_positions:

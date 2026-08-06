@@ -16,6 +16,7 @@ import json
 import logging
 import sqlite3
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -72,6 +73,12 @@ CREATE TABLE IF NOT EXISTS kv (
     value TEXT
 )
 """,
+    """
+CREATE TABLE IF NOT EXISTS job_claims (
+    key TEXT PRIMARY KEY,
+    claimed_at DOUBLE PRECISION NOT NULL
+)
+""",
 )
 
 # Lock down PostgREST exposure: enable RLS with no anon/authenticated policies.
@@ -82,6 +89,7 @@ _PG_RLS = (
     "ALTER TABLE equity_curve ENABLE ROW LEVEL SECURITY",
     "ALTER TABLE trades ENABLE ROW LEVEL SECURITY",
     "ALTER TABLE kv ENABLE ROW LEVEL SECURITY",
+    "ALTER TABLE job_claims ENABLE ROW LEVEL SECURITY",
 )
 
 
@@ -184,6 +192,45 @@ class Store:
             (key, json.dumps(value)),
         )
 
+    def try_job_claim(self, key: str, stale_after: float = 600.0) -> bool:
+        """Atomically claim one cron execution window across server instances."""
+        now = time.time()
+        with self._lock:
+            if self.pg:
+                self._pg_ensure()
+                with self._conn.cursor() as cur:
+                    cur.execute(
+                        "DELETE FROM job_claims WHERE claimed_at < %s",
+                        (now - 7 * 86400,),
+                    )
+                    cur.execute(
+                        "DELETE FROM job_claims WHERE key=%s AND claimed_at < %s",
+                        (key, now - stale_after),
+                    )
+                    cur.execute(
+                        "INSERT INTO job_claims(key,claimed_at) VALUES(%s,%s) "
+                        "ON CONFLICT(key) DO NOTHING RETURNING key",
+                        (key, now),
+                    )
+                    return cur.fetchone() is not None
+            self._conn.execute(
+                "DELETE FROM job_claims WHERE claimed_at < ?",
+                (now - 7 * 86400,),
+            )
+            self._conn.execute(
+                "DELETE FROM job_claims WHERE key=? AND claimed_at < ?",
+                (key, now - stale_after),
+            )
+            cur = self._conn.execute(
+                "INSERT OR IGNORE INTO job_claims(key,claimed_at) VALUES(?,?)",
+                (key, now),
+            )
+            self._conn.commit()
+            return cur.rowcount == 1
+
+    def release_job_claim(self, key: str) -> None:
+        self._exec("DELETE FROM job_claims WHERE key=?", (key,))
+
     # -- position metadata ----------------------------------------------
     def pos_meta_all(self) -> dict[str, dict]:
         return {r["symbol"]: r for r in self._query("SELECT * FROM pos_meta")}
@@ -206,28 +253,44 @@ class Store:
         self._exec("DELETE FROM pos_meta WHERE symbol=?", (symbol,))
 
     # -- pending orders ---------------------------------------------------
+    def _replace_pending_rows(self, rows: list[tuple]) -> None:
+        sql = (
+            "INSERT INTO pending_orders"
+            "(symbol,sleeve,side,slot_weight,stop_mult,reason,created_at) "
+            "VALUES(?,?,?,?,?,?,?)"
+        )
+        # DELETE + INSERT must be one transaction. A serverless timeout between
+        # the old per-row autocommit calls could erase the entire next-open queue.
+        with self._lock:
+            if self.pg:
+                self._pg_ensure()
+                with self._conn.transaction():
+                    with self._conn.cursor() as cur:
+                        cur.execute("DELETE FROM pending_orders")
+                        if rows:
+                            cur.executemany(sql.replace("?", "%s"), rows)
+                return
+            self._conn.execute("DELETE FROM pending_orders")
+            if rows:
+                self._conn.executemany(sql, rows)
+            self._conn.commit()
+
     def pending_replace(self, orders: list) -> None:
-        self._exec("DELETE FROM pending_orders")
-        for o in orders:
-            self._exec(
-                "INSERT INTO pending_orders(symbol,sleeve,side,slot_weight,stop_mult,reason,created_at) "
-                "VALUES(?,?,?,?,?,?,?)",
-                (o.symbol, o.sleeve, o.side, o.slot_weight, o.stop_mult, o.reason,
-                 datetime.now(timezone.utc).isoformat()),
-            )
+        created_at = datetime.now(timezone.utc).isoformat()
+        self._replace_pending_rows([
+            (o.symbol, o.sleeve, o.side, o.slot_weight, o.stop_mult, o.reason, created_at)
+            for o in orders
+        ])
 
     def pending_replace_dicts(self, orders: list[dict]) -> None:
         """Rewrite the pending queue from row dicts (used to keep only the
         orders that failed to execute at the open, so they retry next tick)."""
-        self._exec("DELETE FROM pending_orders")
-        for o in orders:
-            self._exec(
-                "INSERT INTO pending_orders(symbol,sleeve,side,slot_weight,stop_mult,reason,created_at) "
-                "VALUES(?,?,?,?,?,?,?)",
+        self._replace_pending_rows([
                 (o["symbol"], o["sleeve"], o["side"], o.get("slot_weight", 0),
                  o.get("stop_mult", 0), o.get("reason", ""),
-                 o.get("created_at") or datetime.now(timezone.utc).isoformat()),
-            )
+                 o.get("created_at") or datetime.now(timezone.utc).isoformat())
+                for o in orders
+        ])
 
     def pending_all(self) -> list[dict]:
         return self._query("SELECT * FROM pending_orders ORDER BY id")
@@ -239,7 +302,8 @@ class Store:
     def log_equity(self, equity: float, cash: float, reg: str) -> None:
         self._exec(
             "INSERT INTO equity_curve(ts,equity,cash,regime) VALUES(?,?,?,?) "
-            "ON CONFLICT(ts) DO UPDATE SET equity=excluded.equity",
+            "ON CONFLICT(ts) DO UPDATE SET equity=excluded.equity, "
+            "cash=excluded.cash, regime=excluded.regime",
             (datetime.now(timezone.utc).isoformat(), equity, cash, reg),
         )
 

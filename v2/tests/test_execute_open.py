@@ -12,7 +12,8 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app import engine as engine_mod
-from app.engine import Engine
+from app.engine import Engine, _carry_unexecuted_sells
+from app.decisions import PendingOrder
 
 
 class FakeStore:
@@ -58,11 +59,15 @@ class FakeStore:
 
 
 class FakeBroker:
-    def __init__(self, equity=1000.0, cash=1000.0, positions=None, fail_buys=()):
+    def __init__(
+        self, equity=1000.0, cash=1000.0, positions=None,
+        fail_buys=(), fail_sells=(),
+    ):
         self._equity = equity
         self._cash = cash
         self._positions = positions or {}
         self.fail_buys = set(fail_buys)
+        self.fail_sells = set(fail_sells)
         self.bought = []
         self.sold = []
 
@@ -88,12 +93,14 @@ class FakeBroker:
         return "order"
 
     def sell_all(self, sym):
+        if sym in self.fail_sells:
+            return False
         self.sold.append(sym)
         self._positions.pop(sym, None)
         return True
 
     def wait_for_fills(self, timeout=30.0):
-        pass
+        return True
 
 
 def _features(*syms):
@@ -109,7 +116,7 @@ def _make_engine(monkeypatch, broker, store):
                         lambda: {"avoid": [], "tilt": 1.0})
     eng = Engine()
     eng._broker = broker
-    eng._features = lambda syms: _features(*syms)
+    eng._features = lambda syms, **kwargs: _features(*syms)
     return eng
 
 
@@ -117,6 +124,12 @@ def _buy(sym):
     return {"id": 1, "symbol": sym, "sleeve": "momentum", "side": "buy",
             "slot_weight": 0.3, "stop_mult": 3.0, "reason": "signal",
             "created_at": "2026-01-01T00:00:00+00:00"}
+
+
+def _sell(sym):
+    order = _buy(sym)
+    order.update({"side": "sell", "slot_weight": 0.0, "reason": "rotate"})
+    return order
 
 
 def test_hard_brake_at_open_cancels_buys_and_liquidates(monkeypatch):
@@ -164,3 +177,53 @@ def test_all_orders_succeed_clears_queue(monkeypatch):
     assert [s for s, _ in broker.bought] == ["SPY"]
     assert store.pending == []
     assert "SPY" in store.pos_meta          # stop metadata recorded
+
+
+def test_opening_stop_runs_even_without_pending_orders(monkeypatch):
+    store = FakeStore()
+    store.kv["brake"] = {"peak_equity": 1000.0, "halted": False}
+    store.pos_meta["AAPL"] = {
+        "symbol": "AAPL", "sleeve": "momentum", "stop_level": 95.0,
+        "stop_mult": 3.0, "entry_date": "2026-01-01", "held_days": 3,
+    }
+    pos = {"AAPL": {"qty": 1, "market_value": 90.0, "avg_entry": 100.0,
+                    "current_price": 90.0, "unrealized_pl": -10.0}}
+    broker = FakeBroker(equity=990.0, cash=900.0, positions=pos)
+    eng = _make_engine(monkeypatch, broker, store)
+
+    assert eng.job_execute_open() is True
+    assert broker.sold == ["AAPL"]
+    assert "AAPL" not in store.pos_meta
+
+
+def test_failed_sell_defers_all_buys(monkeypatch):
+    store = FakeStore()
+    store.kv["brake"] = {"peak_equity": 1000.0, "halted": False}
+    store.pending = [_sell("AAPL"), _buy("QQQ")]
+    pos = {"AAPL": {"qty": 1, "market_value": 100.0, "avg_entry": 100.0,
+                    "current_price": 100.0, "unrealized_pl": 0.0}}
+    broker = FakeBroker(
+        equity=1000.0, cash=100.0, positions=pos, fail_sells={"AAPL"}
+    )
+    eng = _make_engine(monkeypatch, broker, store)
+
+    assert eng.job_execute_open() is False
+    assert broker.bought == []
+    assert [(o["side"], o["symbol"]) for o in store.pending] == [
+        ("sell", "AAPL"), ("buy", "QQQ")
+    ]
+
+
+def test_close_decision_carries_only_unexecuted_held_sells():
+    old = [
+        {"symbol": "AAPL", "sleeve": "dip", "side": "sell", "reason": "dip-exit"},
+        {"symbol": "QQQ", "sleeve": "momentum", "side": "buy", "reason": ""},
+        {"symbol": "MSFT", "sleeve": "momentum", "side": "sell", "reason": "stop"},
+    ]
+    fresh = [PendingOrder("XLK", "momentum", "buy", 0.3, 3.0)]
+    held = {"AAPL": {}, "XLK": {}}
+
+    merged = _carry_unexecuted_sells(fresh, old, held)
+    assert [(o.side, o.symbol) for o in merged] == [
+        ("sell", "AAPL"), ("buy", "XLK")
+    ]

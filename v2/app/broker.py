@@ -131,6 +131,14 @@ class Broker:
         except Exception:
             return False
 
+    def next_market_open(self) -> datetime | None:
+        """Return Alpaca's next official market open (holiday-aware)."""
+        try:
+            return self.trading.get_clock().next_open
+        except Exception as exc:
+            log.warning("next_market_open failed: %s", exc)
+            return None
+
     # -- orders -------------------------------------------------------------
     def buy_notional(self, symbol: str, dollars: float) -> str | None:
         from alpaca.trading.enums import OrderSide, TimeInForce
@@ -163,14 +171,19 @@ class Broker:
             return len(orders)
         except Exception as exc:
             log.warning("open_orders_count failed: %s", exc)
-            return 0
+            return -1
 
-    def wait_for_fills(self, timeout: float = 30.0) -> None:
+    def wait_for_fills(self, timeout: float = 30.0) -> bool:
         """Block until no open orders remain (or timeout). Used between the
-        morning sells and buys so freed-up cash is actually available."""
+        morning sells and buys so freed-up cash is actually available.
+        Returns False on timeout or when order status cannot be read."""
         deadline = time.time() + timeout
         while time.time() < deadline:
-            if self.open_orders_count() == 0:
-                return
+            count = self.open_orders_count()
+            if count == 0:
+                return True
+            if count < 0:
+                return False
             time.sleep(2)
         log.warning("wait_for_fills: open orders still pending after %.0fs", timeout)
+        return False

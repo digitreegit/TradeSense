@@ -141,6 +141,18 @@ def test_single_stocks_get_half_slot():
     assert slots["AAPL"] == pytest.approx(slots["SPY"] * config.SINGLE_NAME_SCALE)
 
 
+def test_one_symbol_cannot_be_queued_by_multiple_sleeves():
+    rows = _rows()
+    gld = strategy.compute_features(make_df(np.linspace(100, 180, 260))).iloc[-1]
+    rows["GLD"] = gld
+    orders = decide(
+        rows, {}, ["SPY", "QQQ", "GLD"], [], regime.BULL,
+        week_rollover=True, defensive_syms=["GLD"],
+    )
+    gld_buys = [o for o in orders if o.symbol == "GLD" and o.side == "buy"]
+    assert len(gld_buys) == 1
+
+
 def test_decide_crypto_trend_on():
     orders = decide(_rows(), {}, [], ["BTC/USD"], regime.BEAR, week_rollover=False)
     assert any(o.symbol == "BTC/USD" and o.side == "buy" and o.sleeve == CRYPTO for o in orders)

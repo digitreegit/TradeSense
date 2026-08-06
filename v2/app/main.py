@@ -82,18 +82,16 @@ def _start_scheduler() -> "object":
 
 
 def _authorized(request: Request) -> bool:
-    """RuleFive와 동일: Bearer / x-cron-secret / ?secret= 모두 허용."""
+    """Accept cron secrets only in headers (query strings leak into logs)."""
     if not settings.cron_secret:
         return False
     secret = settings.cron_secret
     header = request.headers.get("authorization", "")
     bearer = header[7:] if header.startswith("Bearer ") else ""
     x_secret = request.headers.get("x-cron-secret", "")
-    qs_secret = request.query_params.get("secret", "")
     return (
         secrets.compare_digest(bearer, secret)
         or secrets.compare_digest(x_secret, secret)
-        or secrets.compare_digest(qs_secret, secret)
     )
 
 
@@ -140,6 +138,14 @@ def _run_job(job: str) -> dict:
     return {"ok": True, "job": job, "done": done}
 
 
+def _job_claim_key(job: str, now: datetime) -> str:
+    """Daily key for once-per-day jobs; 15-minute bucket for recurring jobs."""
+    day = now.date().isoformat()
+    if GUARDS[job][2]:
+        return f"{job}:{day}"
+    return f"{job}:{day}:{now.hour:02d}:{now.minute // 15}"
+
+
 def cron_tick() -> dict:
     """외부 스케줄러(cron-job.org)가 호출. 지금 실행할 잡만 골라 돌린다."""
     now = datetime.now(ZoneInfo(settings.timezone))
@@ -149,12 +155,19 @@ def cron_tick() -> dict:
         if skip:
             results[job] = f"skipped: {skip}"
             continue
+        claim = _job_claim_key(job, now)
+        if not store.try_job_claim(claim):
+            results[job] = "skipped: concurrent/already claimed"
+            continue
         try:
             result = _run_job(job)
             if result["done"] and GUARDS[job][2]:
                 store.set(f"job_ran:{job}:{now.date().isoformat()}", True)
+            if not result["done"]:
+                store.release_job_claim(claim)
             results[job] = "ok" if result["done"] else "deferred: will retry next tick"
         except Exception as exc:
+            store.release_job_claim(claim)
             log.exception("job %s failed", job)
             results[job] = f"error: {exc}"
     from .briefing import log_activity
@@ -299,11 +312,17 @@ def cron_job(job: str, request: Request):
     skip = _should_run(job, now)
     if skip:
         return JSONResponse({"ok": True, "skipped": skip})
+    claim = _job_claim_key(job, now)
+    if not store.try_job_claim(claim):
+        return JSONResponse({"ok": True, "skipped": "concurrent/already claimed"})
     try:
         result = _run_job(job)
         if result["done"] and GUARDS[job][2]:
             store.set(f"job_ran:{job}:{now.date().isoformat()}", True)
+        if not result["done"]:
+            store.release_job_claim(claim)
         return JSONResponse(result)
     except Exception as exc:
+        store.release_job_claim(claim)
         log.exception("job %s failed", job)
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)

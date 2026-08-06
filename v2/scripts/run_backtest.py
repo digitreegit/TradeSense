@@ -21,14 +21,27 @@ def main() -> None:
     p.add_argument("--start", default="2016-01-01")
     p.add_argument("--trade-start", default=None, help="first trade date (after warmup)")
     p.add_argument("--capital", type=float, default=3000.0)
+    p.add_argument(
+        "--crypto", action="store_true",
+        help="backtest the crypto sleeve instead of the live-default defensive sleeve",
+    )
     args = p.parse_args()
 
     print(f"loading data from {args.start} ...")
     stocks = load_universe(config.EQUITY_UNIVERSE, start=args.start)
-    crypto = load_universe(config.CRYPTO_UNIVERSE, start=args.start)
+    crypto = (
+        load_universe(config.CRYPTO_UNIVERSE, start=args.start)
+        if args.crypto else {}
+    )
     print(f"loaded {len(stocks)} stock symbols, {len(crypto)} crypto symbols")
 
-    bt = Backtester(stocks, crypto, initial_capital=args.capital)
+    bt = Backtester(
+        stocks,
+        crypto,
+        initial_capital=args.capital,
+        momentum_syms=config.MOMENTUM_UNIVERSE,
+        defensive_syms=[] if args.crypto else config.DEFENSIVE_UNIVERSE,
+    )
     result = bt.run(start=args.trade_start)
 
     print("\n=== TradeSense v2 backtest ===")

@@ -62,12 +62,17 @@ class Backtester:
         stock_data: dict[str, pd.DataFrame],
         crypto_data: dict[str, pd.DataFrame],
         initial_capital: float = 3000.0,
+        *,
+        momentum_syms: list[str] | None = None,
+        defensive_syms: list[str] | None = None,
     ):
         self.features: dict[str, pd.DataFrame] = {
             s: strategy.compute_features(df) for s, df in {**stock_data, **crypto_data}.items()
         }
         self.stock_syms = list(stock_data)
+        self.momentum_syms = momentum_syms or list(stock_data)
         self.crypto_syms = list(crypto_data)
+        self.defensive_syms = defensive_syms or []
         self.initial_capital = initial_capital
         # trade on the equity calendar (SPY); crypto rows are aligned forward
         self.calendar = self.features[config.REGIME_SYMBOL].index
@@ -110,7 +115,18 @@ class Backtester:
                 continue
 
             # 1) execute yesterday's decisions at today's open ---------------
-            equity_now = equity_hist.get(cal[i - 1], self.initial_capital)
+            equity_now = cash
+            for pos in positions.values():
+                open_px = self._open_price(pos.symbol, today)
+                equity_now += pos.qty * (open_px if open_px is not None else pos.entry_price)
+            brake.update(equity_now)
+            if brake.halted:
+                # Match live: an overnight hard-brake breach liquidates at the
+                # open and cancels all queued buys.
+                pending = [
+                    PendingOrder(sym, pos.sleeve, "sell", reason="dd-halt")
+                    for sym, pos in positions.items()
+                ]
             for order in pending:
                 px = self._open_price(order.symbol, today)
                 if px is None:
@@ -127,7 +143,10 @@ class Backtester:
                         reason=order.reason,
                     ))
                 elif order.side == "buy" and order.symbol not in positions:
-                    row = self._row(order.symbol, today)
+                    # The order fills at today's open, so only yesterday's
+                    # completed indicators are knowable. The old code used
+                    # today's full high/low/close to calculate ATR here.
+                    row = self._row(order.symbol, cal[i - 1])
                     if row is None or pd.isna(row["atr"]):
                         continue
                     dollars = position_dollars(
@@ -190,10 +209,11 @@ class Backtester:
                 )
                 for sym, pos in positions.items()
             }
-            week_rollover = cal[i + 1].weekday() < today.weekday()
+            week_rollover = cal[i + 1].weekday() == config.MOMENTUM_REBALANCE_WEEKDAY
             pending = decide(
                 rows=rows, positions=metas,
-                stock_syms=self.stock_syms, crypto_syms=self.crypto_syms,
+                stock_syms=self.momentum_syms, crypto_syms=self.crypto_syms,
+                defensive_syms=self.defensive_syms,
                 reg=reg, week_rollover=week_rollover,
             )
 
