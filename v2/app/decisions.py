@@ -25,6 +25,7 @@ class PosMeta:
     sleeve: str
     held_days: int
     stop_level: float | None
+    entry_price: float | None = None
 
 
 @dataclass
@@ -63,8 +64,19 @@ def decide(
         close = float(row["close"])
         if pos.stop_level is not None and close <= pos.stop_level:
             pending.append(PendingOrder(sym, pos.sleeve, "sell", reason="stop"))
-        elif pos.sleeve == DIP and strategy.dip_exit(row, pos.held_days):
-            pending.append(PendingOrder(sym, pos.sleeve, "sell", reason="dip-exit"))
+        elif pos.sleeve == MOMENTUM and strategy.distribution_exit(row):
+            pending.append(PendingOrder(sym, pos.sleeve, "sell", reason="distribution"))
+        elif pos.sleeve == DIP and strategy.dip_exit(
+            row, pos.held_days, pos.entry_price
+        ):
+            reason = (
+                "profit-target"
+                if config.DIP_PROFIT_TARGET > 0
+                and pos.entry_price is not None
+                and close >= pos.entry_price * (1 + config.DIP_PROFIT_TARGET)
+                else "dip-exit"
+            )
+            pending.append(PendingOrder(sym, pos.sleeve, "sell", reason=reason))
 
     pending_sells = {o.symbol for o in pending if o.side == "sell"}
     pending_buys: set[str] = set()

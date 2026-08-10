@@ -73,6 +73,13 @@ def test_dip_entry_needs_uptrend_and_oversold():
     assert not strategy.dip_entry(row2)  # below 200SMA: no knife catching
 
 
+def test_dip_entry_requires_normal_volume():
+    row = strategy.compute_features(make_df(np.linspace(100, 160, 260))).iloc[-1].copy()
+    row["rsi2"] = 5.0
+    row["volume_ratio"] = config.DIP_ENTRY_MIN_VOLUME_RATIO - 0.01
+    assert not strategy.dip_entry(row)
+
+
 def test_trailing_stop_only_ratchets_up():
     ts = strategy.TrailingStop.initial(close=100, atr_value=2, mult=3)
     assert ts.level == 94
@@ -121,6 +128,30 @@ def test_decide_sells_on_stop_breach():
     orders = decide(rows, positions, ["SPY", "QQQ"], ["BTC/USD"], regime.BULL, week_rollover=False)
     sells = [o for o in orders if o.side == "sell" and o.symbol == "SPY"]
     assert sells and sells[0].reason == "stop"
+
+
+def test_dip_profit_target_exits_at_four_percent():
+    rows = _rows()
+    rows["SPY"] = rows["SPY"].copy()
+    entry = float(rows["SPY"]["close"]) / (1 + config.DIP_PROFIT_TARGET)
+    positions = {
+        "SPY": PosMeta(
+            "SPY", DIP, held_days=2, stop_level=None, entry_price=entry
+        )
+    }
+    orders = decide(
+        rows, positions, ["SPY"], [], regime.BULL, week_rollover=False
+    )
+    assert any(o.symbol == "SPY" and o.reason == "profit-target" for o in orders)
+
+
+def test_distribution_exit_needs_extreme_volume_and_upper_wick():
+    row = _rows()["SPY"].copy()
+    row["volume_ratio"] = config.DISTRIBUTION_MIN_VOLUME_RATIO
+    row["upper_wick"] = config.DISTRIBUTION_MIN_UPPER_WICK
+    assert strategy.distribution_exit(row)
+    row["volume_ratio"] -= 0.01
+    assert not strategy.distribution_exit(row)
 
 
 def test_decide_buys_momentum_on_rollover():

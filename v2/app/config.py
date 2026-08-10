@@ -31,10 +31,10 @@ SINGLE_STOCKS: list[str] = [
 ]
 EQUITY_UNIVERSE: list[str] = EQUITY_ETFS + SINGLE_STOCKS
 
-# Single stocks gap straight through ATR stops on earnings (2026-07-31:
-# AAPL -8.7% overnight on a ~27% slot cost the account 2.4% in one night).
-# Halving the slot halves the damage a single gap can do.
-SINGLE_NAME_SCALE = 0.5
+# Single stocks retain an earnings-gap discount versus ETFs, but 0.65 keeps
+# enough participation for a growth-led bull market. Walk-forward starts
+# 2018/2020/2022/2024 improved CAGR/Sharpe versus the former 0.50 setting.
+SINGLE_NAME_SCALE = 0.65
 
 # Alpaca crypto — NOT available in NJ and many US states. See:
 # https://alpaca.markets/support/alpaca-cryptocurrency
@@ -69,9 +69,17 @@ MOMENTUM_STOP_ATR = 3.0         # wide trailing stop: ride trends, absorb noise
 DIP_RSI_PERIOD = 2
 DIP_RSI_ENTRY = 10.0            # RSI(2) < 10 on a long-term uptrend name
 DIP_RSI_EXIT = 65.0
+DIP_PROFIT_TARGET = 0.04        # lock a 4% rebound; momentum keeps running
+DIP_ENTRY_MIN_VOLUME_RATIO = 1.0  # ignore low-participation dips
 DIP_MAX_HOLD_DAYS = 10
 DIP_STOP_ATR = 2.5
 DIP_MAX_POSITIONS = 2
+
+# A very long upper wick on >=2x normal volume marks a failed rally. This is
+# deliberately rare and applies only to momentum positions.
+DISTRIBUTION_EXIT_ENABLED = True
+DISTRIBUTION_MIN_VOLUME_RATIO = 2.0
+DISTRIBUTION_MIN_UPPER_WICK = 0.60
 
 CRYPTO_FAST_EMA = 20
 CRYPTO_SLOW_EMA = 50

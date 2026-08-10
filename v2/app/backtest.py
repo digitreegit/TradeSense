@@ -206,6 +206,7 @@ class Backtester:
                 sym: PosMeta(
                     symbol=sym, sleeve=pos.sleeve, held_days=pos.held_days,
                     stop_level=pos.stop.level if pos.stop else None,
+                    entry_price=pos.entry_price,
                 )
                 for sym, pos in positions.items()
             }

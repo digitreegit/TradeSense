@@ -137,6 +137,7 @@ class Engine:
             out[sym] = PosMeta(
                 symbol=sym, sleeve=m["sleeve"], held_days=m.get("held_days", 0) or 0,
                 stop_level=m.get("stop_level"),
+                entry_price=broker_positions[sym].get("avg_entry"),
             )
         # clean up metadata for positions that no longer exist at the broker
         for sym in list(metas):

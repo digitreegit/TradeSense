@@ -30,6 +30,11 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     out["mom_ret"] = close / close.shift(config.MOMENTUM_LOOKBACK) - 1.0
     out["mom_vol"] = annualized_vol(close, config.MOMENTUM_LOOKBACK)
     out["rsi2"] = rsi(close, config.DIP_RSI_PERIOD)
+    out["volume_ratio"] = out["volume"] / out["volume"].rolling(20).mean()
+    candle_range = (out["high"] - out["low"]).replace(0.0, float("nan"))
+    out["upper_wick"] = (
+        out["high"] - out[["open", "close"]].max(axis=1)
+    ) / candle_range
     out["sma200"] = sma(close, 200)
     out["ema_fast"] = ema(close, config.CRYPTO_FAST_EMA)
     out["ema_slow"] = ema(close, config.CRYPTO_SLOW_EMA)
@@ -60,16 +65,46 @@ def select_momentum(rows: dict[str, pd.Series], top_n: int | None = None) -> lis
 
 def dip_entry(row: pd.Series) -> bool:
     """Short-term panic in a long-term uptrend."""
-    if pd.isna(row.get("sma200")) or pd.isna(row.get("rsi2")):
+    if (
+        pd.isna(row.get("sma200"))
+        or pd.isna(row.get("rsi2"))
+        or pd.isna(row.get("volume_ratio"))
+    ):
         return False
-    return bool(row["close"] > row["sma200"] and row["rsi2"] < config.DIP_RSI_ENTRY)
+    return bool(
+        row["close"] > row["sma200"]
+        and row["rsi2"] < config.DIP_RSI_ENTRY
+        and row["volume_ratio"] >= config.DIP_ENTRY_MIN_VOLUME_RATIO
+    )
 
 
-def dip_exit(row: pd.Series, held_days: int) -> bool:
+def dip_exit(
+    row: pd.Series, held_days: int, entry_price: float | None = None
+) -> bool:
+    if (
+        config.DIP_PROFIT_TARGET > 0
+        and entry_price is not None
+        and float(row["close"]) >= entry_price * (1 + config.DIP_PROFIT_TARGET)
+    ):
+        return True
     if held_days >= config.DIP_MAX_HOLD_DAYS:
         return True
     r = row.get("rsi2")
     return bool(not pd.isna(r) and r > config.DIP_RSI_EXIT)
+
+
+def distribution_exit(row: pd.Series) -> bool:
+    """High-volume failed rally / upper-wick exit."""
+    if not config.DISTRIBUTION_EXIT_ENABLED:
+        return False
+    volume_ratio = row.get("volume_ratio")
+    upper_wick = row.get("upper_wick")
+    return bool(
+        not pd.isna(volume_ratio)
+        and not pd.isna(upper_wick)
+        and volume_ratio >= config.DISTRIBUTION_MIN_VOLUME_RATIO
+        and upper_wick >= config.DISTRIBUTION_MIN_UPPER_WICK
+    )
 
 
 def trend_long(row: pd.Series) -> bool:
