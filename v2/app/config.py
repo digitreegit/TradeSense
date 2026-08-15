@@ -26,9 +26,19 @@ EQUITY_ETFS: list[str] = [
     "GLD", "SLV", "TLT", "IEF",
 ]
 # Liquid megacaps — carry earnings-gap risk that ETFs don't.
-SINGLE_STOCKS: list[str] = [
+MEGACAPS: list[str] = [
     "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "AVGO",
 ]
+# High-volatility names from the 2026-08 research (scripts/compare_universe.py).
+# Adding them to the momentum/dip universe beat the megacap-only baseline in
+# walk-forward starts 2018/2020/2022/2023 (e.g. 2018: 20.2% -> 29.1% CAGR)
+# with max drawdown staying inside the brake limits. A RuleFive-style ±1%
+# grid on the same names LOST money in every tested period (scripts/grid_sim.py)
+# — ride these names with trend + stops, don't fade them.
+VOLATILE_STOCKS: list[str] = [
+    "AMD", "PLTR", "COIN", "MSTR", "SMCI",
+]
+SINGLE_STOCKS: list[str] = MEGACAPS + VOLATILE_STOCKS
 EQUITY_UNIVERSE: list[str] = EQUITY_ETFS + SINGLE_STOCKS
 
 # Single stocks retain an earnings-gap discount versus ETFs, but 0.65 keeps

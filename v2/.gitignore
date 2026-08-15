@@ -6,7 +6,9 @@ __pycache__/
 .env.vercel
 .vercel/
 data/cache/
+data/cache_grid/
 data/*.db
+.coverage
 data/backtest_equity.csv
 .pytest_cache/
 .vercel
