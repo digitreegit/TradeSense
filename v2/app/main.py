@@ -281,6 +281,15 @@ def snapshot(request: Request):
     return JSONResponse(engine.snapshot())
 
 
+@app.get("/api/crypto/advice")
+def crypto_advice(request: Request):
+    """크립토 분석·시그널 (분석만 — 주문 없음, 실행은 로빈후드에서 수동)."""
+    if not _admin_authorized(request):
+        return _unauthorized()
+    from .crypto_advisor import get_advice
+    return JSONResponse(get_advice())
+
+
 @app.get("/api/cron/run")
 @app.post("/api/cron/run")
 def cron_run(request: Request):
