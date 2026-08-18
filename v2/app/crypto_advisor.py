@@ -3,7 +3,7 @@ exactly what to buy or sell; the user only executes the orders on Robinhood.
 
 Alpaca cannot trade crypto in this account's state, so no real orders are
 ever placed here. The book (positions, cash, anchors) lives in the store and
-is checked twice a day (09:00 / 21:00 ET) by the cron scheduler; each order
+is checked three times a day (09:00 / 12:00 / 21:00 ET) by the cron scheduler; each order
 is assumed executed at the quoted price.
 
 Signal design (lesson from scripts/grid_sim.py on stocks): a naked grid
@@ -42,7 +42,7 @@ CACHE_TTL = 900.0      # panel refresh window; scheduled runs bypass it
 
 MIN_STEP = 0.04        # never advise a step tighter than 4%
 MAX_STEP = 0.12
-SCHEDULE = "매일 09:00 · 21:00 (ET)"
+SCHEDULE = "매일 09:00 · 12:00 · 21:00 (ET)"
 
 
 def fetch_bars(days: int = 400) -> dict[str, pd.DataFrame]:
@@ -291,7 +291,7 @@ def _fmt_px(v: float) -> str:
 
 
 def run_scheduled(slot: str) -> bool:
-    """Twice-daily check. Telegram: mornings always, evenings only on orders."""
+    """Three daily checks (09:00 / 12:00 / 21:00 ET). Telegram on every slot."""
     data = advise_and_apply(force=True)
     if not data.get("ok"):
         log_activity("crypto", f"크립토 어드바이저 실패: {data.get('error')}")
@@ -307,11 +307,13 @@ def run_scheduled(slot: str) -> bool:
         f"평가 ${s['total']:,.0f} ({s['pl']:+,.0f}) · 현금 ${s['cash']:,.0f} · "
         f"시장 {data['market']['label']}"
     )
+    labels = {"am": "아침", "noon": "점심", "pm": "저녁"}
+    when = labels.get(slot, slot)
     if lines:
-        send("🪙 크립토 주문 — 로빈후드에서 실행하세요\n"
+        send(f"🪙 크립토 {when} 주문 — 로빈후드에서 실행하세요\n"
              + "\n".join(lines) + "\n" + status)
-    elif slot == "am":
-        send(f"🪙 크립토 점검 — 오늘 주문 없음, 보유 유지\n{status}")
+    else:
+        send(f"🪙 크립토 {when} 점검 — 주문 없음, 보유 유지\n{status}")
 
     n = len(data["orders"])
     log_activity("crypto", f"크립토 어드바이저({slot}) — 주문 {n}건, {status}")

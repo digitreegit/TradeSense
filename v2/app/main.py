@@ -38,8 +38,9 @@ JOBS = {
     "stops": engine.job_intraday_stops,
     "decision": engine.job_daily_decision,
     "crypto": engine.job_crypto,
-    # Crypto advisor (manual trading via Robinhood): morning + evening check.
+    # Crypto advisor (manual trading via Robinhood): 09:00 / 12:00 / 21:00 ET.
     "crypto_am": lambda: run_scheduled("am"),
+    "crypto_noon": lambda: run_scheduled("noon"),
     "crypto_pm": lambda: run_scheduled("pm"),
 }
 
@@ -53,6 +54,7 @@ GUARDS = {
     "decision": (True, lambda h, m: (h == 16 and m >= 30) or h == 17, True),
     "crypto": (False, lambda h, m: True, False),
     "crypto_am": (False, lambda h, m: h == 9, True),
+    "crypto_noon": (False, lambda h, m: h == 12, True),
     "crypto_pm": (False, lambda h, m: h == 21, True),
 }
 
@@ -85,6 +87,8 @@ def _start_scheduler() -> "object":
     sched.add_job(wrap(engine.job_crypto), CronTrigger(minute=5, timezone=tz))
     sched.add_job(wrap(lambda: run_scheduled("am")),
                   CronTrigger(hour=9, minute=0, timezone=tz))
+    sched.add_job(wrap(lambda: run_scheduled("noon")),
+                  CronTrigger(hour=12, minute=0, timezone=tz))
     sched.add_job(wrap(lambda: run_scheduled("pm")),
                   CronTrigger(hour=21, minute=0, timezone=tz))
     sched.start()
