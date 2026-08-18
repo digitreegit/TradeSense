@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from .alpaca_config import clear_keys, save_keys, status_dict
 
 from .config import settings
+from .crypto_advisor import advise_and_apply, reset_book, run_scheduled
 from .engine import Engine
 from .state import store
 
@@ -37,6 +38,9 @@ JOBS = {
     "stops": engine.job_intraday_stops,
     "decision": engine.job_daily_decision,
     "crypto": engine.job_crypto,
+    # Crypto advisor (manual trading via Robinhood): morning + evening check.
+    "crypto_am": lambda: run_scheduled("am"),
+    "crypto_pm": lambda: run_scheduled("pm"),
 }
 
 # (weekdays_only, time predicate, dedupe once per ET day)
@@ -48,6 +52,8 @@ GUARDS = {
     "stops": (True, lambda h, m: (h == 9 and m >= 31) or 10 <= h < 16, False),
     "decision": (True, lambda h, m: (h == 16 and m >= 30) or h == 17, True),
     "crypto": (False, lambda h, m: True, False),
+    "crypto_am": (False, lambda h, m: h == 9, True),
+    "crypto_pm": (False, lambda h, m: h == 21, True),
 }
 
 
@@ -77,6 +83,10 @@ def _start_scheduler() -> "object":
     sched.add_job(wrap(engine.job_daily_decision),
                   CronTrigger(day_of_week="mon-fri", hour=16, minute=35, timezone=tz))
     sched.add_job(wrap(engine.job_crypto), CronTrigger(minute=5, timezone=tz))
+    sched.add_job(wrap(lambda: run_scheduled("am")),
+                  CronTrigger(hour=9, minute=0, timezone=tz))
+    sched.add_job(wrap(lambda: run_scheduled("pm")),
+                  CronTrigger(hour=21, minute=0, timezone=tz))
     sched.start()
     return sched
 
@@ -283,11 +293,19 @@ def snapshot(request: Request):
 
 @app.get("/api/crypto/advice")
 def crypto_advice(request: Request):
-    """크립토 분석·시그널 (분석만 — 주문 없음, 실행은 로빈후드에서 수동)."""
+    """크립토 가상 포트폴리오 주문 지시 (실행은 로빈후드에서 수동)."""
     if not _admin_authorized(request):
         return _unauthorized()
-    from .crypto_advisor import get_advice
-    return JSONResponse(get_advice())
+    return JSONResponse(advise_and_apply())
+
+
+@app.post("/api/crypto/reset")
+def crypto_reset(request: Request):
+    """가상 크립토 포트폴리오를 $1,000 현금 상태로 초기화."""
+    if not _admin_authorized(request):
+        return _unauthorized()
+    reset_book()
+    return JSONResponse(advise_and_apply(force=True))
 
 
 @app.get("/api/cron/run")

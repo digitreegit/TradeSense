@@ -6,7 +6,9 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.crypto_advisor import MAX_STEP, MIN_STEP, _step_for, analyze_frames
+from app.crypto_advisor import (
+    MAX_POSITIONS, MAX_STEP, MIN_STEP, _new_book, _step_for, generate_orders,
+)
 
 
 def make_frame(closes: np.ndarray, daily_range: float = 0.05) -> pd.DataFrame:
@@ -22,65 +24,115 @@ def make_frame(closes: np.ndarray, daily_range: float = 0.05) -> pd.DataFrame:
     )
 
 
+def wavy_uptrend(n: int = 250, lo: float = 100, hi: float = 200) -> np.ndarray:
+    """Rising but oscillating, ending on a mild pullback so RSI(14) is not
+    overbought while price stays above the 50EMA (trend still up)."""
+    closes = np.linspace(lo, hi, n) * (1 + 0.03 * np.sin(np.arange(n) / 3))
+    closes[-5:] = closes[-6] * np.array([0.995, 0.985, 0.99, 0.98, 0.985])
+    return closes
+
+
 def test_step_is_bounded():
     assert _step_for(0.001) == MIN_STEP
     assert _step_for(0.5) == MAX_STEP
     assert MIN_STEP <= _step_for(0.05) <= MAX_STEP
 
 
-def test_uptrend_coin_is_picked_and_downtrend_avoided():
-    n = 250
-    up = make_frame(np.linspace(100, 200, n), daily_range=0.06)
-    down = make_frame(np.linspace(200, 100, n), daily_range=0.08)
-    btc = make_frame(np.linspace(50_000, 80_000, n), daily_range=0.03)
-
-    out = analyze_frames({"SOL/USD": up, "DOGE/USD": down, "BTC/USD": btc},
-                         budget=1000.0)
-
-    picked = {c["symbol"] for c in out["picks"]}
-    assert "SOL" in picked
-    assert "DOGE" not in picked
-    doge = next(c for c in out["watch"] if c["symbol"] == "DOGE")
-    assert doge["action"] == "avoid"
-    assert out["market"]["label"] == "BULL"
-
-
-def test_levels_are_ordered_and_budget_split():
-    n = 250
+def test_uptrend_coin_gets_bought_and_downtrend_does_not():
     frames = {
-        "SOL/USD": make_frame(np.linspace(100, 200, n), daily_range=0.06),
-        "BTC/USD": make_frame(np.linspace(50_000, 80_000, n), daily_range=0.03),
+        "BTC/USD": make_frame(wavy_uptrend(), daily_range=0.03),
+        "SOL/USD": make_frame(wavy_uptrend(), daily_range=0.06),
+        "DOGE/USD": make_frame(np.linspace(200, 100, 250), daily_range=0.08),
     }
-    out = analyze_frames(frames, budget=1000.0)
-    assert out["picks"]
-    total = 0.0
-    for c in out["picks"]:
-        assert c["buy2"] < c["buy1"] < c["sell"]
-        assert c["unit"] * 2 == c["alloc"]
-        total += c["alloc"]
-    assert total == 1000.0
+    orders, book, view = generate_orders(frames, _new_book())
+
+    bought = {o["symbol"] for o in orders if o["side"] == "buy"}
+    assert "SOL" in bought
+    assert "DOGE" not in bought
+    assert "SOL/USD" in book["positions"]
+    assert book["cash"] < book["budget"]
+    assert view["market"]["label"] in ("BULL", "CHOP")
 
 
-def test_bear_market_halves_budget_for_surviving_uptrends():
-    n = 250
+def test_take_profit_sells_a_unit_and_ratchets_anchor():
+    closes = wavy_uptrend()
+    frames = {"SOL/USD": make_frame(closes, daily_range=0.06)}
+    price = float(closes[-1])
+    anchor = price / 1.10  # price is >10% above the anchor: +step hit
+    book = _new_book()
+    book["cash"] = 875.0
+    book["positions"]["SOL/USD"] = {
+        "units": [{"dollars": 125.0, "price": anchor, "qty": 125.0 / anchor}],
+        "anchor": anchor,
+        "step": 0.05,
+    }
+    orders, book, _ = generate_orders(frames, book)
+
+    sells = [o for o in orders if o["side"] == "sell" and o["symbol"] == "SOL"]
+    assert len(sells) == 1
+    assert "익절" in sells[0]["reason"]
+    assert book["realized_pl"] > 0
+    assert "SOL/USD" not in book["positions"]  # only unit was sold
+
+
+def test_dip_triggers_one_add_buy():
+    closes = wavy_uptrend()
+    frames = {"SOL/USD": make_frame(closes, daily_range=0.06)}
+    price = float(closes[-1])
+    anchor = price / 0.94  # price fell >5% below the anchor
+    book = _new_book()
+    book["cash"] = 875.0
+    book["positions"]["SOL/USD"] = {
+        "units": [{"dollars": 125.0, "price": anchor, "qty": 125.0 / anchor}],
+        "anchor": anchor,
+        "step": 0.05,
+    }
+    orders, book, _ = generate_orders(frames, book)
+
+    adds = [o for o in orders if o["side"] == "buy" and o["symbol"] == "SOL"]
+    assert len(adds) == 1
+    assert "추가 매수" in adds[0]["reason"]
+    assert len(book["positions"]["SOL/USD"]["units"]) == 2
+
+
+def test_trend_break_liquidates_position():
+    frames = {"SOL/USD": make_frame(np.linspace(200, 100, 250), daily_range=0.06)}
+    book = _new_book()
+    book["cash"] = 750.0
+    book["positions"]["SOL/USD"] = {
+        "units": [
+            {"dollars": 125.0, "price": 180.0, "qty": 125.0 / 180.0},
+            {"dollars": 125.0, "price": 150.0, "qty": 125.0 / 150.0},
+        ],
+        "anchor": 150.0,
+        "step": 0.05,
+    }
+    orders, book, _ = generate_orders(frames, book)
+
+    sells = [o for o in orders if o["side"] == "sell" and o["symbol"] == "SOL"]
+    assert len(sells) == 1
+    assert "추세 이탈" in sells[0]["reason"]
+    assert book["positions"] == {}
+    assert book["realized_pl"] < 0  # sold the falling knife at a loss
+
+
+def test_bear_market_halves_entry_size():
     frames = {
-        "BTC/USD": make_frame(np.linspace(80_000, 50_000, n), daily_range=0.03),
-        "SOL/USD": make_frame(np.linspace(100, 200, n), daily_range=0.06),
+        "BTC/USD": make_frame(np.linspace(80_000, 50_000, 250), daily_range=0.03),
+        "SOL/USD": make_frame(wavy_uptrend(), daily_range=0.06),
     }
-    out = analyze_frames(frames, budget=1000.0)
-    assert out["market"]["label"] == "BEAR"
-    assert len(out["picks"]) == 1
-    sol = out["picks"][0]
-    assert sol["alloc"] == 500.0
-    assert sol["action_label"].startswith("약세장 주의")
+    orders, _, view = generate_orders(frames, _new_book())
+    assert view["market"]["label"] == "BEAR"
+    buys = [o for o in orders if o["side"] == "buy"]
+    assert buys and all(o["dollars"] == 62.0 for o in buys)
 
 
-def test_bear_market_yields_no_picks():
-    n = 250
+def test_positions_capped_at_max():
     frames = {
-        "BTC/USD": make_frame(np.linspace(80_000, 50_000, n), daily_range=0.03),
-        "SOL/USD": make_frame(np.linspace(200, 100, n), daily_range=0.06),
+        f"C{i}/USD": make_frame(wavy_uptrend(), daily_range=0.05)
+        for i in range(6)
     }
-    out = analyze_frames(frames, budget=1000.0)
-    assert out["picks"] == []
-    assert out["market"]["label"] == "BEAR"
+    frames["BTC/USD"] = make_frame(wavy_uptrend(), daily_range=0.03)
+    orders, book, _ = generate_orders(frames, _new_book())
+    assert len(book["positions"]) == MAX_POSITIONS
+    assert len([o for o in orders if o["side"] == "buy"]) == MAX_POSITIONS

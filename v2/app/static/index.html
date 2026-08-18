@@ -141,28 +141,25 @@
 
   /* crypto advisor */
   .crypto-market {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    border: 1px solid var(--border); border-radius: 10px; background: #0d1117;
+    margin: 14px 0; font-size: 13px; line-height: 1.5;
+  }
+  .crypto-order {
     display: flex; align-items: center; gap: 10px; padding: 12px 14px;
     border: 1px solid var(--border); border-radius: 10px; background: #0d1117;
-    margin-bottom: 16px; font-size: 13px; line-height: 1.5;
+    margin-bottom: 8px; font-size: 14px;
   }
-  .crypto-pick {
-    border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
-    margin-bottom: 10px; background: #0d1117;
+  .crypto-order .side {
+    flex-shrink: 0; padding: 3px 10px; border-radius: 8px;
+    font-size: 12px; font-weight: 700;
   }
-  .crypto-pick .head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
-  .crypto-pick .head b { font-size: 15px; }
-  .crypto-pick .head .px { font-variant-numeric: tabular-nums; color: var(--dim); }
-  .crypto-pick .stats { color: var(--dim); font-size: 12px; margin-bottom: 8px; }
-  .crypto-pick .plan { font-size: 13px; line-height: 1.6; }
-  .crypto-pick .levels {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-    gap: 6px; margin-top: 8px;
-  }
-  .crypto-pick .levels div {
-    border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
-    font-size: 12px; font-variant-numeric: tabular-nums;
-  }
-  .crypto-pick .levels span { display: block; color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
+  .crypto-order .side.buy { background: #12351f; color: var(--green); }
+  .crypto-order .side.sell { background: #3d1d1d; color: var(--red); }
+  .crypto-order .amt { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .crypto-order .why { color: var(--dim); font-size: 12px; margin-left: auto; text-align: right; }
+  .crypto-summary { color: var(--dim); font-size: 13px; margin-bottom: 8px; }
+  .crypto-summary b { color: var(--text); }
 </style>
 </head>
 <body>
@@ -239,7 +236,8 @@
       </button>
     </div>
     <p class="field-hint" style="margin-bottom:14px">
-      분석·시그널만 제공합니다. 주문은 넣지 않으며, 실행은 로빈후드에서 직접 하세요. 기준 예산 $1,000.
+      봇이 가상 $1,000 포트폴리오를 굴리며 주문을 지시합니다. 실행만 로빈후드에서 그대로 해주세요.
+      매일 09:00 · 21:00 (ET) 자동 점검, 주문 발생 시 텔레그램 알림.
     </p>
     <div id="crypto-body"><div class="empty">불러오는 중…</div></div>
   </div>
@@ -657,73 +655,75 @@ const cpx = v => {
   if (v >= 0.1) return v.toFixed(3);
   return Number(v).toPrecision(3);
 };
-const trendPill = t => {
-  const map = {up: ['BULL', '상승'], side: ['CHOP', '횡보'], down: ['BEAR', '하락']};
-  const [cls, label] = map[t] || ['CHOP', t];
-  return `<span class="pill ${cls}">${label}</span>`;
-};
-
 function renderCrypto(d) {
   if (!d.ok) {
     $('crypto-body').innerHTML = `<div class="empty">${escapeHtml(d.error || '분석 실패')}</div>`;
     return;
   }
   const m = d.market || {};
-  let html = `
+  const s = d.summary || {};
+  const usd2 = v => '$' + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
+  let html = `<div class="briefing-section"><h3>지금 실행할 주문 (로빈후드)</h3></div>`;
+
+  if (d.orders && d.orders.length) {
+    html += d.orders.map(o => `
+      <div class="crypto-order">
+        <span class="side ${o.side}">${o.side === 'buy' ? '매수' : '매도'}</span>
+        <b>${o.symbol}</b>
+        <span class="amt">${usd2(o.dollars)}어치</span>
+        <span style="color:var(--dim);font-size:12px">@$${cpx(o.price)}</span>
+        <span class="why">${escapeHtml(o.reason)}</span>
+      </div>`).join('');
+  } else {
+    html += `<div class="empty">할 일 없음 — 보유 유지. 다음 점검 때 다시 확인하세요.</div>`;
+  }
+
+  html += `<div class="briefing-section" style="margin-top:16px"><h3>가상 포트폴리오 (시작 $${Number(s.budget || 1000).toLocaleString()})</h3></div>
+    <div class="crypto-summary">
+      평가 <b>${usd2(s.total)}</b>
+      <span class="${plClass(s.pl || 0)}">(${s.pl >= 0 ? '+' : '−'}$${Math.abs(s.pl || 0).toFixed(0)})</span>
+      · 현금 ${usd2(s.cash)} · 실현손익 <span class="${plClass(s.realized_pl || 0)}">${s.realized_pl >= 0 ? '+' : '−'}$${Math.abs(s.realized_pl || 0).toFixed(0)}</span>
+    </div>`;
+  if (s.positions && s.positions.length) {
+    html += table(s.positions, [
+      {h: '코인', f: r => `<b>${r.symbol}</b>${r.units > 1 ? ` <span style="color:var(--dim);font-size:11px">×${r.units}</span>` : ''}`},
+      {h: '평가액', f: r => usd2(r.value)},
+      {h: '손익', f: r => `<span class="${plClass(r.pl)}">${r.pl >= 0 ? '+' : ''}${r.pl.toFixed(0)}</span>`},
+      {h: '익절가', f: r => '$' + cpx(r.sell_at)},
+      {h: '추가매수가', f: r => r.add_at ? '$' + cpx(r.add_at) : '—'},
+      {h: '이탈 청산', f: r => r.exit_at ? '$' + cpx(r.exit_at) : '—'},
+    ]);
+  } else {
+    html += `<div class="empty">보유 없음 — 전액 현금</div>`;
+  }
+
+  html += `
     <div class="crypto-market">
       <span class="pill ${m.label}">${m.label}</span>
-      <div>${escapeHtml(m.comment || '')}<br>
-        <span style="color:var(--dim);font-size:12px">
-          BTC $${cpx(m.btc_price)} (30일 ${m.btc_ret30 >= 0 ? '+' : ''}${pct(m.btc_ret30 || 0)})
-          · 상승 추세 비율 ${pct(m.breadth || 0)}
-        </span>
+      <div>${escapeHtml(m.comment || '')}
+        <span style="color:var(--dim);font-size:12px"><br>BTC $${cpx(m.btc_price)}
+        (30일 ${m.btc_ret30 >= 0 ? '+' : ''}${pct(m.btc_ret30 || 0)})</span>
       </div>
+    </div>
+    <div class="btn-row" style="justify-content:space-between;align-items:center">
+      <span class="field-hint" style="margin:0">${new Date(d.generated_at).toLocaleString()} 기준 · ${escapeHtml(d.schedule || '')}</span>
+      <button type="button" class="btn btn-ghost" id="btn-crypto-reset">포트폴리오 리셋</button>
     </div>`;
-
-  if (d.picks && d.picks.length) {
-    html += `<div class="briefing-section"><h3>추천 픽 — 변동성 상위 · 상승 추세 (예산 $${Number(d.budget).toLocaleString()})</h3></div>`;
-    html += d.picks.map(c => `
-      <div class="crypto-pick">
-        <div class="head">
-          <b>${c.symbol}</b>
-          <span class="px">$${cpx(c.price)}</span>
-          ${trendPill(c.trend)}
-          <span style="margin-left:auto;font-size:12px;color:var(--dim)">배분 $${Number(c.alloc).toLocaleString()} (2회 × $${Number(c.unit).toLocaleString()})</span>
-        </div>
-        <div class="stats">
-          일평균 변동폭 ${pct(c.range30)} · RSI ${c.rsi14.toFixed(0)}
-          · 7일 <span class="${plClass(c.ret7)}">${c.ret7 >= 0 ? '+' : ''}${pct(c.ret7)}</span>
-          · 30일 <span class="${plClass(c.ret30)}">${c.ret30 >= 0 ? '+' : ''}${pct(c.ret30)}</span>
-        </div>
-        <div class="plan">${escapeHtml(c.action_label)}</div>
-        <div class="levels">
-          <div><span>1차 매수</span>$${cpx(c.buy1)}</div>
-          <div><span>2차 매수 (−${pct(c.step)})</span>$${cpx(c.buy2)}</div>
-          <div><span>익절 (+${pct(c.step)})</span>$${cpx(c.sell)}</div>
-          <div><span>추세 이탈 청산</span>$${cpx(c.exit_level)}</div>
-        </div>
-      </div>`).join('');
-    html += `<p class="field-hint" style="margin-top:10px">
-      매도 후 재진입: 익절가에서 판 뒤 다시 −${pct(d.picks[0].step)} 내려오면 같은 방식으로 재매수 (RuleFive 방식).
-      가격이 "추세 이탈 청산" 레벨(50일 EMA) 아래로 마감하면 전량 정리하고 관망하세요.</p>`;
-  } else {
-    html += `<div class="empty">지금은 매수 후보가 없습니다 — 전 코인 하락/횡보 추세. 현금 대기가 포지션입니다.</div>`;
-  }
-
-  if (d.watch && d.watch.length) {
-    html += `<div class="briefing-section" style="margin-top:16px"><h3>관망 목록</h3></div>`;
-    html += table(d.watch, [
-      {h: '코인', f: r => `<b>${r.symbol}</b>`},
-      {h: '현재가', f: r => '$' + cpx(r.price)},
-      {h: '추세', f: r => trendPill(r.trend)},
-      {h: '변동폭', f: r => pct(r.range30)},
-      {h: 'RSI', f: r => r.rsi14.toFixed(0)},
-      {h: '30일', f: r => `<span class="${plClass(r.ret30)}">${r.ret30 >= 0 ? '+' : ''}${pct(r.ret30)}</span>`},
-    ]);
-  }
-  html += `<p class="field-hint" style="margin-top:12px">
-    ${new Date(d.generated_at).toLocaleString()} 기준 · 일봉 데이터 · 15분 캐시</p>`;
   $('crypto-body').innerHTML = html;
+  $('btn-crypto-reset').addEventListener('click', () => openConfirm(
+    '가상 크립토 포트폴리오를 리셋할까요?',
+    '가상 보유 내역과 손익 기록이 지워지고 $1,000 현금 상태에서 다시 시작합니다. 로빈후드 실계좌에는 아무 영향이 없습니다.',
+    '리셋',
+    async () => {
+      $('crypto-body').innerHTML = '<div class="empty">리셋 중…</div>';
+      try {
+        const r = await api('/api/crypto/reset', {method: 'POST'});
+        renderCrypto(await r.json());
+      } catch (e) {
+        $('crypto-body').innerHTML = `<div class="empty">리셋 실패: ${escapeHtml(String(e.message || e))}</div>`;
+      }
+    },
+  ));
 }
 
 async function loadCrypto() {
