@@ -1,15 +1,15 @@
-"""Crypto advisor — the bot "trades" a virtual $1,000 book and tells the user
-exactly what to buy or sell; the user only executes the orders on Robinhood.
+"""Crypto advisor — the bot tells the user exactly what to buy or sell
+on Robinhood. Primary objective: recover original principal.
 
 Alpaca cannot trade crypto in this account's state, so no real orders are
 ever placed here. Proposed orders stay pending until the user confirms
 (optionally with the actual Robinhood fill size). The book is updated only
 on confirm. Checks run 09:00 / 12:00 / 21:00 ET.
 
-Signal design (lesson from scripts/grid_sim.py on stocks): a naked grid
-bleeds in downtrends, so entries require an uptrend (price > 50EMA and
-20EMA >= 50EMA), a trend break liquidates, and the RuleFive step is sized by
-each coin's own realized daily range instead of a fixed 5%.
+Recovery playbook: do not average down a concentrated bag (XRP). Trim
+overweight names, dump dust, and redeploy proceeds into relative-strength
+uptrends. A naked grid still bleeds in downtrends, so entries require
+price > 50EMA and 20EMA >= 50EMA.
 """
 from __future__ import annotations
 
@@ -46,9 +46,15 @@ CACHE_TTL = 900.0      # panel refresh window; scheduled runs bypass it
 MIN_STEP = 0.04        # never advise a step tighter than 4%
 MAX_STEP = 0.12
 MAX_WEIGHT = 0.35      # one coin above this share of the book gets trimmed
-TRIM_FRACTION = 0.30   # staged: sell 30% of an oversized position per check
+TRIM_FRACTION = 0.45   # downtrend bags: unstick capital faster (was 30%)
+TRIM_FRACTION_UP = 0.20
+MAX_TRIM = 0.50        # never dump more than half a bag in one check
 DUST_MIN = 50.0        # positions below this are consolidated when not trending up
 MIN_UNIT = 25.0
+BEAR_SIZE = 0.75       # recovery: deploy 75% size in a bear, not half
+CASH_FLOOR = 0.15      # keep 15% cash; the rest can work
+RSI_MAX = 75.0         # skip only clearly overbought strength
+NO_AVERAGEDOWN = 0.15  # never add if price is >15% below original avg cost
 SCHEDULE = "매일 09:00 · 12:00 · 21:00 (ET)"
 
 
@@ -114,7 +120,16 @@ def _step_for(range30: float) -> float:
 
 
 def _new_book() -> dict:
-    return {"budget": BUDGET, "cash": BUDGET, "positions": {}, "realized_pl": 0.0}
+    return {
+        "budget": BUDGET, "cash": BUDGET, "positions": {},
+        "realized_pl": 0.0, "principal": BUDGET,
+    }
+
+
+def _underwater(pos: dict, price: float) -> bool:
+    """True when adding would be averaging down a deep original loss."""
+    avg = pos.get("avg_cost")
+    return bool(avg) and avg > 0 and price < avg * (1 - NO_AVERAGEDOWN)
 
 
 def _market_state(metrics: dict[str, dict]) -> tuple[str, str]:
@@ -124,7 +139,7 @@ def _market_state(metrics: dict[str, dict]) -> tuple[str, str]:
     if btc and btc["trend"] == "up" and breadth >= 0.5:
         return "BULL", "강세 — BTC 상승 추세, 시장 폭 양호"
     if (btc and btc["trend"] == "down") or breadth < 0.25:
-        return "BEAR", "약세 — BTC 하락 추세. 신규 진입 절반 크기, 이탈 시 즉시 정리"
+        return "BEAR", "약세 — 물타기 금지, 하락 편중은 축소, 강세 상대강도로만 재배치"
     return "CHOP", "혼조 — 상승 추세 코인만 제한적으로"
 
 
@@ -155,7 +170,8 @@ def generate_orders(
     )
     unit = max(MIN_UNIT, round(total_value / MAX_POSITIONS / MAX_UNITS, 0))
     if bear:
-        unit = max(MIN_UNIT, round(unit / 2, 0))
+        unit = max(MIN_UNIT, round(unit * BEAR_SIZE, 0))
+    floor = CASH_FLOOR * total_value
 
     def _order(side: str, sym: str, dollars: float, price: float,
                reason: str, kind: str, step: float):
@@ -184,12 +200,14 @@ def generate_orders(
             sold_this_run.add(sym)
             continue
 
-        # 1) oversized position: staged trim instead of all-or-nothing.
-        # A -44% bag at 84% weight must shrink gradually, not market-dump.
+        # 1) oversized position: staged trim. Recovery wants capital unstuck
+        # faster than a 30% drip, but never a full dump in one check.
         if weight > MAX_WEIGHT:
-            trim = value * (TRIM_FRACTION if m["trend"] == "down" else TRIM_FRACTION / 2)
+            frac = TRIM_FRACTION if m["trend"] == "down" else TRIM_FRACTION_UP
+            excess = value - MAX_WEIGHT * total_value
+            trim = min(value * MAX_TRIM, max(value * frac, excess * 0.5))
             why = ("하락 추세" if m["trend"] == "down" else "추세 무관") + \
-                f" · 비중 {weight:.0%} — 단계적 축소"
+                f" · 비중 {weight:.0%} — 원금 회복용 축소"
             _order("sell", sym, trim, price, why, "trim", step)
             apply_order(sim, orders[-1], trim)
             sold_this_run.add(sym)
@@ -208,26 +226,61 @@ def generate_orders(
         elif (
             price <= pos["anchor"] * (1 - step)
             and len(pos["units"]) < MAX_UNITS
-            and sim["cash"] >= unit
+            and sim["cash"] - floor >= unit
+            and not _underwater(pos, price)
         ):
             _order("buy", sym, unit, price, f"−{step:.0%} 추가 매수", "add", step)
             apply_order(sim, orders[-1], unit)
+
+    def _can_deploy(new_slot: bool) -> bool:
+        if sim["cash"] - floor < unit:
+            return False
+        if new_slot and len(sim["positions"]) >= MAX_POSITIONS:
+            return False
+        return True
+
+    def _fits_cap(sym: str, dollars: float) -> bool:
+        value = _pos_value(sim["positions"][sym], sym) if sym in sim["positions"] else 0.0
+        return total_value <= 0 or (value + dollars) / total_value <= MAX_WEIGHT + 1e-9
+
+    # Put trim proceeds to work in relative strength — don't let cash sit.
+    # Rank by 30-day return (what's actually going up), not raw range.
+    held_rs = sorted(
+        (
+            (sym, metrics[sym]) for sym in sim["positions"]
+            if metrics.get(sym)
+            and metrics[sym]["trend"] == "up"
+            and metrics[sym]["rsi14"] < RSI_MAX
+            and sym not in sold_this_run
+            and not _underwater(sim["positions"][sym], metrics[sym]["price"])
+            and len(sim["positions"][sym]["units"]) < MAX_UNITS
+        ),
+        key=lambda x: x[1]["ret30"], reverse=True,
+    )
+    for sym, m in held_rs:
+        if not _can_deploy(new_slot=False) or not _fits_cap(sym, unit):
+            continue
+        step = sim["positions"][sym]["step"]
+        _order("buy", sym, unit, m["price"],
+               "원금 회복 — 상대강도 재배치", "rotate", step)
+        apply_order(sim, orders[-1], unit)
 
     candidates = sorted(
         (
             (sym, m) for sym, m in metrics.items()
             if sym not in sim["positions"] and sym not in sold_this_run
-            and m["trend"] == "up" and m["rsi14"] < 70
+            and m["trend"] == "up" and m["rsi14"] < RSI_MAX
         ),
-        key=lambda x: x[1]["range30"], reverse=True,
+        key=lambda x: x[1]["ret30"], reverse=True,
     )
     for sym, m in candidates:
-        if len(sim["positions"]) >= MAX_POSITIONS or sim["cash"] < unit:
+        if not _can_deploy(new_slot=True):
             break
         step = _step_for(m["range30"])
-        _order("buy", sym, unit, m["price"],
-               ("약세장 절반 크기 · " if bear else "") + "신규 진입 — 상승 추세",
-               "entry", step)
+        why = "원금 회복 — 상승 추세 진입"
+        if bear:
+            why += " · 약세장 축소 크기"
+        _order("buy", sym, unit, m["price"], why, "entry", step)
         apply_order(sim, orders[-1], unit)
 
     sim["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -320,12 +373,17 @@ def _summary(book: dict, metrics: dict[str, dict]) -> dict:
             "add_at": pos["anchor"] * (1 - pos["step"]) if len(pos["units"]) < MAX_UNITS else None,
             "exit_at": m["ema50"] if m else None,
         })
+    principal = float(book.get("principal") or book.get("budget") or BUDGET)
+    gap = max(0.0, principal - total)
     return {
         "cash": book["cash"],
         "total": total,
         "pl": total - book["budget"],
         "realized_pl": book["realized_pl"],
         "budget": book["budget"],
+        "principal": principal,
+        "gap": gap,
+        "recovered_pct": (total / principal) if principal else 0.0,
         "positions": positions_view,
     }
 
@@ -423,20 +481,25 @@ def reset_book() -> None:
     store.set(CACHE_KEY, None)
 
 
-def import_holdings(cash: float, holdings: list[dict]) -> dict:
+def import_holdings(
+    cash: float, holdings: list[dict], principal: float | None = None,
+) -> dict:
     """Rebuild the book from the user's real Robinhood holdings.
 
     Cost basis inside the book is marked to market at import (so summary P/L
     measures improvement *since import*); the original avg cost is kept per
-    position for the truthful total-return display.
+    position for the truthful total-return display. `principal` is the
+    recovery target (original capital); if omitted it is inferred from
+    qty × avg_cost + cash.
     """
     valid = {p.split("/")[0]: p for p in CANDIDATES}
     frames = fetch_bars()
     metrics = {s: m for s, m in
                ((sym, _coin_metrics(df)) for sym, df in frames.items()) if m}
     book = {"budget": 0.0, "cash": float(cash), "positions": {},
-            "realized_pl": 0.0}
+            "realized_pl": 0.0, "principal": 0.0}
     skipped: list[str] = []
+    inferred = float(cash)
     for h in holdings:
         sym = str(h.get("symbol", "")).upper().strip()
         qty = float(h.get("qty") or 0)
@@ -449,15 +512,18 @@ def import_holdings(cash: float, holdings: list[dict]) -> dict:
             skipped.append(sym)
             continue
         price = m["price"]
+        avg_cost = float(h["avg_cost"]) if h.get("avg_cost") else None
         book["positions"][pair] = {
             "units": [{"dollars": qty * price, "price": price, "qty": qty}],
             "anchor": price,
             "step": _step_for(m["range30"]),
-            "avg_cost": float(h["avg_cost"]) if h.get("avg_cost") else None,
+            "avg_cost": avg_cost,
         }
+        inferred += qty * (avg_cost if avg_cost else price)
     book["budget"] = book["cash"] + sum(
         sum(u["dollars"] for u in p["units"]) for p in book["positions"].values()
     )
+    book["principal"] = float(principal) if principal and principal > 0 else inferred
     book["updated_at"] = datetime.now(timezone.utc).isoformat()
     store.set(BOOK_KEY, book)
     store.set(PENDING_KEY, [])
@@ -497,8 +563,11 @@ def run_scheduled(slot: str) -> bool:
         f"${o['dollars']:,.0f} (@${_fmt_px(o['price'])}) — {o['reason']}"
         for o in pending_orders
     ]
+    gap = s.get("gap") or 0
+    principal = s.get("principal") or s.get("budget") or 0
     status = (
-        f"평가 ${s['total']:,.0f} ({s['pl']:+,.0f}) · 현금 ${s['cash']:,.0f} · "
+        f"현재 ${s['total']:,.0f} / 원금 ${principal:,.0f} "
+        f"(남음 ${gap:,.0f}) · 현금 ${s['cash']:,.0f} · "
         f"시장 {data['market']['label']}"
     )
     labels = {"am": "아침", "noon": "점심", "pm": "저녁"}

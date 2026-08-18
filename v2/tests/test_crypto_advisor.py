@@ -7,8 +7,8 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.crypto_advisor import (
-    MAX_POSITIONS, MAX_STEP, MAX_WEIGHT, MIN_STEP, TRIM_FRACTION,
-    _new_book, _step_for, apply_order, generate_orders,
+    BEAR_SIZE, MAX_POSITIONS, MAX_STEP, MAX_UNITS, MAX_WEIGHT, MIN_STEP,
+    TRIM_FRACTION, _new_book, _step_for, apply_order, generate_orders,
 )
 
 
@@ -120,7 +120,7 @@ def test_trend_break_liquidates_position():
     assert sim["realized_pl"] < 0
 
 
-def test_bear_market_halves_entry_size():
+def test_bear_market_reduces_entry_size():
     frames = {
         "BTC/USD": make_frame(np.linspace(80_000, 50_000, 250), daily_range=0.03),
         "SOL/USD": make_frame(wavy_uptrend(), daily_range=0.06),
@@ -128,7 +128,8 @@ def test_bear_market_halves_entry_size():
     orders, _, view = generate_orders(frames, _new_book())
     assert view["market"]["label"] == "BEAR"
     buys = [o for o in orders if o["side"] == "buy"]
-    assert buys and all(o["dollars"] == 62.0 for o in buys)
+    expected = round(1000 / MAX_POSITIONS / MAX_UNITS * BEAR_SIZE, 0)
+    assert buys and all(o["dollars"] == expected for o in buys)
 
 
 def test_positions_capped_at_max():
@@ -145,7 +146,7 @@ def test_positions_capped_at_max():
 
 
 def test_oversized_position_gets_staged_trim_not_full_dump():
-    """An 80%+ bag in a downtrend is trimmed 30% per check, never dumped."""
+    """An 80%+ bag in a downtrend is trimmed in stages, never dumped."""
     closes = np.linspace(2.0, 1.0, 250)          # XRP-like downtrend
     frames = {"XRP/USD": make_frame(closes, daily_range=0.05)}
     price = float(closes[-1])
@@ -163,11 +164,15 @@ def test_oversized_position_gets_staged_trim_not_full_dump():
     assert len(sells) == 1
     assert sells[0]["kind"] == "trim"
     assert "축소" in sells[0]["reason"]
-    expected = qty * price * TRIM_FRACTION
+    value = qty * price
+    total = 745.0 + value
+    excess = value - MAX_WEIGHT * total
+    expected = min(value * 0.50, max(value * TRIM_FRACTION, excess * 0.5))
     assert abs(sells[0]["dollars"] - expected) < 2
-    # position survives in the sim, smaller
     remaining = sum(u["qty"] for u in sim["positions"]["XRP/USD"]["units"])
     assert 0 < remaining < qty
+    # recovery: never buy more of the underwater bag
+    assert not any(o["side"] == "buy" and o["symbol"] == "XRP" for o in orders)
 
 
 def test_dust_position_is_consolidated():
@@ -216,6 +221,55 @@ def test_unit_size_scales_with_real_book():
     orders, _, _ = generate_orders(frames, book)
     buys = [o for o in orders if o["side"] == "buy"]
     assert buys and all(o["dollars"] == 750.0 for o in buys)
+
+
+def test_no_average_down_when_deep_underwater():
+    closes = wavy_uptrend()
+    frames = {"SOL/USD": make_frame(closes, daily_range=0.06)}
+    price = float(closes[-1])
+    anchor = price / 0.94
+    book = _new_book()
+    book["cash"] = 875.0
+    book["positions"]["SOL/USD"] = {
+        "units": [{"dollars": 125.0, "price": anchor, "qty": 125.0 / anchor}],
+        "anchor": anchor,
+        "step": 0.05,
+        "avg_cost": price * 1.5,
+    }
+    orders, _, _ = generate_orders(frames, book)
+    assert not any(o["side"] == "buy" and o["symbol"] == "SOL" for o in orders)
+
+
+def test_trim_proceeds_rotate_into_relative_strength():
+    xrp = np.linspace(2.0, 1.0, 250)
+    eth = wavy_uptrend()
+    frames = {
+        "XRP/USD": make_frame(xrp, daily_range=0.05),
+        "ETH/USD": make_frame(eth, daily_range=0.04),
+        "BTC/USD": make_frame(np.linspace(80_000, 50_000, 250), daily_range=0.03),
+    }
+    xrp_px = float(xrp[-1])
+    eth_px = float(eth[-1])
+    book = _new_book()
+    book["cash"] = 745.0
+    book["positions"]["XRP/USD"] = {
+        "units": [{"dollars": 5000 * xrp_px, "price": xrp_px, "qty": 5000.0}],
+        "anchor": xrp_px, "step": 0.05, "avg_cost": 1.80,
+    }
+    book["positions"]["ETH/USD"] = {
+        "units": [{"dollars": 100.0, "price": eth_px, "qty": 100.0 / eth_px}],
+        "anchor": eth_px, "step": 0.04, "avg_cost": eth_px,
+    }
+    book["budget"] = book["cash"] + 5000 * xrp_px + 100.0
+    book["principal"] = 13500.0
+    orders, _, view = generate_orders(frames, book)
+    assert view["summary"]["principal"] == 13500.0
+    assert view["summary"]["gap"] > 0
+    assert any(o["kind"] == "trim" and o["symbol"] == "XRP" for o in orders)
+    rotates = [o for o in orders if o["side"] == "buy" and o["symbol"] == "ETH"]
+    assert rotates
+    assert "재배치" in rotates[0]["reason"]
+    assert not any(o["side"] == "buy" and o["symbol"] == "XRP" for o in orders)
 
 
 def test_confirm_uses_actual_dollars_not_recommendation():

@@ -347,6 +347,7 @@ class CryptoHolding(BaseModel):
 class CryptoHoldingsBody(BaseModel):
     cash: float = 0.0
     positions: list[CryptoHolding]
+    principal: float | None = None
 
 
 @app.post("/api/crypto/holdings")
@@ -354,7 +355,9 @@ def crypto_holdings(body: CryptoHoldingsBody, request: Request):
     """실제 로빈후드 보유 내역으로 장부를 재구성."""
     if not _admin_authorized(request):
         return _unauthorized()
-    result = import_holdings(body.cash, [h.model_dump() for h in body.positions])
+    result = import_holdings(
+        body.cash, [h.model_dump() for h in body.positions], body.principal,
+    )
     return JSONResponse(result, status_code=200 if result.get("ok") else 400)
 
 

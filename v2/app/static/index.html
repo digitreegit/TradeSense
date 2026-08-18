@@ -170,6 +170,16 @@
   .crypto-order .done { font-size: 12px; color: var(--green); }
   .crypto-summary { color: var(--dim); font-size: 13px; margin-bottom: 8px; }
   .crypto-summary b { color: var(--text); }
+  .crypto-recovery {
+    margin: 0 0 12px; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: #0d1117; font-size: 13px;
+  }
+  .crypto-recovery .bar {
+    height: 6px; border-radius: 99px; background: #21262d; margin-top: 8px; overflow: hidden;
+  }
+  .crypto-recovery .bar > span {
+    display: block; height: 100%; background: var(--green); border-radius: 99px;
+  }
   .holding-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
   .holding-row input, .holding-row select {
     padding: 7px 8px; border-radius: 6px; border: 1px solid var(--border);
@@ -718,10 +728,16 @@ function renderCrypto(d) {
     html += `<div class="empty">할 일 없음 — 보유 유지. 다음 점검 때 다시 확인하세요.</div>`;
   }
 
-  html += `<div class="briefing-section" style="margin-top:16px"><h3>가상 포트폴리오 (시작 $${Number(s.budget || 1000).toLocaleString()})</h3></div>
+  html += `<div class="briefing-section" style="margin-top:16px"><h3>원금 회복</h3></div>
+    <div class="crypto-recovery">
+      원금 <b>${usd2(s.principal || s.budget)}</b>
+      · 현재 <b>${usd2(s.total)}</b>
+      · 남음 <span class="${plClass(-(s.gap || 0))}">${usd2(s.gap || 0)}</span>
+      (${pct(s.recovered_pct || 0)})
+      <div class="bar"><span style="width:${Math.min(100, Math.max(0, (s.recovered_pct || 0) * 100)).toFixed(1)}%"></span></div>
+    </div>
     <div class="crypto-summary">
-      평가 <b>${usd2(s.total)}</b>
-      <span class="${plClass(s.pl || 0)}">(${s.pl >= 0 ? '+' : '−'}$${Math.abs(s.pl || 0).toFixed(0)})</span>
+      등록후 손익 <span class="${plClass(s.pl || 0)}">${s.pl >= 0 ? '+' : '−'}$${Math.abs(s.pl || 0).toFixed(0)}</span>
       · 현금 ${usd2(s.cash)} · 실현손익 <span class="${plClass(s.realized_pl || 0)}">${s.realized_pl >= 0 ? '+' : '−'}$${Math.abs(s.realized_pl || 0).toFixed(0)}</span>
     </div>`;
   if (s.positions && s.positions.length) {
@@ -746,6 +762,11 @@ function renderCrypto(d) {
     <div class="holding-row">
       <span style="font-size:12px;color:var(--dim);width:84px;flex-shrink:0">현금 $</span>
       <input type="number" id="holdings-cash" min="0" step="0.01" placeholder="Buying power">
+      <span style="width:30px;flex-shrink:0"></span>
+    </div>
+    <div class="holding-row">
+      <span style="font-size:12px;color:var(--dim);width:84px;flex-shrink:0">원금 $</span>
+      <input type="number" id="holdings-principal" min="0" step="0.01" placeholder="회복 목표 (예: 13500)">
       <span style="width:30px;flex-shrink:0"></span>
     </div>
     <div class="btn-row" style="margin-top:8px">
@@ -774,6 +795,9 @@ function renderCrypto(d) {
     ({symbol: p.symbol, qty: p.qty, avg_cost: p.avg_cost}));
   (existing.length ? existing : [{}]).forEach(h => addHoldingRow(h));
   if (Number.isFinite(s.cash)) $('holdings-cash').value = Number(s.cash).toFixed(2);
+  if (Number.isFinite(s.principal) && s.principal > 0) {
+    $('holdings-principal').value = Number(s.principal).toFixed(2);
+  }
   $('btn-holding-add').addEventListener('click', () => addHoldingRow({}));
   $('btn-holdings-save').addEventListener('click', saveHoldings);
   $('btn-crypto-reset').addEventListener('click', () => openConfirm(
@@ -844,9 +868,13 @@ function saveHoldings() {
     });
   });
   const cash = Number($('holdings-cash').value) || 0;
+  const principalRaw = Number($('holdings-principal').value);
+  const principal = Number.isFinite(principalRaw) && principalRaw > 0 ? principalRaw : null;
   openConfirm(
     '실보유 내역으로 장부를 재구성할까요?',
-    `${positions.length}개 코인 + 현금 $${cash.toFixed(2)} 기준으로 기존 가상 장부를 덮어씁니다. 이후 봇은 이 실제 포트폴리오를 기준으로 매수/매도를 지시합니다.`,
+    `${positions.length}개 코인 + 현금 $${cash.toFixed(2)} 기준으로 기존 장부를 덮어씁니다.` +
+    (principal ? ` 원금 회복 목표는 $${principal.toFixed(0)}입니다.` : '') +
+    ` 이후 봇은 XRP 같은 편중·물타기 대신 상대강도로 재배치해 원금 회복을 우선합니다.`,
     '재구성',
     async () => {
       $('crypto-body').innerHTML = '<div class="empty">장부 재구성 중…</div>';
@@ -854,7 +882,7 @@ function saveHoldings() {
         const r = await api('/api/crypto/holdings', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({cash, positions}),
+          body: JSON.stringify({cash, positions, principal}),
         });
         renderCrypto(await r.json());
       } catch (e) {
