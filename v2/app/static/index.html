@@ -146,7 +146,7 @@
     margin: 14px 0; font-size: 13px; line-height: 1.5;
   }
   .crypto-order {
-    display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+    display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 14px;
     border: 1px solid var(--border); border-radius: 10px; background: #0d1117;
     margin-bottom: 8px; font-size: 14px;
   }
@@ -158,6 +158,16 @@
   .crypto-order .side.sell { background: #3d1d1d; color: var(--red); }
   .crypto-order .amt { font-weight: 700; font-variant-numeric: tabular-nums; }
   .crypto-order .why { color: var(--dim); font-size: 12px; margin-left: auto; text-align: right; }
+  .crypto-order .fill {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+  }
+  .crypto-order .fill label { font-size: 12px; color: var(--dim); white-space: nowrap; }
+  .crypto-order .fill input {
+    width: 88px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--panel); color: var(--text); font-size: 13px; font-variant-numeric: tabular-nums;
+  }
+  .crypto-order .done { font-size: 12px; color: var(--green); }
   .crypto-summary { color: var(--dim); font-size: 13px; margin-bottom: 8px; }
   .crypto-summary b { color: var(--text); }
 </style>
@@ -237,7 +247,7 @@
     </div>
     <p class="field-hint" style="margin-bottom:14px">
       봇이 가상 $1,000 포트폴리오를 굴리며 주문을 지시합니다. 실행만 로빈후드에서 그대로 해주세요.
-      매일 09:00 · 12:00 · 21:00 (ET) 자동 점검, 매번 텔레그램 알림.
+      매일 09:00 · 12:00 · 21:00 (ET) 자동 점검. 로빈후드에서 실행한 뒤 아래 확인을 눌러야 장부에 반영됩니다.
     </p>
     <div id="crypto-body"><div class="empty">불러오는 중…</div></div>
   </div>
@@ -673,14 +683,25 @@ function renderCrypto(d) {
   let html = `<div class="briefing-section"><h3>지금 실행할 주문 (로빈후드)</h3></div>`;
 
   if (d.orders && d.orders.length) {
-    html += d.orders.map(o => `
+    html += d.orders.map(o => {
+      const done = o.status === 'confirmed';
+      const fill = done
+        ? `<div class="fill"><span class="done">확인됨 · 실제 ${usd2(o.actual_dollars ?? o.dollars)}</span></div>`
+        : `<div class="fill">
+            <label>실제 금액 $</label>
+            <input type="number" min="1" step="1" value="${Number(o.dollars)}" data-oid="${escapeHtml(o.id)}" aria-label="${o.symbol} 실제 금액">
+            <button type="button" class="btn btn-primary btn-confirm-order" data-oid="${escapeHtml(o.id)}">확인</button>
+          </div>`;
+      return `
       <div class="crypto-order">
         <span class="side ${o.side}">${o.side === 'buy' ? '매수' : '매도'}</span>
         <b>${o.symbol}</b>
-        <span class="amt">${usd2(o.dollars)}어치</span>
+        <span class="amt">추천 ${usd2(o.dollars)}</span>
         <span style="color:var(--dim);font-size:12px">@$${cpx(o.price)}</span>
         <span class="why">${escapeHtml(o.reason)}</span>
-      </div>`).join('');
+        ${fill}
+      </div>`;
+    }).join('');
   } else {
     html += `<div class="empty">할 일 없음 — 보유 유지. 다음 점검 때 다시 확인하세요.</div>`;
   }
@@ -717,6 +738,9 @@ function renderCrypto(d) {
       <button type="button" class="btn btn-ghost" id="btn-crypto-reset">포트폴리오 리셋</button>
     </div>`;
   $('crypto-body').innerHTML = html;
+  $('crypto-body').querySelectorAll('.btn-confirm-order').forEach(btn => {
+    btn.addEventListener('click', () => confirmCryptoOrder(btn.dataset.oid));
+  });
   $('btn-crypto-reset').addEventListener('click', () => openConfirm(
     '가상 크립토 포트폴리오를 리셋할까요?',
     '가상 보유 내역과 손익 기록이 지워지고 $1,000 현금 상태에서 다시 시작합니다. 로빈후드 실계좌에는 아무 영향이 없습니다.',
@@ -731,6 +755,29 @@ function renderCrypto(d) {
       }
     },
   ));
+}
+
+async function confirmCryptoOrder(id) {
+  const input = $('crypto-body').querySelector(`input[data-oid="${id}"]`);
+  const raw = input ? Number(input.value) : NaN;
+  if (!Number.isFinite(raw) || raw <= 0) return;
+  try {
+    const r = await api('/api/crypto/confirm', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id, dollars: raw}),
+    });
+    const d = await r.json();
+    if (!d.ok) {
+      $('crypto-body').insertAdjacentHTML('afterbegin',
+        `<div class="empty" style="color:var(--red)">${escapeHtml(d.error || '확인 실패')}</div>`);
+      return;
+    }
+    renderCrypto(d);
+  } catch (e) {
+    $('crypto-body').insertAdjacentHTML('afterbegin',
+      `<div class="empty" style="color:var(--red)">${escapeHtml(String(e.message || e))}</div>`);
+  }
 }
 
 async function loadCrypto() {

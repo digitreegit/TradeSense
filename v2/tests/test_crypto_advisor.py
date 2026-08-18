@@ -7,7 +7,8 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.crypto_advisor import (
-    MAX_POSITIONS, MAX_STEP, MIN_STEP, _new_book, _step_for, generate_orders,
+    MAX_POSITIONS, MAX_STEP, MIN_STEP, _new_book, _step_for,
+    apply_order, generate_orders,
 )
 
 
@@ -39,18 +40,19 @@ def test_step_is_bounded():
 
 
 def test_uptrend_coin_gets_bought_and_downtrend_does_not():
+    live = _new_book()
     frames = {
         "BTC/USD": make_frame(wavy_uptrend(), daily_range=0.03),
         "SOL/USD": make_frame(wavy_uptrend(), daily_range=0.06),
         "DOGE/USD": make_frame(np.linspace(200, 100, 250), daily_range=0.08),
     }
-    orders, book, view = generate_orders(frames, _new_book())
+    orders, sim, view = generate_orders(frames, live)
 
     bought = {o["symbol"] for o in orders if o["side"] == "buy"}
     assert "SOL" in bought
     assert "DOGE" not in bought
-    assert "SOL/USD" in book["positions"]
-    assert book["cash"] < book["budget"]
+    assert live["positions"] == {}          # not applied until confirm
+    assert "SOL/USD" in sim["positions"]
     assert view["market"]["label"] in ("BULL", "CHOP")
 
 
@@ -58,7 +60,7 @@ def test_take_profit_sells_a_unit_and_ratchets_anchor():
     closes = wavy_uptrend()
     frames = {"SOL/USD": make_frame(closes, daily_range=0.06)}
     price = float(closes[-1])
-    anchor = price / 1.10  # price is >10% above the anchor: +step hit
+    anchor = price / 1.10
     book = _new_book()
     book["cash"] = 875.0
     book["positions"]["SOL/USD"] = {
@@ -66,20 +68,20 @@ def test_take_profit_sells_a_unit_and_ratchets_anchor():
         "anchor": anchor,
         "step": 0.05,
     }
-    orders, book, _ = generate_orders(frames, book)
+    orders, sim, _ = generate_orders(frames, book)
 
     sells = [o for o in orders if o["side"] == "sell" and o["symbol"] == "SOL"]
     assert len(sells) == 1
     assert "익절" in sells[0]["reason"]
-    assert book["realized_pl"] > 0
-    assert "SOL/USD" not in book["positions"]  # only unit was sold
+    assert "SOL/USD" in book["positions"]   # live book waits for confirm
+    assert "SOL/USD" not in sim["positions"]
 
 
 def test_dip_triggers_one_add_buy():
     closes = wavy_uptrend()
     frames = {"SOL/USD": make_frame(closes, daily_range=0.06)}
     price = float(closes[-1])
-    anchor = price / 0.94  # price fell >5% below the anchor
+    anchor = price / 0.94
     book = _new_book()
     book["cash"] = 875.0
     book["positions"]["SOL/USD"] = {
@@ -87,12 +89,13 @@ def test_dip_triggers_one_add_buy():
         "anchor": anchor,
         "step": 0.05,
     }
-    orders, book, _ = generate_orders(frames, book)
+    orders, sim, _ = generate_orders(frames, book)
 
     adds = [o for o in orders if o["side"] == "buy" and o["symbol"] == "SOL"]
     assert len(adds) == 1
     assert "추가 매수" in adds[0]["reason"]
-    assert len(book["positions"]["SOL/USD"]["units"]) == 2
+    assert len(book["positions"]["SOL/USD"]["units"]) == 1
+    assert len(sim["positions"]["SOL/USD"]["units"]) == 2
 
 
 def test_trend_break_liquidates_position():
@@ -107,13 +110,14 @@ def test_trend_break_liquidates_position():
         "anchor": 150.0,
         "step": 0.05,
     }
-    orders, book, _ = generate_orders(frames, book)
+    orders, sim, _ = generate_orders(frames, book)
 
     sells = [o for o in orders if o["side"] == "sell" and o["symbol"] == "SOL"]
     assert len(sells) == 1
     assert "추세 이탈" in sells[0]["reason"]
-    assert book["positions"] == {}
-    assert book["realized_pl"] < 0  # sold the falling knife at a loss
+    assert book["positions"] != {}
+    assert sim["positions"] == {}
+    assert sim["realized_pl"] < 0
 
 
 def test_bear_market_halves_entry_size():
@@ -133,6 +137,22 @@ def test_positions_capped_at_max():
         for i in range(6)
     }
     frames["BTC/USD"] = make_frame(wavy_uptrend(), daily_range=0.03)
-    orders, book, _ = generate_orders(frames, _new_book())
-    assert len(book["positions"]) == MAX_POSITIONS
+    live = _new_book()
+    orders, sim, _ = generate_orders(frames, live)
+    assert live["positions"] == {}
+    assert len(sim["positions"]) == MAX_POSITIONS
     assert len([o for o in orders if o["side"] == "buy"]) == MAX_POSITIONS
+
+
+def test_confirm_uses_actual_dollars_not_recommendation():
+    live = _new_book()
+    frames = {
+        "BTC/USD": make_frame(wavy_uptrend(), daily_range=0.03),
+        "SOL/USD": make_frame(wavy_uptrend(), daily_range=0.06),
+    }
+    orders, _, _ = generate_orders(frames, live)
+    buy = next(o for o in orders if o["symbol"] == "SOL" and o["side"] == "buy")
+    apply_order(live, buy, 100.0)
+    pos = live["positions"]["SOL/USD"]
+    assert pos["units"][0]["dollars"] == 100.0
+    assert live["cash"] == live["budget"] - 100.0

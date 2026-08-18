@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from .alpaca_config import clear_keys, save_keys, status_dict
 
 from .config import settings
-from .crypto_advisor import advise_and_apply, reset_book, run_scheduled
+from .crypto_advisor import advise_and_apply, confirm_order, reset_book, run_scheduled
 from .engine import Engine
 from .state import store
 
@@ -311,6 +311,20 @@ def notify_test(request: Request):
     from .notify import send_test
     result = send_test()
     return JSONResponse(result, status_code=200 if result["ok"] else 400)
+
+
+class CryptoConfirmBody(BaseModel):
+    id: str
+    dollars: float | None = None
+
+
+@app.post("/api/crypto/confirm")
+def crypto_confirm(body: CryptoConfirmBody, request: Request):
+    """로빈후드 실행 확인 — 실제 체결 금액을 장부에 반영."""
+    if not _admin_authorized(request):
+        return _unauthorized()
+    result = confirm_order(body.id, body.dollars)
+    return JSONResponse(result, status_code=200 if result.get("ok") else 400)
 
 
 @app.post("/api/crypto/reset")

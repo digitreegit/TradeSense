@@ -2,9 +2,9 @@
 exactly what to buy or sell; the user only executes the orders on Robinhood.
 
 Alpaca cannot trade crypto in this account's state, so no real orders are
-ever placed here. The book (positions, cash, anchors) lives in the store and
-is checked three times a day (09:00 / 12:00 / 21:00 ET) by the cron scheduler; each order
-is assumed executed at the quoted price.
+ever placed here. Proposed orders stay pending until the user confirms
+(optionally with the actual Robinhood fill size). The book is updated only
+on confirm. Checks run 09:00 / 12:00 / 21:00 ET.
 
 Signal design (lesson from scripts/grid_sim.py on stocks): a naked grid
 bleeds in downtrends, so entries require an uptrend (price > 50EMA and
@@ -13,8 +13,10 @@ each coin's own realized daily range instead of a fixed 5%.
 """
 from __future__ import annotations
 
+import copy
 import logging
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
@@ -37,6 +39,7 @@ BUDGET = 1000.0
 MAX_POSITIONS = 4
 MAX_UNITS = 2          # per coin: initial entry + one add on the dip
 BOOK_KEY = "crypto_book"
+PENDING_KEY = "crypto_pending"
 CACHE_KEY = "crypto_advice"
 CACHE_TTL = 900.0      # panel refresh window; scheduled runs bypass it
 
@@ -124,11 +127,8 @@ def _market_state(metrics: dict[str, dict]) -> tuple[str, str]:
 def generate_orders(
     frames: dict[str, pd.DataFrame], book: dict
 ) -> tuple[list[dict], dict, dict]:
-    """Pure decision step: (orders, updated book, market info).
-
-    Orders are applied to the book at the quoted price — the user's manual
-    execution is assumed to follow.
-    """
+    """Propose orders against a *copy* of the book. The caller's book is
+    left unchanged — fills land only via confirm_order()."""
     metrics = {}
     for sym, df in frames.items():
         m = _coin_metrics(df)
@@ -141,18 +141,22 @@ def generate_orders(
     if bear:
         unit = round(unit / 2, 0)
     orders: list[dict] = []
+    sim = copy.deepcopy(book)
 
-    def _order(side: str, sym: str, dollars: float, price: float, reason: str):
+    def _order(side: str, sym: str, dollars: float, price: float,
+               reason: str, kind: str, step: float):
         orders.append({
+            "id": uuid.uuid4().hex[:12],
             "side": side, "symbol": sym.split("/")[0], "pair": sym,
             "dollars": round(dollars, 0), "price": price, "reason": reason,
+            "kind": kind, "step": step,
+            "status": "pending", "actual_dollars": None,
         })
 
-    # 1) manage held positions: trend-break exit, take profit, add on dip
     sold_this_run: set[str] = set()
-    for sym in list(book["positions"]):
+    for sym in list(sim["positions"]):
         m = metrics.get(sym)
-        pos = book["positions"][sym]
+        pos = sim["positions"][sym]
         if m is None:
             continue
         price, step = m["price"], pos["step"]
@@ -160,57 +164,93 @@ def generate_orders(
         value = sum(u["qty"] for u in pos["units"]) * price
 
         if m["trend"] == "down" or price < m["ema50"]:
-            _order("sell", sym, value, price, "추세 이탈 — 전량 매도")
-            book["cash"] += value
-            book["realized_pl"] += value - invested
-            del book["positions"][sym]
+            _order("sell", sym, value, price, "추세 이탈 — 전량 매도", "exit", step)
+            apply_order(sim, orders[-1], value)
             sold_this_run.add(sym)
         elif price >= pos["anchor"] * (1 + step):
-            u = pos["units"].pop()                        # LIFO: last buy first
+            u = pos["units"][-1]
             got = u["qty"] * price
-            _order("sell", sym, got, price, f"익절 +{step:.0%}")
-            book["cash"] += got
-            book["realized_pl"] += got - u["dollars"]
-            pos["anchor"] = pos["anchor"] * (1 + step)
+            _order("sell", sym, got, price, f"익절 +{step:.0%}", "take_profit", step)
+            apply_order(sim, orders[-1], got)
             sold_this_run.add(sym)
-            if not pos["units"]:
-                del book["positions"][sym]
         elif (
             price <= pos["anchor"] * (1 - step)
             and len(pos["units"]) < MAX_UNITS
-            and book["cash"] >= unit
+            and sim["cash"] >= unit
         ):
-            _order("buy", sym, unit, price, f"−{step:.0%} 추가 매수")
-            pos["units"].append({"dollars": unit, "price": price, "qty": unit / price})
-            book["cash"] -= unit
-            pos["anchor"] = pos["anchor"] * (1 - step)
+            _order("buy", sym, unit, price, f"−{step:.0%} 추가 매수", "add", step)
+            apply_order(sim, orders[-1], unit)
 
-    # 2) new entries: highest-range uptrending coins, not overheated. A coin
-    # sold this run must not be rebought in the same breath.
     candidates = sorted(
         (
             (sym, m) for sym, m in metrics.items()
-            if sym not in book["positions"] and sym not in sold_this_run
+            if sym not in sim["positions"] and sym not in sold_this_run
             and m["trend"] == "up" and m["rsi14"] < 70
         ),
         key=lambda x: x[1]["range30"], reverse=True,
     )
     for sym, m in candidates:
-        if len(book["positions"]) >= MAX_POSITIONS or book["cash"] < unit:
+        if len(sim["positions"]) >= MAX_POSITIONS or sim["cash"] < unit:
             break
         step = _step_for(m["range30"])
         _order("buy", sym, unit, m["price"],
-               ("약세장 절반 크기 · " if bear else "") + "신규 진입 — 상승 추세")
-        book["positions"][sym] = {
-            "units": [{"dollars": unit, "price": m["price"], "qty": unit / m["price"]}],
-            "anchor": m["price"],
-            "step": step,
-        }
-        book["cash"] -= unit
+               ("약세장 절반 크기 · " if bear else "") + "신규 진입 — 상승 추세",
+               "entry", step)
+        apply_order(sim, orders[-1], unit)
 
-    book["updated_at"] = datetime.now(timezone.utc).isoformat()
+    sim["updated_at"] = datetime.now(timezone.utc).isoformat()
+    market = {
+        "label": label, "comment": comment,
+        "btc_price": metrics.get("BTC/USD", {}).get("price"),
+        "btc_ret30": metrics.get("BTC/USD", {}).get("ret30"),
+    }
+    # Panel P/L is the *confirmed* book, not the simulated fills.
+    view = {"market": market, "summary": _summary(book, metrics)}
+    return orders, sim, view
 
-    # valuation snapshot for the panel / notification
+
+def apply_order(book: dict, order: dict, dollars: float) -> None:
+    """Apply one fill to the book at `order['price']` for `dollars` notional."""
+    dollars = float(dollars)
+    if dollars <= 0:
+        raise ValueError("금액은 0보다 커야 합니다")
+    pair = order["pair"]
+    price = float(order["price"])
+    kind = order.get("kind") or ("buy" if order["side"] == "buy" else "exit")
+    step = float(order.get("step") or MIN_STEP)
+
+    if order["side"] == "buy":
+        qty = dollars / price
+        if pair not in book["positions"]:
+            book["positions"][pair] = {
+                "units": [], "anchor": price, "step": step,
+            }
+        pos = book["positions"][pair]
+        pos["units"].append({"dollars": dollars, "price": price, "qty": qty})
+        if kind == "add":
+            pos["anchor"] = pos["anchor"] * (1 - pos["step"])
+        book["cash"] -= dollars
+        return
+
+    pos = book["positions"].get(pair)
+    if not pos or not pos["units"]:
+        raise ValueError(f"{order['symbol']} 보유가 없어 매도할 수 없습니다")
+    invested = sum(u["dollars"] for u in pos["units"])
+    if kind == "take_profit":
+        u = pos["units"].pop()
+        book["cash"] += dollars
+        book["realized_pl"] += dollars - u["dollars"]
+        pos["anchor"] = pos["anchor"] * (1 + pos["step"])
+        if not pos["units"]:
+            del book["positions"][pair]
+        return
+    # full exit
+    book["cash"] += dollars
+    book["realized_pl"] += dollars - invested
+    del book["positions"][pair]
+
+
+def _summary(book: dict, metrics: dict[str, dict]) -> dict:
     positions_view = []
     total = book["cash"]
     for sym, pos in book["positions"].items():
@@ -231,25 +271,52 @@ def generate_orders(
             "add_at": pos["anchor"] * (1 - pos["step"]) if len(pos["units"]) < MAX_UNITS else None,
             "exit_at": m["ema50"] if m else None,
         })
-
-    market = {
-        "label": label, "comment": comment,
-        "btc_price": metrics.get("BTC/USD", {}).get("price"),
-        "btc_ret30": metrics.get("BTC/USD", {}).get("ret30"),
-    }
-    summary = {
+    return {
         "cash": book["cash"],
         "total": total,
-        "pl": total - book["budget"] ,
+        "pl": total - book["budget"],
         "realized_pl": book["realized_pl"],
         "budget": book["budget"],
         "positions": positions_view,
     }
-    return orders, book, {"market": market, "summary": summary}
+
+
+def _fp(o: dict) -> tuple:
+    return (o["side"], o["pair"], o.get("kind", ""))
+
+
+def _merge_pending(old: list[dict], fresh: list[dict]) -> list[dict]:
+    """Keep confirmation state when the same action is re-proposed."""
+    by_fp = {_fp(o): o for o in old}
+    out: list[dict] = []
+    seen: set[tuple] = set()
+    for o in fresh:
+        prev = by_fp.get(_fp(o))
+        if prev and prev.get("status") == "confirmed":
+            o = {**o, "id": prev["id"], "status": "confirmed",
+                 "actual_dollars": prev.get("actual_dollars")}
+        elif prev:
+            o = {**o, "id": prev["id"]}
+        seen.add(_fp(o))
+        out.append(o)
+    for o in old:
+        if o.get("status") == "confirmed" and _fp(o) not in seen:
+            out.append(o)
+    return out
+
+
+def _panel(orders: list[dict], view: dict) -> dict:
+    return {
+        "ok": True,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "schedule": SCHEDULE,
+        "orders": orders,
+        **view,
+    }
 
 
 def advise_and_apply(force: bool = False) -> dict:
-    """Compute today's orders and roll them into the virtual book (cached)."""
+    """Propose orders. Confirmed book is not touched until confirm_order()."""
     if not force:
         cached = store.get(CACHE_KEY)
         if cached and time.time() - cached.get("cached_at", 0) < CACHE_TTL:
@@ -259,25 +326,52 @@ def advise_and_apply(force: bool = False) -> dict:
         if not frames:
             raise RuntimeError("no crypto bars returned")
         book = store.get(BOOK_KEY) or _new_book()
-        orders, book, view = generate_orders(frames, book)
-        store.set(BOOK_KEY, book)
+        orders, _, view = generate_orders(frames, book)
+        orders = _merge_pending(store.get(PENDING_KEY) or [], orders)
+        store.set(PENDING_KEY, orders)
     except Exception as exc:
         log.exception("crypto advice failed")
         return {"ok": False, "error": f"크립토 분석 실패: {exc}"}
-    data = {
-        "ok": True,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "schedule": SCHEDULE,
-        "orders": orders,
-        **view,
-    }
+    data = _panel(orders, view)
     store.set(CACHE_KEY, {"cached_at": time.time(), "data": data})
+    return data
+
+
+def confirm_order(order_id: str, actual_dollars: float | None = None) -> dict:
+    """Mark a pending order executed and size the book to the real fill."""
+    pending = store.get(PENDING_KEY) or []
+    order = next((o for o in pending if o.get("id") == order_id), None)
+    if order is None:
+        return {"ok": False, "error": "해당 주문을 찾을 수 없습니다. 패널을 새로고침하세요."}
+    if order.get("status") == "confirmed":
+        cached = store.get(CACHE_KEY)
+        return (cached or {}).get("data") or {"ok": True, "orders": pending}
+    dollars = float(actual_dollars) if actual_dollars is not None else float(order["dollars"])
+    book = store.get(BOOK_KEY) or _new_book()
+    try:
+        apply_order(book, order, dollars)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    book["updated_at"] = datetime.now(timezone.utc).isoformat()
+    order["status"] = "confirmed"
+    order["actual_dollars"] = round(dollars, 2)
+    store.set(BOOK_KEY, book)
+    store.set(PENDING_KEY, pending)
+    store.set(CACHE_KEY, None)
+    log_activity(
+        "crypto",
+        f"실행 확인 {order['side']} {order['symbol']} "
+        f"추천 ${order['dollars']:.0f} → 실제 ${dollars:.0f}",
+    )
+    # Rebuild the panel against the updated book (keep pending confirmations).
+    data = advise_and_apply(force=True)
     return data
 
 
 def reset_book() -> None:
     store.set(BOOK_KEY, _new_book())
-    store.set(CACHE_KEY, None)  # invalidate the panel cache
+    store.set(PENDING_KEY, [])
+    store.set(CACHE_KEY, None)
 
 
 def _fmt_px(v: float) -> str:
@@ -298,10 +392,11 @@ def run_scheduled(slot: str) -> bool:
         return False
 
     s = data["summary"]
+    pending_orders = [o for o in data.get("orders", []) if o.get("status") != "confirmed"]
     lines = [
         f"{'🟢 매수' if o['side'] == 'buy' else '🔴 매도'} {o['symbol']} "
         f"${o['dollars']:,.0f} (@${_fmt_px(o['price'])}) — {o['reason']}"
-        for o in data["orders"]
+        for o in pending_orders
     ]
     status = (
         f"평가 ${s['total']:,.0f} ({s['pl']:+,.0f}) · 현금 ${s['cash']:,.0f} · "
@@ -310,11 +405,11 @@ def run_scheduled(slot: str) -> bool:
     labels = {"am": "아침", "noon": "점심", "pm": "저녁"}
     when = labels.get(slot, slot)
     if lines:
-        send(f"🪙 크립토 {when} 주문 — 로빈후드에서 실행하세요\n"
+        send(f"🪙 크립토 {when} 주문 — 로빈후드에서 실행 후 대시보드에서 확인을 누르세요\n"
              + "\n".join(lines) + "\n" + status)
     else:
         send(f"🪙 크립토 {when} 점검 — 주문 없음, 보유 유지\n{status}")
 
-    n = len(data["orders"])
+    n = len(pending_orders)
     log_activity("crypto", f"크립토 어드바이저({slot}) — 주문 {n}건, {status}")
     return True
