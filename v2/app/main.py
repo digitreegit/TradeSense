@@ -20,7 +20,9 @@ from pydantic import BaseModel
 from .alpaca_config import clear_keys, save_keys, status_dict
 
 from .config import settings
-from .crypto_advisor import advise_and_apply, confirm_order, reset_book, run_scheduled
+from .crypto_advisor import (
+    advise_and_apply, confirm_order, import_holdings, reset_book, run_scheduled,
+)
 from .engine import Engine
 from .state import store
 
@@ -334,6 +336,26 @@ def crypto_reset(request: Request):
         return _unauthorized()
     reset_book()
     return JSONResponse(advise_and_apply(force=True))
+
+
+class CryptoHolding(BaseModel):
+    symbol: str
+    qty: float
+    avg_cost: float | None = None
+
+
+class CryptoHoldingsBody(BaseModel):
+    cash: float = 0.0
+    positions: list[CryptoHolding]
+
+
+@app.post("/api/crypto/holdings")
+def crypto_holdings(body: CryptoHoldingsBody, request: Request):
+    """실제 로빈후드 보유 내역으로 장부를 재구성."""
+    if not _admin_authorized(request):
+        return _unauthorized()
+    result = import_holdings(body.cash, [h.model_dump() for h in body.positions])
+    return JSONResponse(result, status_code=200 if result.get("ok") else 400)
 
 
 @app.get("/api/cron/run")

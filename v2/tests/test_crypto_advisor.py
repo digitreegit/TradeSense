@@ -7,8 +7,8 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.crypto_advisor import (
-    MAX_POSITIONS, MAX_STEP, MIN_STEP, _new_book, _step_for,
-    apply_order, generate_orders,
+    MAX_POSITIONS, MAX_STEP, MAX_WEIGHT, MIN_STEP, TRIM_FRACTION,
+    _new_book, _step_for, apply_order, generate_orders,
 )
 
 
@@ -142,6 +142,80 @@ def test_positions_capped_at_max():
     assert live["positions"] == {}
     assert len(sim["positions"]) == MAX_POSITIONS
     assert len([o for o in orders if o["side"] == "buy"]) == MAX_POSITIONS
+
+
+def test_oversized_position_gets_staged_trim_not_full_dump():
+    """An 80%+ bag in a downtrend is trimmed 30% per check, never dumped."""
+    closes = np.linspace(2.0, 1.0, 250)          # XRP-like downtrend
+    frames = {"XRP/USD": make_frame(closes, daily_range=0.05)}
+    price = float(closes[-1])
+    qty = 5000.0
+    book = _new_book()
+    book["cash"] = 745.0
+    book["budget"] = 745.0 + qty * price
+    book["positions"]["XRP/USD"] = {
+        "units": [{"dollars": qty * price, "price": price, "qty": qty}],
+        "anchor": price, "step": 0.05, "avg_cost": 1.80,
+    }
+    orders, sim, _ = generate_orders(frames, book)
+
+    sells = [o for o in orders if o["side"] == "sell" and o["symbol"] == "XRP"]
+    assert len(sells) == 1
+    assert sells[0]["kind"] == "trim"
+    assert "축소" in sells[0]["reason"]
+    expected = qty * price * TRIM_FRACTION
+    assert abs(sells[0]["dollars"] - expected) < 2
+    # position survives in the sim, smaller
+    remaining = sum(u["qty"] for u in sim["positions"]["XRP/USD"]["units"])
+    assert 0 < remaining < qty
+
+
+def test_dust_position_is_consolidated():
+    frames = {"SHIB/USD": make_frame(np.linspace(0.0001, 0.00005, 250))}
+    price = 0.00005
+    book = _new_book()
+    book["cash"] = 950.0
+    book["positions"]["SHIB/USD"] = {
+        "units": [{"dollars": 4.0, "price": price, "qty": 4.0 / price}],
+        "anchor": price, "step": 0.08,
+    }
+    orders, sim, _ = generate_orders(frames, book)
+    sells = [o for o in orders if o["side"] == "sell" and o["symbol"] == "SHIB"]
+    assert len(sells) == 1
+    assert "소액 정리" in sells[0]["reason"]
+    assert "SHIB/USD" not in sim["positions"]
+
+
+def test_trim_apply_reduces_units_proportionally():
+    book = _new_book()
+    book["cash"] = 0.0
+    book["positions"]["XRP/USD"] = {
+        "units": [{"dollars": 5000.0, "price": 1.0, "qty": 5000.0}],
+        "anchor": 1.0, "step": 0.05, "avg_cost": 1.80,
+    }
+    order = {"side": "sell", "symbol": "XRP", "pair": "XRP/USD",
+             "price": 1.0, "kind": "trim", "step": 0.05}
+    apply_order(book, order, 1500.0)
+    pos = book["positions"]["XRP/USD"]
+    assert abs(sum(u["qty"] for u in pos["units"]) - 3500.0) < 1e-6
+    assert abs(book["cash"] - 1500.0) < 1e-6
+    assert abs(book["realized_pl"]) < 1e-6      # MTM basis: no phantom P/L
+    assert pos["avg_cost"] == 1.80              # display basis preserved
+
+
+def test_unit_size_scales_with_real_book():
+    """A $6,000 real book should size units off $6,000, not the $1,000 toy."""
+    closes = wavy_uptrend()
+    frames = {
+        "BTC/USD": make_frame(closes, daily_range=0.03),
+        "SOL/USD": make_frame(closes, daily_range=0.06),
+    }
+    book = _new_book()
+    book["cash"] = 6000.0
+    book["budget"] = 6000.0
+    orders, _, _ = generate_orders(frames, book)
+    buys = [o for o in orders if o["side"] == "buy"]
+    assert buys and all(o["dollars"] == 750.0 for o in buys)
 
 
 def test_confirm_uses_actual_dollars_not_recommendation():

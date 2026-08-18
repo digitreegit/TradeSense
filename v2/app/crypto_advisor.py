@@ -45,6 +45,10 @@ CACHE_TTL = 900.0      # panel refresh window; scheduled runs bypass it
 
 MIN_STEP = 0.04        # never advise a step tighter than 4%
 MAX_STEP = 0.12
+MAX_WEIGHT = 0.35      # one coin above this share of the book gets trimmed
+TRIM_FRACTION = 0.30   # staged: sell 30% of an oversized position per check
+DUST_MIN = 50.0        # positions below this are consolidated when not trending up
+MIN_UNIT = 25.0
 SCHEDULE = "매일 09:00 · 12:00 · 21:00 (ET)"
 
 
@@ -137,11 +141,21 @@ def generate_orders(
 
     label, comment = _market_state(metrics)
     bear = label == "BEAR"
-    unit = round(BUDGET / MAX_POSITIONS / MAX_UNITS, 0)   # $125
-    if bear:
-        unit = round(unit / 2, 0)
     orders: list[dict] = []
     sim = copy.deepcopy(book)
+
+    def _pos_value(pos: dict, sym: str) -> float:
+        m = metrics.get(sym)
+        px = m["price"] if m else pos["units"][-1]["price"]
+        return sum(u["qty"] for u in pos["units"]) * px
+
+    # size units off the whole book (real holdings + cash), not a fixed $1000
+    total_value = sim["cash"] + sum(
+        _pos_value(p, s) for s, p in sim["positions"].items()
+    )
+    unit = max(MIN_UNIT, round(total_value / MAX_POSITIONS / MAX_UNITS, 0))
+    if bear:
+        unit = max(MIN_UNIT, round(unit / 2, 0))
 
     def _order(side: str, sym: str, dollars: float, price: float,
                reason: str, kind: str, step: float):
@@ -160,8 +174,26 @@ def generate_orders(
         if m is None:
             continue
         price, step = m["price"], pos["step"]
-        invested = sum(u["dollars"] for u in pos["units"])
         value = sum(u["qty"] for u in pos["units"]) * price
+        weight = value / total_value if total_value > 0 else 0.0
+
+        # 0) dust that is not trending up: consolidate into cash
+        if value < DUST_MIN and m["trend"] != "up":
+            _order("sell", sym, value, price, "소액 정리 — 회복 기여 없음", "exit", step)
+            apply_order(sim, orders[-1], value)
+            sold_this_run.add(sym)
+            continue
+
+        # 1) oversized position: staged trim instead of all-or-nothing.
+        # A -44% bag at 84% weight must shrink gradually, not market-dump.
+        if weight > MAX_WEIGHT:
+            trim = value * (TRIM_FRACTION if m["trend"] == "down" else TRIM_FRACTION / 2)
+            why = ("하락 추세" if m["trend"] == "down" else "추세 무관") + \
+                f" · 비중 {weight:.0%} — 단계적 축소"
+            _order("sell", sym, trim, price, why, "trim", step)
+            apply_order(sim, orders[-1], trim)
+            sold_this_run.add(sym)
+            continue
 
         if m["trend"] == "down" or price < m["ema50"]:
             _order("sell", sym, value, price, "추세 이탈 — 전량 매도", "exit", step)
@@ -244,6 +276,19 @@ def apply_order(book: dict, order: dict, dollars: float) -> None:
         if not pos["units"]:
             del book["positions"][pair]
         return
+    if kind == "trim":
+        # partial sell: reduce every unit proportionally, anchor unchanged
+        total_qty = sum(u["qty"] for u in pos["units"])
+        ratio = min(1.0, (dollars / price) / total_qty) if total_qty > 0 else 1.0
+        removed_cost = invested * ratio
+        for u in pos["units"]:
+            u["qty"] *= (1 - ratio)
+            u["dollars"] *= (1 - ratio)
+        book["cash"] += dollars
+        book["realized_pl"] += dollars - removed_cost
+        if ratio >= 0.999:
+            del book["positions"][pair]
+        return
     # full exit
     book["cash"] += dollars
     book["realized_pl"] += dollars - invested
@@ -260,6 +305,7 @@ def _summary(book: dict, metrics: dict[str, dict]) -> dict:
         invested = sum(u["dollars"] for u in pos["units"])
         value = qty * price
         total += value
+        avg_cost = pos.get("avg_cost")
         positions_view.append({
             "symbol": sym.split("/")[0],
             "price": price,
@@ -267,6 +313,9 @@ def _summary(book: dict, metrics: dict[str, dict]) -> dict:
             "value": value,
             "pl": value - invested,
             "units": len(pos["units"]),
+            "qty": qty,
+            "avg_cost": avg_cost,
+            "total_return": (price / avg_cost - 1) if avg_cost else None,
             "sell_at": pos["anchor"] * (1 + pos["step"]),
             "add_at": pos["anchor"] * (1 - pos["step"]) if len(pos["units"]) < MAX_UNITS else None,
             "exit_at": m["ema50"] if m else None,
@@ -372,6 +421,56 @@ def reset_book() -> None:
     store.set(BOOK_KEY, _new_book())
     store.set(PENDING_KEY, [])
     store.set(CACHE_KEY, None)
+
+
+def import_holdings(cash: float, holdings: list[dict]) -> dict:
+    """Rebuild the book from the user's real Robinhood holdings.
+
+    Cost basis inside the book is marked to market at import (so summary P/L
+    measures improvement *since import*); the original avg cost is kept per
+    position for the truthful total-return display.
+    """
+    valid = {p.split("/")[0]: p for p in CANDIDATES}
+    frames = fetch_bars()
+    metrics = {s: m for s, m in
+               ((sym, _coin_metrics(df)) for sym, df in frames.items()) if m}
+    book = {"budget": 0.0, "cash": float(cash), "positions": {},
+            "realized_pl": 0.0}
+    skipped: list[str] = []
+    for h in holdings:
+        sym = str(h.get("symbol", "")).upper().strip()
+        qty = float(h.get("qty") or 0)
+        pair = valid.get(sym)
+        if not pair or qty <= 0:
+            skipped.append(sym or "?")
+            continue
+        m = metrics.get(pair)
+        if m is None:
+            skipped.append(sym)
+            continue
+        price = m["price"]
+        book["positions"][pair] = {
+            "units": [{"dollars": qty * price, "price": price, "qty": qty}],
+            "anchor": price,
+            "step": _step_for(m["range30"]),
+            "avg_cost": float(h["avg_cost"]) if h.get("avg_cost") else None,
+        }
+    book["budget"] = book["cash"] + sum(
+        sum(u["dollars"] for u in p["units"]) for p in book["positions"].values()
+    )
+    book["updated_at"] = datetime.now(timezone.utc).isoformat()
+    store.set(BOOK_KEY, book)
+    store.set(PENDING_KEY, [])
+    store.set(CACHE_KEY, None)
+    log_activity(
+        "crypto",
+        f"실보유 등록 — {len(book['positions'])}종목 + 현금 ${cash:,.0f}"
+        + (f", 제외: {', '.join(skipped)}" if skipped else ""),
+    )
+    data = advise_and_apply(force=True)
+    if data.get("ok") and skipped:
+        data["skipped"] = skipped
+    return data
 
 
 def _fmt_px(v: float) -> str:

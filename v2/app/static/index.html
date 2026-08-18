@@ -170,6 +170,18 @@
   .crypto-order .done { font-size: 12px; color: var(--green); }
   .crypto-summary { color: var(--dim); font-size: 13px; margin-bottom: 8px; }
   .crypto-summary b { color: var(--text); }
+  .holding-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+  .holding-row input, .holding-row select {
+    padding: 7px 8px; border-radius: 6px; border: 1px solid var(--border);
+    background: #0d1117; color: var(--text); font-size: 13px; min-width: 0;
+  }
+  .holding-row select { width: 84px; flex-shrink: 0; }
+  .holding-row input { flex: 1; }
+  .holding-row .rm {
+    width: 30px; height: 30px; flex-shrink: 0; border: none; border-radius: 6px;
+    background: transparent; color: var(--dim); cursor: pointer; font-size: 16px;
+  }
+  .holding-row .rm:hover { color: var(--red); }
 </style>
 </head>
 <body>
@@ -716,14 +728,30 @@ function renderCrypto(d) {
     html += table(s.positions, [
       {h: '코인', f: r => `<b>${r.symbol}</b>${r.units > 1 ? ` <span style="color:var(--dim);font-size:11px">×${r.units}</span>` : ''}`},
       {h: '평가액', f: r => usd2(r.value)},
-      {h: '손익', f: r => `<span class="${plClass(r.pl)}">${r.pl >= 0 ? '+' : ''}${r.pl.toFixed(0)}</span>`},
+      {h: '평단', f: r => r.avg_cost ? '$' + cpx(r.avg_cost) : '—'},
+      {h: '총수익', f: r => r.total_return != null
+        ? `<span class="${plClass(r.total_return)}">${r.total_return >= 0 ? '+' : ''}${pct(r.total_return)}</span>` : '—'},
+      {h: '등록후', f: r => `<span class="${plClass(r.pl)}">${r.pl >= 0 ? '+' : ''}${r.pl.toFixed(0)}</span>`},
       {h: '익절가', f: r => '$' + cpx(r.sell_at)},
-      {h: '추가매수가', f: r => r.add_at ? '$' + cpx(r.add_at) : '—'},
-      {h: '이탈 청산', f: r => r.exit_at ? '$' + cpx(r.exit_at) : '—'},
+      {h: '이탈/축소', f: r => r.exit_at ? '$' + cpx(r.exit_at) : '—'},
     ]);
   } else {
     html += `<div class="empty">보유 없음 — 전액 현금</div>`;
   }
+
+  // real-holdings editor (rebuilds the book from actual Robinhood positions)
+  html += `<div class="briefing-section" style="margin-top:16px"><h3>실보유 등록 (로빈후드와 동기화)</h3></div>
+    <p class="field-hint">실제 보유 수량·평단을 입력하고 저장하면 봇이 이 포트폴리오를 기준으로 주문을 지시합니다.</p>
+    <div id="holdings-rows"></div>
+    <div class="holding-row">
+      <span style="font-size:12px;color:var(--dim);width:84px;flex-shrink:0">현금 $</span>
+      <input type="number" id="holdings-cash" min="0" step="0.01" placeholder="Buying power">
+      <span style="width:30px;flex-shrink:0"></span>
+    </div>
+    <div class="btn-row" style="margin-top:8px">
+      <button type="button" class="btn btn-ghost" id="btn-holding-add">+ 코인 추가</button>
+      <button type="button" class="btn btn-primary" id="btn-holdings-save">저장 — 장부 재구성</button>
+    </div>`;
 
   html += `
     <div class="crypto-market">
@@ -741,6 +769,13 @@ function renderCrypto(d) {
   $('crypto-body').querySelectorAll('.btn-confirm-order').forEach(btn => {
     btn.addEventListener('click', () => confirmCryptoOrder(btn.dataset.oid));
   });
+  // holdings editor: prefill from the current book
+  const existing = (s.positions || []).map(p =>
+    ({symbol: p.symbol, qty: p.qty, avg_cost: p.avg_cost}));
+  (existing.length ? existing : [{}]).forEach(h => addHoldingRow(h));
+  if (Number.isFinite(s.cash)) $('holdings-cash').value = Number(s.cash).toFixed(2);
+  $('btn-holding-add').addEventListener('click', () => addHoldingRow({}));
+  $('btn-holdings-save').addEventListener('click', saveHoldings);
   $('btn-crypto-reset').addEventListener('click', () => openConfirm(
     '가상 크립토 포트폴리오를 리셋할까요?',
     '가상 보유 내역과 손익 기록이 지워지고 $1,000 현금 상태에서 다시 시작합니다. 로빈후드 실계좌에는 아무 영향이 없습니다.',
@@ -778,6 +813,55 @@ async function confirmCryptoOrder(id) {
     $('crypto-body').insertAdjacentHTML('afterbegin',
       `<div class="empty" style="color:var(--red)">${escapeHtml(String(e.message || e))}</div>`);
   }
+}
+
+const COIN_LIST = ['BTC','ETH','SOL','DOGE','XRP','AVAX','LINK','LTC','UNI','SHIB','BCH','AAVE'];
+
+function addHoldingRow(h) {
+  const row = document.createElement('div');
+  row.className = 'holding-row';
+  const opts = COIN_LIST.map(c =>
+    `<option value="${c}"${h.symbol === c ? ' selected' : ''}>${c}</option>`).join('');
+  row.innerHTML = `
+    <select aria-label="코인">${opts}</select>
+    <input type="number" min="0" step="any" placeholder="수량" value="${h.qty ?? ''}" aria-label="수량">
+    <input type="number" min="0" step="any" placeholder="평단 $ (선택)" value="${h.avg_cost ?? ''}" aria-label="평단">
+    <button type="button" class="rm" aria-label="삭제">&times;</button>`;
+  row.querySelector('.rm').addEventListener('click', () => row.remove());
+  $('holdings-rows').appendChild(row);
+}
+
+function saveHoldings() {
+  const positions = [];
+  $('holdings-rows').querySelectorAll('.holding-row').forEach(row => {
+    const [qtyEl, avgEl] = row.querySelectorAll('input');
+    const qty = Number(qtyEl.value);
+    if (!Number.isFinite(qty) || qty <= 0) return;
+    positions.push({
+      symbol: row.querySelector('select').value,
+      qty,
+      avg_cost: Number(avgEl.value) > 0 ? Number(avgEl.value) : null,
+    });
+  });
+  const cash = Number($('holdings-cash').value) || 0;
+  openConfirm(
+    '실보유 내역으로 장부를 재구성할까요?',
+    `${positions.length}개 코인 + 현금 $${cash.toFixed(2)} 기준으로 기존 가상 장부를 덮어씁니다. 이후 봇은 이 실제 포트폴리오를 기준으로 매수/매도를 지시합니다.`,
+    '재구성',
+    async () => {
+      $('crypto-body').innerHTML = '<div class="empty">장부 재구성 중…</div>';
+      try {
+        const r = await api('/api/crypto/holdings', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({cash, positions}),
+        });
+        renderCrypto(await r.json());
+      } catch (e) {
+        $('crypto-body').innerHTML = `<div class="empty">실패: ${escapeHtml(String(e.message || e))}</div>`;
+      }
+    },
+  );
 }
 
 async function loadCrypto() {
