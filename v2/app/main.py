@@ -299,6 +299,16 @@ def crypto_advice(request: Request):
     return JSONResponse(advise_and_apply())
 
 
+@app.post("/api/notify/test")
+def notify_test(request: Request):
+    """텔레그램 설정 진단 — 테스트 메시지를 실제로 발송해본다."""
+    if not _admin_authorized(request):
+        return _unauthorized()
+    from .notify import send_test
+    result = send_test()
+    return JSONResponse(result, status_code=200 if result["ok"] else 400)
+
+
 @app.post("/api/crypto/reset")
 def crypto_reset(request: Request):
     """가상 크립토 포트폴리오를 $1,000 현금 상태로 초기화."""

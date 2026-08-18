@@ -283,6 +283,13 @@
     <p class="msg" id="settings-msg"></p>
 
     <hr style="border:none;border-top:1px solid var(--border);margin:18px 0 14px">
+    <span class="field-label">텔레그램 알림</span>
+    <p class="field-hint">Vercel 환경변수 <b>TELEGRAM_BOT_TOKEN</b> / <b>TELEGRAM_CHAT_ID</b>를 사용합니다.
+      아래 버튼으로 실제 발송을 테스트하세요.</p>
+    <button type="button" class="btn btn-ghost" id="btn-tg-test">텔레그램 테스트 발송</button>
+    <p class="msg" id="tg-msg"></p>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:18px 0 14px">
     <span class="field-label">상태 리셋</span>
     <p class="field-hint">계좌를 바꾼 뒤 이전 드로다운 기준점 때문에 거래가 중단되면 여기서 초기화하세요.
       드로다운·레짐·포지션 메타·예약 주문·에쿼티 곡선·거래 기록이 지워지고, Alpaca 키는 유지됩니다.</p>
@@ -788,6 +795,19 @@ async function submitToken() {
 }
 $('btn-token-save').addEventListener('click', submitToken);
 $('token-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitToken(); });
+
+$('btn-tg-test').addEventListener('click', async () => {
+  const el = $('tg-msg');
+  el.textContent = '발송 중…'; el.className = 'msg';
+  try {
+    const r = await api('/api/notify/test', {method: 'POST'});
+    const d = await r.json();
+    el.textContent = d.ok ? '발송 성공 — 텔레그램을 확인하세요.' : (d.error || '발송 실패');
+    el.className = 'msg ' + (d.ok ? 'ok' : 'err');
+  } catch (e) {
+    el.textContent = String(e.message || e); el.className = 'msg err';
+  }
+});
 
 $('btn-save-keys').addEventListener('click', saveKeys);
 $('btn-delete-keys').addEventListener('click', () => openConfirm(
