@@ -1066,14 +1066,30 @@ document.querySelectorAll('.main-tab').forEach(btn => {
 });
 
 let pendingScreenshots = [];
+let previewObjectUrls = [];
+
+function resetScreenshotUpload() {
+  previewObjectUrls.forEach(u => URL.revokeObjectURL(u));
+  previewObjectUrls = [];
+  pendingScreenshots = [];
+  $('upload-preview').innerHTML = '';
+  $('screenshot-input').value = '';
+  $('upload-zone').classList.remove('drag');
+}
 
 function renderUploadPreview() {
+  previewObjectUrls.forEach(u => URL.revokeObjectURL(u));
+  previewObjectUrls = [];
   const el = $('upload-preview');
-  el.innerHTML = pendingScreenshots.map((f, i) => `
+  el.innerHTML = pendingScreenshots.map((f, i) => {
+    const url = URL.createObjectURL(f);
+    previewObjectUrls.push(url);
+    return `
     <div class="upload-thumb">
-      <img src="${URL.createObjectURL(f)}" alt="${escapeHtml(f.name)}">
+      <img src="${url}" alt="${escapeHtml(f.name)}">
       <button type="button" data-idx="${i}" aria-label="제거">&times;</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   el.querySelectorAll('button[data-idx]').forEach(btn => {
     btn.addEventListener('click', () => {
       pendingScreenshots.splice(Number(btn.dataset.idx), 1);
@@ -1123,6 +1139,7 @@ async function analyzeScreenshots() {
     }
     msg.textContent = '분석 완료 — 아래 가이드를 확인하세요.';
     msg.className = 'msg ok';
+    resetScreenshotUpload();
     renderCrypto(d);
   } catch (e) {
     msg.textContent = String(e.message || e);
