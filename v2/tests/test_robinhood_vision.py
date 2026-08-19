@@ -22,9 +22,15 @@ def test_parse_screenshots_requires_api_key(monkeypatch):
 
 
 def test_resolve_google_model_maps_deprecated_exp():
-    assert rv._resolve_google_model("gemini-2.0-flash-exp") == "gemini-2.0-flash"
-    assert rv._resolve_google_model("models/gemini-2.0-flash-exp") == "gemini-2.0-flash"
-    assert rv._resolve_google_model("gemini-2.0-flash") == "gemini-2.0-flash"
+    assert rv._resolve_google_model("gemini-2.0-flash-exp") == "gemini-2.5-flash"
+    assert rv._resolve_google_model("models/gemini-2.0-flash") == "gemini-2.5-flash"
+    assert rv._resolve_google_model("gemini-2.5-flash") == "gemini-2.5-flash"
+
+
+def test_gemini_models_to_try_includes_fallbacks():
+    chain = rv._gemini_models_to_try("gemini-2.0-flash")
+    assert chain[0] == "gemini-2.5-flash"
+    assert "gemini-flash-latest" in chain
 
 
 def test_image_mime_detects_png():

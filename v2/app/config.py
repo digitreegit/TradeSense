@@ -140,7 +140,7 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
     google_api_key: str = ""
-    google_model: str = "gemini-2.0-flash"
+    google_model: str = "gemini-2.5-flash"
 
     # Notifications
     telegram_bot_token: str = ""

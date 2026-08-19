@@ -14,20 +14,39 @@ from .crypto_advisor import advise_and_apply, import_holdings
 
 log = logging.getLogger(__name__)
 
-# Google occasionally retires *-exp preview IDs; map them to stable names.
+# Retired preview/stable IDs → current vision-capable models (Aug 2026).
 _GOOGLE_MODEL_ALIASES = {
-    "gemini-2.0-flash-exp": "gemini-2.0-flash",
-    "gemini-2.0-flash-lite-exp": "gemini-2.0-flash-lite",
-    "gemini-1.5-flash-exp": "gemini-1.5-flash",
-    "gemini-1.5-pro-exp": "gemini-1.5-pro",
+    "gemini-2.0-flash-exp": "gemini-2.5-flash",
+    "gemini-2.0-flash": "gemini-2.5-flash",
+    "gemini-2.0-flash-lite-exp": "gemini-2.5-flash-lite",
+    "gemini-2.0-flash-lite": "gemini-2.5-flash-lite",
+    "gemini-1.5-flash-exp": "gemini-2.5-flash",
+    "gemini-1.5-flash": "gemini-2.5-flash",
+    "gemini-1.5-pro-exp": "gemini-2.5-flash",
+    "gemini-1.5-pro": "gemini-2.5-flash",
 }
+
+_GOOGLE_VISION_FALLBACKS = (
+    "gemini-2.5-flash",
+    "gemini-flash-latest",
+    "gemini-2.5-flash-lite",
+)
 
 
 def _resolve_google_model(name: str) -> str:
-    model = (name or "gemini-2.0-flash").strip()
+    model = (name or "gemini-2.5-flash").strip()
     if model.startswith("models/"):
         model = model[7:]
     return _GOOGLE_MODEL_ALIASES.get(model, model)
+
+
+def _gemini_models_to_try(preferred: str) -> list[str]:
+    first = _resolve_google_model(preferred)
+    chain = [first]
+    for model in _GOOGLE_VISION_FALLBACKS:
+        if model not in chain:
+            chain.append(model)
+    return chain
 
 
 def _image_mime(data: bytes) -> str:
@@ -85,18 +104,7 @@ def _vision_via_openai(images: list[bytes]) -> dict[str, Any]:
     return json.loads(resp.choices[0].message.content)
 
 
-def _vision_via_gemini(images: list[bytes]) -> dict[str, Any]:
-    if not settings.google_api_key:
-        raise RuntimeError("GOOGLE_API_KEY가 설정되지 않았습니다.")
-    model = _resolve_google_model(settings.google_model)
-    parts: list[dict] = [{"text": PROMPT}]
-    for img in images:
-        parts.append({
-            "inline_data": {
-                "mime_type": _image_mime(img),
-                "data": base64.standard_b64encode(img).decode(),
-            }
-        })
+def _gemini_generate(model: str, parts: list[dict]) -> dict[str, Any]:
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
         f"{model}:generateContent"
@@ -115,6 +123,30 @@ def _vision_via_gemini(images: list[bytes]) -> dict[str, Any]:
         raise RuntimeError(body["error"].get("message", str(body["error"])))
     text = body["candidates"][0]["content"]["parts"][0]["text"]
     return json.loads(text)
+
+
+def _vision_via_gemini(images: list[bytes]) -> dict[str, Any]:
+    if not settings.google_api_key:
+        raise RuntimeError("GOOGLE_API_KEY가 설정되지 않았습니다.")
+    parts: list[dict] = [{"text": PROMPT}]
+    for img in images:
+        parts.append({
+            "inline_data": {
+                "mime_type": _image_mime(img),
+                "data": base64.standard_b64encode(img).decode(),
+            }
+        })
+    errors: list[str] = []
+    for model in _gemini_models_to_try(settings.google_model):
+        try:
+            return _gemini_generate(model, parts)
+        except RuntimeError as exc:
+            msg = str(exc)
+            errors.append(f"{model}: {msg}")
+            if "no longer available" not in msg.lower() and "not found" not in msg.lower():
+                raise
+            log.warning("Gemini model %s unavailable, trying fallback", model)
+    raise RuntimeError(errors[-1] if errors else "Gemini vision failed")
 
 
 def parse_screenshots(images: list[bytes]) -> dict[str, Any]:
