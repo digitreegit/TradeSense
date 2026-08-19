@@ -111,6 +111,8 @@ def test_connection() -> dict:
 
 
 def status_dict() -> dict:
+    from .notify import telegram_status
+
     api_key, _, _ = get_credentials()
     configured = is_configured()
     conn = test_connection() if configured else {"connected": False, "error": "keys_not_configured"}
@@ -124,4 +126,5 @@ def status_dict() -> dict:
         "key_prefix": api_key[:2].upper() if api_key else "",
         "paper_key_detected": is_paper_key(api_key),
         "connection": conn,
+        "telegram": telegram_status(),
     }
