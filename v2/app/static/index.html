@@ -249,10 +249,12 @@
   }
   .section-head h3 { margin: 0; }
   .btn-sm { padding: 6px 12px; font-size: 12px; }
-  .rh-panel { margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+  .settings-section { margin-bottom: 4px; }
+  .settings-section h3 { font-size: 14px; margin: 0 0 8px; font-weight: 700; }
   .rh-status { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 13px; }
   .rh-keys { display: grid; gap: 8px; max-width: 420px; margin-top: 10px; }
   .rh-keys .input { width: 100%; }
+  .crypto-toolbar { padding: 0 0 8px; }
 </style>
 </head>
 <body>
@@ -284,53 +286,11 @@
 <div class="err" id="err"></div>
 
 <section id="tab-crypto" class="tab-panel active" role="tabpanel">
-  <div class="panel rh-panel">
-    <h2>Robinhood API</h2>
-    <p class="field-hint" style="margin-bottom:8px">
-      공식 크립토 API로 보유·현금을 자동 동기화합니다 (거래는 앱에서 직접).
-      <a class="link" href="https://robinhood.com/us/en/support/articles/crypto-api/" target="_blank" rel="noreferrer">키 발급 안내</a>
-    </p>
-    <div class="rh-status">
-      <span class="status-dot" id="rh-dot"></span>
-      <div class="status-text">
-        <span id="rh-label">연결 확인 중…</span>
-        <small id="rh-detail"></small>
-      </div>
-    </div>
-    <div class="rh-keys" id="rh-keys-wrap">
-      <span class="field-label">API Key</span>
-      <input type="password" class="input" id="rh-api-key" autocomplete="off" placeholder="rh-api-…">
-      <span class="field-label">Private Key (Base64)</span>
-      <input type="password" class="input" id="rh-private-key" autocomplete="off" placeholder="Ed25519 private key">
-      <div class="btn-row">
-        <button type="button" class="btn btn-primary btn-sm" id="btn-save-rh-keys">키 저장</button>
-        <button type="button" class="btn btn-ghost btn-sm" id="btn-delete-rh-keys" style="display:none">키 삭제</button>
-        <button type="button" class="btn btn-primary btn-sm" id="btn-robinhood-sync">동기화 · 가이드 생성</button>
-      </div>
-    </div>
-    <p class="msg" id="rh-msg"></p>
+  <div class="crypto-toolbar btn-row" style="justify-content:space-between;align-items:center">
+    <span class="field-hint" style="margin:0">로빈후드 가이드 · 설정에서 API 동기화 또는 스크린샷</span>
+    <button type="button" class="btn btn-ghost btn-sm" id="btn-refresh-crypto">새로고침</button>
   </div>
-  <div class="panel">
-    <h2>또는 스크린샷</h2>
-    <p class="field-hint" style="margin-bottom:12px">
-      API 없이 계좌·보유 화면 캡처를 올려도 됩니다. 평단 확인용으로 유용합니다.
-    </p>
-    <div class="upload-zone" id="upload-zone">
-      <input type="file" id="screenshot-input" accept="image/*" multiple hidden>
-      <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l3.182 3.182m-18.75 0V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18v-4.5M12 2.25v13.5"/>
-      </svg>
-      <div>탭하거나 드래그해서 스크린샷 추가</div>
-      <div class="upload-hint">여러 장 올려도 됩니다 (총액 + 각 코인 보유)</div>
-    </div>
-    <div id="upload-preview" class="upload-preview"></div>
-    <div class="btn-row" style="margin-top:12px">
-      <button type="button" class="btn btn-primary" id="btn-analyze-screenshots">분석 · 가이드 생성</button>
-      <button type="button" class="btn btn-ghost" id="btn-refresh-crypto">새로고침</button>
-    </div>
-    <p class="msg" id="upload-msg"></p>
-  </div>
-  <div id="crypto-body"><div class="empty">Robinhood 동기화 또는 스크린샷 업로드 후 가이드를 확인하세요.</div></div>
+  <div id="crypto-body"><div class="empty">설정에서 Robinhood 동기화 후 가이드를 확인하세요.</div></div>
 </section>
 
 <section id="tab-stocks" class="tab-panel" role="tabpanel">
@@ -380,9 +340,15 @@
       </button>
     </div>
     <p class="field-hint" style="margin-bottom:14px">
-      실거래 전용입니다. 라이브 계좌의 API 키(AK…)를 연결하세요.
-      <a class="link" href="https://app.alpaca.markets/dashboard/overview" target="_blank" rel="noreferrer">Alpaca Live 대시보드</a>
+      주식(Alpaca)과 크립토(Robinhood) 연동, 알림, 상태 관리.
     </p>
+
+    <div class="settings-section">
+      <h3>주식 · Alpaca</h3>
+      <p class="field-hint" style="margin-bottom:10px">
+        실거래 전용. 라이브 API 키(AK…)를 연결하세요.
+        <a class="link" href="https://app.alpaca.markets/dashboard/overview" target="_blank" rel="noreferrer">Alpaca Live 대시보드</a>
+      </p>
 
     <div class="status-row" id="conn-status">
       <span class="status-dot" id="conn-dot"></span>
@@ -406,6 +372,58 @@
 
     <ul class="acct-list" id="acct-summary" style="display:none"></ul>
     <p class="msg" id="settings-msg"></p>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:18px 0 14px">
+
+    <div class="settings-section">
+      <h3>크립토 · Robinhood API</h3>
+      <p class="field-hint" style="margin-bottom:8px">
+        보유·현금 자동 동기화 (거래는 앱에서 직접).
+        <a class="link" href="https://robinhood.com/us/en/support/articles/crypto-api/" target="_blank" rel="noreferrer">키 발급 안내</a>
+      </p>
+      <div class="rh-status">
+        <span class="status-dot" id="rh-dot"></span>
+        <div class="status-text">
+          <span id="rh-label">연결 확인 중…</span>
+          <small id="rh-detail"></small>
+        </div>
+      </div>
+      <div class="rh-keys" id="rh-keys-wrap">
+        <span class="field-label">API Key</span>
+        <input type="password" class="input" id="rh-api-key" autocomplete="off" placeholder="rh-api-…">
+        <span class="field-label">Private Key (Base64)</span>
+        <input type="password" class="input" id="rh-private-key" autocomplete="off" placeholder="Ed25519 private key">
+        <div class="btn-row">
+          <button type="button" class="btn btn-primary btn-sm" id="btn-save-rh-keys">키 저장</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-delete-rh-keys" style="display:none">키 삭제</button>
+          <button type="button" class="btn btn-primary btn-sm" id="btn-robinhood-sync">동기화 · 가이드 생성</button>
+        </div>
+      </div>
+      <p class="msg" id="rh-msg"></p>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:18px 0 14px">
+
+    <div class="settings-section">
+      <h3>또는 스크린샷</h3>
+      <p class="field-hint" style="margin-bottom:12px">
+        API 없이 계좌·보유 캡처 업로드. 평단 확인용으로 유용합니다.
+      </p>
+      <div class="upload-zone" id="upload-zone">
+        <input type="file" id="screenshot-input" accept="image/*" multiple hidden>
+        <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l3.182 3.182m-18.75 0V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18v-4.5M12 2.25v13.5"/>
+        </svg>
+        <div>탭하거나 드래그해서 스크린샷 추가</div>
+        <div class="upload-hint">여러 장 올려도 됩니다 (총액 + 각 코인 보유)</div>
+      </div>
+      <div id="upload-preview" class="upload-preview"></div>
+      <div class="btn-row" style="margin-top:12px">
+        <button type="button" class="btn btn-primary btn-sm" id="btn-analyze-screenshots">분석 · 가이드 생성</button>
+      </div>
+      <p class="msg" id="upload-msg"></p>
+    </div>
 
     <hr style="border:none;border-top:1px solid var(--border);margin:18px 0 14px">
     <span class="field-label">텔레그램 알림</span>
@@ -688,10 +706,17 @@ async function loadSettings() {
     const r = await api('/api/settings');
     const st = await r.json();
     renderConnection(st);
+    await loadRobinhoodStatus();
   } catch (e) {
     $('conn-label').textContent = '설정 불러오기 실패';
     $('conn-detail').textContent = String(e);
   }
+}
+
+function showCryptoGuide(d) {
+  closeOverlay('overlay-settings');
+  switchTab('crypto');
+  renderCrypto(d);
 }
 
 function setSettingsMsg(text, ok) {
@@ -1184,7 +1209,7 @@ async function syncRobinhood() {
     }
     msg.textContent = '동기화 완료 — 아래 가이드를 확인하세요.';
     msg.className = 'msg ok';
-    renderCrypto(d);
+    showCryptoGuide(d);
     loadRobinhoodStatus();
   } catch (e) {
     msg.textContent = String(e.message || e);
@@ -1283,7 +1308,7 @@ async function analyzeScreenshots() {
     msg.textContent = '분석 완료 — 아래 가이드를 확인하세요.';
     msg.className = 'msg ok';
     resetScreenshotUpload();
-    renderCrypto(d);
+    showCryptoGuide(d);
   } catch (e) {
     msg.textContent = String(e.message || e);
     msg.className = 'msg err';
@@ -1412,7 +1437,6 @@ $('btn-confirm-action').addEventListener('click', async () => {
 });
 refresh();
 loadCrypto();
-loadRobinhoodStatus();
 loadSettings();
 setInterval(refresh, 30000);
 setInterval(() => {
