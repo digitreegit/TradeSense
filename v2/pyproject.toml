@@ -1,10 +1,11 @@
 [project]
 name = "tradesense"
-version = "2.0.0"
+version = "3.0.0"
 requires-python = ">=3.12"
 dependencies = [
     "alpaca-py>=0.33",
     "fastapi>=0.115",
+    "python-multipart>=0.0.9",
     "uvicorn[standard]>=0.30",
     "apscheduler>=3.10",
     "pandas>=2.2",
