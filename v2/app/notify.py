@@ -18,17 +18,30 @@ def _chat_id() -> str:
     return (settings.telegram_chat_id or "").strip()
 
 
+def _chat_id_issue(chat: str) -> str | None:
+    """Return issue code: placeholder | mismatch | None if OK."""
+    if not chat:
+        return "missing"
+    if "TELEGRAM" in chat.upper() or not chat.lstrip("-").isdigit():
+        return "placeholder"
+    if not chat.endswith("0870"):
+        return "mismatch"
+    return None
+
+
 def telegram_status() -> dict:
     """Safe diagnostics for the settings panel (no secrets)."""
     token = _token()
     chat = _chat_id()
+    issue = _chat_id_issue(chat)
     return {
-        "configured": bool(token and chat),
+        "configured": bool(token and chat and issue is None),
         "token_set": bool(token),
         "chat_id_set": bool(chat),
         "token_hint": f"{token[:4]}…{token[-4:]}" if len(token) >= 10 else "",
-        "chat_id_hint": f"…{chat[-4:]}" if len(chat) >= 4 else "",
-        "expected_chat_id_suffix": "0870",
+        "chat_id_hint": f"…{chat[-4:]}" if len(chat) >= 4 else chat,
+        "expected_chat_id": "8788110870",
+        "chat_id_issue": issue,
     }
 
 

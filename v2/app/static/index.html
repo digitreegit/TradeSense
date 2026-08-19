@@ -632,9 +632,14 @@ function renderConnection(st) {
     tgEl.textContent = '서버: TELEGRAM_CHAT_ID 없음';
     tgEl.style.color = 'var(--red)';
   } else {
-    const okChat = tg.chat_id_hint === '…0870';
-    tgEl.innerHTML = `서버: BOT ${escapeHtml(tg.token_hint || '?')} · CHAT ${escapeHtml(tg.chat_id_hint || '?')}`
-      + (okChat ? '' : ' <span style="color:var(--red)">← chat ID 불일치 (8788110870 이어야 함)</span>');
+    let err = '';
+    if (tg.chat_id_issue === 'placeholder') {
+      err = ' <span style="color:var(--red)">← 변수 이름이 값으로 들어감 — <b>8788110870</b> 숫자만 넣으세요</span>';
+    } else if (tg.chat_id_issue === 'mismatch') {
+      err = ' <span style="color:var(--red)">← chat ID 불일치 (<b>8788110870</b> 이어야 함)</span>';
+    }
+    const okChat = !tg.chat_id_issue;
+    tgEl.innerHTML = `서버: BOT ${escapeHtml(tg.token_hint || '?')} · CHAT ${escapeHtml(tg.chat_id_hint || '?')}` + err;
     tgEl.style.color = okChat ? 'var(--green)' : 'var(--dim)';
   }
 }

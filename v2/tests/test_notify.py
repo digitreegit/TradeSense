@@ -39,7 +39,12 @@ def test_send_test_returns_telegram_error_description():
         assert "8788110870" in out["error"]
 
 
-def test_send_returns_false_when_telegram_rejects():
+def test_telegram_status_flags_placeholder_chat_id():
+    with patch.object(notify.settings, "telegram_bot_token", "8530546766:AAHtest"), \
+         patch.object(notify.settings, "telegram_chat_id", "TELEGRAM_CHAT_ID"):
+        st = notify.telegram_status()
+        assert st["chat_id_issue"] == "placeholder"
+        assert st["configured"] is False
     resp = MagicMock()
     resp.text = "bad"
     resp.json.return_value = {"ok": False, "description": "Bad Request: can't parse entities"}
