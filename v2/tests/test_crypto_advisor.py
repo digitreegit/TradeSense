@@ -284,3 +284,46 @@ def test_confirm_uses_actual_dollars_not_recommendation():
     pos = live["positions"]["SOL/USD"]
     assert pos["units"][0]["dollars"] == 100.0
     assert live["cash"] == live["budget"] - 100.0
+
+
+def test_panel_splits_active_and_history():
+    from app.crypto_advisor import _panel
+
+    orders = [
+        {"id": "1", "side": "sell", "symbol": "XRP", "dollars": 100, "status": "confirmed",
+         "confirmed_at": "2026-08-19T12:00:00+00:00"},
+        {"id": "2", "side": "buy", "symbol": "SOL", "dollars": 50},
+    ]
+    data = _panel(orders, {"summary": {}, "market": {"label": "CHOP"}})
+    assert len(data["orders"]) == 1
+    assert data["orders"][0]["symbol"] == "SOL"
+    assert len(data["order_history"]) == 1
+    assert data["order_history"][0]["symbol"] == "XRP"
+
+
+def test_notify_crypto_orders_skips_when_empty():
+    from unittest.mock import patch
+    from app.crypto_advisor import notify_crypto_orders
+
+    with patch("app.crypto_advisor.send") as send:
+        assert notify_crypto_orders({"ok": True, "orders": []}, "test") is True
+        send.assert_not_called()
+
+
+def test_notify_crypto_orders_sends_when_actionable():
+    from unittest.mock import patch
+    from app.crypto_advisor import notify_crypto_orders
+    from app.state import store
+
+    store.set("crypto_notify_fp", None)
+    data = {
+        "ok": True,
+        "orders": [{"id": "a", "side": "sell", "symbol": "XRP", "dollars": 100,
+                    "price": 1.0, "reason": "trim"}],
+        "summary": {"total": 6000, "principal": 10000, "gap": 4000, "cash": 80},
+        "market": {"label": "CHOP"},
+    }
+    with patch("app.crypto_advisor.send", return_value=True) as send:
+        assert notify_crypto_orders(data, "스크린샷", force=True) is True
+        assert send.call_count == 1
+        assert "XRP" in send.call_args[0][0]

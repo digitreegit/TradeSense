@@ -40,6 +40,7 @@ MAX_POSITIONS = 4
 MAX_UNITS = 2          # per coin: initial entry + one add on the dip
 BOOK_KEY = "crypto_book"
 PENDING_KEY = "crypto_pending"
+NOTIFY_FP_KEY = "crypto_notify_fp"
 CACHE_KEY = "crypto_advice"
 CACHE_TTL = 900.0      # panel refresh window; scheduled runs bypass it
 
@@ -413,13 +414,65 @@ def _merge_pending(old: list[dict], fresh: list[dict]) -> list[dict]:
 
 
 def _panel(orders: list[dict], view: dict) -> dict:
+    active = [o for o in orders if o.get("status") != "confirmed"]
+    history = [o for o in orders if o.get("status") == "confirmed"]
+    history.sort(key=lambda o: o.get("confirmed_at") or "", reverse=True)
     return {
         "ok": True,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "schedule": SCHEDULE,
-        "orders": orders,
+        "orders": active,
+        "order_history": history,
         **view,
     }
+
+
+def _order_fingerprint(orders: list[dict]) -> tuple:
+    return tuple(sorted(
+        (o.get("id"), o["side"], o["symbol"], round(float(o["dollars"]), 2))
+        for o in orders
+    ))
+
+
+def _format_crypto_telegram(data: dict, source: str) -> str:
+    s = data.get("summary") or {}
+    pending = data.get("orders") or []
+    lines = [
+        f"{'🟢 매수' if o['side'] == 'buy' else '🔴 매도'} {o['symbol']} "
+        f"${o['dollars']:,.0f} (@${_fmt_px(o['price'])}) — {o['reason']}"
+        for o in pending
+    ]
+    gap = s.get("gap") or 0
+    principal = s.get("principal") or s.get("budget") or 0
+    status = (
+        f"현재 ${s.get('total', 0):,.0f} / 원금 ${principal:,.0f} "
+        f"(남음 ${gap:,.0f}) · 현금 ${s.get('cash', 0):,.0f} · "
+        f"시장 {(data.get('market') or {}).get('label', '?')}"
+    )
+    if lines:
+        return (
+            f"🪙 크립토 {source} — 로빈후드에서 실행 후 대시보드에서 확인\n"
+            + "\n".join(lines) + "\n" + status
+        )
+    return f"🪙 크립토 {source} — 주문 없음, 보유 유지\n{status}"
+
+
+def notify_crypto_orders(data: dict, source: str, *, force: bool = False) -> bool:
+    """Telegram alert when there are actionable buy/sell guides."""
+    if not data.get("ok"):
+        return False
+    pending = data.get("orders") or []
+    if not pending:
+        return True
+    fp = _order_fingerprint(pending)
+    if not force and store.get(NOTIFY_FP_KEY) == fp:
+        return True
+    body = _format_crypto_telegram(data, source)
+    if not send(body):
+        log.warning("crypto telegram notify failed (%s)", source)
+        return False
+    store.set(NOTIFY_FP_KEY, fp)
+    return True
 
 
 def advise_and_apply(force: bool = False) -> dict:
@@ -462,6 +515,7 @@ def confirm_order(order_id: str, actual_dollars: float | None = None) -> dict:
     book["updated_at"] = datetime.now(timezone.utc).isoformat()
     order["status"] = "confirmed"
     order["actual_dollars"] = round(dollars, 2)
+    order["confirmed_at"] = datetime.now(timezone.utc).isoformat()
     store.set(BOOK_KEY, book)
     store.set(PENDING_KEY, pending)
     store.set(CACHE_KEY, None)
@@ -479,6 +533,7 @@ def reset_book() -> None:
     store.set(BOOK_KEY, _new_book())
     store.set(PENDING_KEY, [])
     store.set(CACHE_KEY, None)
+    store.set(NOTIFY_FP_KEY, None)
 
 
 def import_holdings(
@@ -534,6 +589,8 @@ def import_holdings(
         + (f", 제외: {', '.join(skipped)}" if skipped else ""),
     )
     data = advise_and_apply(force=True)
+    if data.get("ok"):
+        notify_crypto_orders(data, "스크린샷 분석", force=True)
     if data.get("ok") and skipped:
         data["skipped"] = skipped
     return data
@@ -556,34 +613,19 @@ def run_scheduled(slot: str) -> bool:
         log_activity("crypto", f"크립토 어드바이저 실패: {data.get('error')}")
         return False
 
-    s = data["summary"]
-    pending_orders = [o for o in data.get("orders", []) if o.get("status") != "confirmed"]
-    lines = [
-        f"{'🟢 매수' if o['side'] == 'buy' else '🔴 매도'} {o['symbol']} "
-        f"${o['dollars']:,.0f} (@${_fmt_px(o['price'])}) — {o['reason']}"
-        for o in pending_orders
-    ]
-    gap = s.get("gap") or 0
-    principal = s.get("principal") or s.get("budget") or 0
-    status = (
-        f"현재 ${s['total']:,.0f} / 원금 ${principal:,.0f} "
-        f"(남음 ${gap:,.0f}) · 현금 ${s['cash']:,.0f} · "
-        f"시장 {data['market']['label']}"
-    )
     labels = {"am": "아침", "noon": "점심", "pm": "저녁"}
     when = labels.get(slot, slot)
-    if lines:
-        body = (
-            f"🪙 크립토 {when} 주문 — 로빈후드에서 실행 후 대시보드에서 확인을 누르세요\n"
-            + "\n".join(lines) + "\n" + status
-        )
-    else:
-        body = f"🪙 크립토 {when} 점검 — 주문 없음, 보유 유지\n{status}"
-
-    if not send(body):
+    if not notify_crypto_orders(data, when, force=True):
         log_activity("crypto", f"크립토 어드바이저({slot}) — 텔레그램 발송 실패")
         return False
 
-    n = len(pending_orders)
+    n = len(data.get("orders") or [])
+    s = data.get("summary") or {}
+    gap = s.get("gap") or 0
+    principal = s.get("principal") or s.get("budget") or 0
+    status = (
+        f"현재 ${s.get('total', 0):,.0f} / 원금 ${principal:,.0f} "
+        f"(남음 ${gap:,.0f})"
+    )
     log_activity("crypto", f"크립토 어드바이저({slot}) — 주문 {n}건, {status}")
     return True

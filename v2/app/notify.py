@@ -44,8 +44,8 @@ def send(text: str) -> bool:
     try:
         r = httpx.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat, "text": text},
-            timeout=10,
+            json={"chat_id": str(chat), "text": text},
+            timeout=15.0,
         )
         body = r.json()
         if not body.get("ok"):
@@ -73,10 +73,10 @@ def send_test() -> dict:
         r = httpx.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
             json={
-                "chat_id": chat,
+                "chat_id": str(chat),
                 "text": "✅ TradeSense 텔레그램 테스트 — 알림이 정상 작동합니다.",
             },
-            timeout=10,
+            timeout=15.0,
         )
         body = r.json()
         if body.get("ok"):
