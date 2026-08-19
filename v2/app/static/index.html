@@ -818,6 +818,18 @@ function renderCryptoHistory() {
   el.innerHTML = lastCryptoHistory.map(o => renderCryptoOrder(o, {history: true})).join('');
 }
 
+function splitCryptoOrders(d) {
+  const byId = new Map();
+  for (const o of [...(d.orders || []), ...(d.order_history || [])]) {
+    if (o && o.id) byId.set(o.id, o);
+  }
+  const all = [...byId.values()];
+  const history = all.filter(o => o.status === 'confirmed')
+    .sort((a, b) => (b.confirmed_at || '').localeCompare(a.confirmed_at || ''));
+  const active = all.filter(o => o.status !== 'confirmed');
+  return {active, history};
+}
+
 function renderCrypto(d) {
   if (!d.ok) {
     $('crypto-body').innerHTML = `<div class="empty">${escapeHtml(d.error || '분석 실패')}</div>`;
@@ -853,13 +865,13 @@ function renderCrypto(d) {
     </div>`;
   }
 
+  const {active, history} = splitCryptoOrders(d);
+  lastCryptoHistory = history;
+
   html += `<div class="section-head">
     <h3>지금 실행할 주문 (로빈후드)</h3>
-    <button type="button" class="btn btn-ghost btn-sm" id="btn-crypto-history">History${(d.order_history || []).length ? ` (${d.order_history.length})` : ''}</button>
+    <button type="button" class="btn btn-ghost btn-sm" id="btn-crypto-history">History${history.length ? ` (${history.length})` : ''}</button>
   </div>`;
-
-  lastCryptoHistory = d.order_history || [];
-  const active = d.orders || [];
 
   if (active.length) {
     html += active.map(o => renderCryptoOrder(o)).join('');

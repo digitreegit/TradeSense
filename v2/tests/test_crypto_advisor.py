@@ -301,6 +301,38 @@ def test_panel_splits_active_and_history():
     assert data["order_history"][0]["symbol"] == "XRP"
 
 
+def test_ensure_order_split_fixes_legacy_cache():
+    from app.crypto_advisor import _ensure_order_split
+
+    legacy = {
+        "ok": True,
+        "orders": [
+            {"id": "1", "side": "sell", "symbol": "XRP", "dollars": 100, "status": "confirmed",
+             "confirmed_at": "2026-08-19T12:00:00+00:00"},
+            {"id": "2", "side": "buy", "symbol": "ETH", "dollars": 50},
+        ],
+    }
+    fixed = _ensure_order_split(legacy)
+    assert len(fixed["orders"]) == 1
+    assert fixed["orders"][0]["symbol"] == "ETH"
+    assert len(fixed["order_history"]) == 1
+
+
+def test_merge_pending_does_not_reconfirm_fresh_proposal():
+    from app.crypto_advisor import _merge_pending
+
+    old = [{"id": "a", "side": "sell", "symbol": "XRP", "pair": "XRP/USD",
+            "kind": "trim", "dollars": 100, "status": "confirmed",
+            "confirmed_at": "2026-08-19T12:00:00+00:00"}]
+    fresh = [{"id": "b", "side": "sell", "symbol": "XRP", "pair": "XRP/USD",
+              "kind": "trim", "dollars": 120}]
+    merged = _merge_pending(old, fresh)
+    active = [o for o in merged if o.get("status") != "confirmed"]
+    assert len(active) == 1
+    assert active[0].get("status") != "confirmed"
+    assert active[0]["dollars"] == 120
+
+
 def test_notify_crypto_orders_skips_when_empty():
     from unittest.mock import patch
     from app.crypto_advisor import notify_crypto_orders

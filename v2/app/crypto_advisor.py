@@ -401,8 +401,8 @@ def _merge_pending(old: list[dict], fresh: list[dict]) -> list[dict]:
     for o in fresh:
         prev = by_fp.get(_fp(o))
         if prev and prev.get("status") == "confirmed":
-            o = {**o, "id": prev["id"], "status": "confirmed",
-                 "actual_dollars": prev.get("actual_dollars")}
+            # Same action re-recommended → new todo, keep old in history.
+            o = {**o, "id": str(uuid.uuid4())}
         elif prev:
             o = {**o, "id": prev["id"]}
         seen.add(_fp(o))
@@ -425,6 +425,21 @@ def _panel(orders: list[dict], view: dict) -> dict:
         "order_history": history,
         **view,
     }
+
+
+def _ensure_order_split(data: dict) -> dict:
+    """Guarantee confirmed orders live in order_history, not the active todo list."""
+    if not data.get("ok"):
+        return data
+    combined: dict[str, dict] = {}
+    for o in (data.get("orders") or []) + (data.get("order_history") or []):
+        oid = o.get("id") or str(uuid.uuid4())
+        combined[oid] = o
+    orders = list(combined.values())
+    active = [o for o in orders if o.get("status") != "confirmed"]
+    history = [o for o in orders if o.get("status") == "confirmed"]
+    history.sort(key=lambda o: o.get("confirmed_at") or "", reverse=True)
+    return {**data, "orders": active, "order_history": history}
 
 
 def _order_fingerprint(orders: list[dict]) -> tuple:
@@ -480,7 +495,7 @@ def advise_and_apply(force: bool = False) -> dict:
     if not force:
         cached = store.get(CACHE_KEY)
         if cached and time.time() - cached.get("cached_at", 0) < CACHE_TTL:
-            return cached["data"]
+            return _ensure_order_split(cached["data"])
     try:
         frames = fetch_bars()
         if not frames:
@@ -493,6 +508,7 @@ def advise_and_apply(force: bool = False) -> dict:
         log.exception("crypto advice failed")
         return {"ok": False, "error": f"크립토 분석 실패: {exc}"}
     data = _panel(orders, view)
+    data = _ensure_order_split(data)
     store.set(CACHE_KEY, {"cached_at": time.time(), "data": data})
     return data
 
@@ -505,7 +521,8 @@ def confirm_order(order_id: str, actual_dollars: float | None = None) -> dict:
         return {"ok": False, "error": "해당 주문을 찾을 수 없습니다. 패널을 새로고침하세요."}
     if order.get("status") == "confirmed":
         cached = store.get(CACHE_KEY)
-        return (cached or {}).get("data") or {"ok": True, "orders": pending}
+        raw = (cached or {}).get("data") or _panel(pending, {})
+        return _ensure_order_split(raw)
     dollars = float(actual_dollars) if actual_dollars is not None else float(order["dollars"])
     book = store.get(BOOK_KEY) or _new_book()
     try:
@@ -526,7 +543,7 @@ def confirm_order(order_id: str, actual_dollars: float | None = None) -> dict:
     )
     # Rebuild the panel against the updated book (keep pending confirmations).
     data = advise_and_apply(force=True)
-    return data
+    return _ensure_order_split(data)
 
 
 def reset_book() -> None:
