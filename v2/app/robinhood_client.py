@@ -83,3 +83,10 @@ class RobinhoodCryptoClient:
             parsed = urlparse(nxt)
             path = parsed.path + (f"?{parsed.query}" if parsed.query else "")
         return out
+
+    def get_best_bid_ask(self, *symbols: str) -> dict:
+        """Live mid prices — symbol args like BTC-USD."""
+        query = self._query_params("symbol", *symbols) if symbols else ""
+        path = f"/api/v1/crypto/marketdata/best_bid_ask/{query}"
+        data = self.request("GET", path)
+        return data if isinstance(data, dict) else {}

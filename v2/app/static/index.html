@@ -260,6 +260,52 @@
   #tab-settings .upload-zone,
   #tab-settings .upload-preview { max-width: 480px; }
   #tab-settings .rh-keys { max-width: 480px; }
+
+  /* Robinhood-style portfolio (dark theme) */
+  .rh-wrap { max-width: 440px; margin: 0 auto; }
+  .rh-portfolio { padding: 4px 0 18px; }
+  .rh-total {
+    font-size: 40px; font-weight: 700; letter-spacing: -.02em;
+    font-variant-numeric: tabular-nums; line-height: 1.08;
+  }
+  .rh-day { font-size: 15px; font-weight: 600; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .rh-live {
+    font-size: 12px; color: var(--dim); margin-top: 8px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .rh-live-dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--green);
+    box-shadow: 0 0 6px rgba(63,185,80,.55);
+  }
+  .rh-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 0; border-bottom: 1px solid var(--border); font-size: 15px;
+  }
+  .rh-row .rh-row-val { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .rh-section { margin-top: 22px; }
+  .rh-section-head h3 { font-size: 20px; font-weight: 700; margin: 0 0 4px; }
+  .rh-section-sub { font-size: 12px; color: var(--dim); margin-bottom: 10px; }
+  .rh-holding {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center; gap: 10px; padding: 13px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .rh-sym { font-size: 16px; font-weight: 700; }
+  .rh-qty { font-size: 13px; color: var(--dim); margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .rh-spark { display: block; flex-shrink: 0; }
+  .rh-price-pill {
+    padding: 8px 14px; border-radius: 999px; font-size: 15px; font-weight: 700;
+    font-variant-numeric: tabular-nums; min-width: 76px; text-align: center;
+  }
+  .rh-price-pill.up { background: rgba(63,185,80,.2); color: var(--green); }
+  .rh-price-pill.down { background: rgba(248,81,73,.2); color: var(--red); }
+  .rh-advisor {
+    margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--border);
+  }
+  .rh-advisor h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin-bottom: 10px; }
+  .rh-orders-note {
+    font-size: 12px; color: var(--dim); margin: -4px 0 10px; line-height: 1.45;
+  }
 </style>
 </head>
 <body>
@@ -292,7 +338,7 @@
 
 <section id="tab-crypto" class="tab-panel active" role="tabpanel">
   <div class="crypto-toolbar btn-row" style="justify-content:space-between;align-items:center">
-    <span class="field-hint" style="margin:0">로빈후드 가이드 · 설정에서 API 동기화 또는 스크린샷</span>
+    <span class="field-hint" style="margin:0">Robinhood 잔액 · 주문은 앱에서 실행 후 여기서 확인</span>
     <button type="button" class="btn btn-ghost btn-sm" id="btn-refresh-crypto">새로고침</button>
   </div>
   <div id="crypto-body"><div class="empty">설정에서 Robinhood 동기화 후 가이드를 확인하세요.</div></div>
@@ -902,87 +948,74 @@ function splitCryptoOrders(d) {
   return {active, history};
 }
 
-function renderCrypto(d) {
-  if (!d.ok) {
-    $('crypto-body').innerHTML = `<div class="empty">${escapeHtml(d.error || '분석 실패')}</div>`;
-    return;
-  }
-  const m = d.market || {};
-  const s = d.summary || {};
-  const usd2 = v => '$' + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
-  let html = `<div class="briefing-section"><h3>원금 회복</h3></div>
-    <div class="crypto-recovery">
-      <span class="principal-edit">
-        원금 $<input type="number" min="1" step="1" id="crypto-principal-input"
-          value="${Math.round(Number(s.principal || s.budget || 0))}" aria-label="원금 목표">
-        <button type="button" class="btn btn-ghost btn-sm" id="btn-crypto-principal">저장</button>
-      </span>
-      · 현재 <b>${usd2(s.total)}</b>
-      · 남음 <span class="${plClass(-(s.gap || 0))}">${usd2(s.gap || 0)}</span>
-      (${pct(s.recovered_pct || 0)})
-      <div class="bar"><span style="width:${Math.min(100, Math.max(0, (s.recovered_pct || 0) * 100)).toFixed(1)}%"></span></div>
-    </div>
-    <div class="crypto-summary">
-      등록후 손익 <span class="${plClass(s.pl || 0)}">${s.pl >= 0 ? '+' : '−'}$${Math.abs(s.pl || 0).toFixed(0)}</span>
-      · 현금 ${usd2(s.cash)} · 실현손익 <span class="${plClass(s.realized_pl || 0)}">${s.realized_pl >= 0 ? '+' : '−'}$${Math.abs(s.realized_pl || 0).toFixed(0)}</span>
-    </div>`;
+function rhMoney(v, {cents = true} = {}) {
+  if (v == null || Number.isNaN(Number(v))) return '—';
+  const opts = cents
+    ? {minimumFractionDigits: 2, maximumFractionDigits: 2}
+    : {maximumFractionDigits: 0};
+  return '$' + Number(v).toLocaleString(undefined, opts);
+}
 
-  if (d.parsed) {
-    const p = d.parsed;
-    html += `<div class="parsed-note">
-      <b style="color:var(--text)">스크린샷 분석</b> — ${escapeHtml(p.notes || '보유 내역을 읽었습니다.')}
-      · 현금 ${usd2(p.cash)} · ${(p.positions || []).length}종목
-      ${p.principal ? ` · 원금 목표 ${usd2(p.principal)}` : ''}
-    </div>`;
-  }
-  if (d.skipped && d.skipped.length) {
-    html += `<div class="parsed-note" style="border-color:#3b2e1a;color:var(--amber)">
-      지원하지 않거나 가격을 못 찾은 코인: ${escapeHtml(d.skipped.join(', '))}
-    </div>`;
-  }
+function rhQty(v) {
+  if (v == null) return '—';
+  const n = Number(v);
+  if (n >= 100) return n.toLocaleString(undefined, {maximumFractionDigits: 3});
+  return n.toLocaleString(undefined, {maximumFractionDigits: 5});
+}
 
-  const {active, history} = splitCryptoOrders(d);
-  lastCryptoHistory = history;
+function sparklineSvg(closes, {w = 72, h = 28} = {}) {
+  if (!closes || closes.length < 2) return '<span class="rh-spark"></span>';
+  const min = Math.min(...closes);
+  const max = Math.max(...closes);
+  const span = max - min || 1;
+  const pts = closes.map((c, i) => {
+    const x = (i / (closes.length - 1)) * w;
+    const y = h - ((c - min) / span) * (h - 4) - 2;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const up = closes[closes.length - 1] >= closes[0];
+  const color = up ? '#3fb950' : '#f85149';
+  return `<svg class="rh-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">
+    <polyline fill="none" stroke="${color}" stroke-width="1.5" points="${pts}"/>
+  </svg>`;
+}
 
-  html += `<div class="section-head">
-    <h3>지금 실행할 주문 (로빈후드)</h3>
-    <button type="button" class="btn btn-ghost btn-sm" id="btn-crypto-history">History${history.length ? ` (${history.length})` : ''}</button>
-  </div>`;
+function renderRhDayChange(change, pct) {
+  if (change == null || Number.isNaN(Number(change))) return '';
+  const up = change >= 0;
+  const sign = up ? '▲' : '▼';
+  const cls = up ? 'green' : 'red';
+  const absPct = Math.abs(Number(pct) || 0) * 100;
+  return `<div class="rh-day ${cls}">${sign} ${rhMoney(Math.abs(change))} (${absPct.toFixed(2)}%) Today</div>`;
+}
 
-  if (active.length) {
-    html += active.map(o => renderCryptoOrder(o)).join('');
-  } else {
-    html += `<div class="empty">할 일 없음 — 보유 유지. 다음 점검 때 다시 확인하세요.</div>`;
-  }
-
-  if (s.positions && s.positions.length) {
-    html += table(s.positions, [
-      {h: '코인', f: r => `<b>${r.symbol}</b>${r.units > 1 ? ` <span style="color:var(--dim);font-size:11px">×${r.units}</span>` : ''}`},
-      {h: '평가액', f: r => usd2(r.value)},
-      {h: '평단', f: r => r.avg_cost ? '$' + cpx(r.avg_cost) : '—'},
-      {h: '총수익', f: r => r.total_return != null
-        ? `<span class="${plClass(r.total_return)}">${r.total_return >= 0 ? '+' : ''}${pct(r.total_return)}</span>` : '—'},
-      {h: '등록후', f: r => `<span class="${plClass(r.pl)}">${r.pl >= 0 ? '+' : ''}${r.pl.toFixed(0)}</span>`},
-      {h: '익절가', f: r => '$' + cpx(r.sell_at)},
-      {h: '이탈/축소', f: r => r.exit_at ? '$' + cpx(r.exit_at) : '—'},
-    ]);
-  } else {
-    html += `<div class="empty">보유 없음</div>`;
-  }
-
-  html += `
-    <div class="crypto-market">
-      <span class="pill ${m.label}">${m.label}</span>
-      <div>${escapeHtml(m.comment || '')}
-        <span style="color:var(--dim);font-size:12px"><br>BTC $${cpx(m.btc_price)}
-        (30일 ${m.btc_ret30 >= 0 ? '+' : ''}${pct(m.btc_ret30 || 0)})</span>
+function renderRhHoldings(positions) {
+  if (!positions?.length) return '<div class="empty">보유 없음</div>';
+  return positions.map(p => {
+    const up = (p.day_change_pct ?? 0) >= 0;
+    return `<div class="rh-holding">
+      <div>
+        <div class="rh-sym">${escapeHtml(p.symbol)}</div>
+        <div class="rh-qty">${rhQty(p.qty)}</div>
       </div>
-    </div>
-    <div class="btn-row" style="justify-content:space-between;align-items:center">
-      <span class="field-hint" style="margin:0">${new Date(d.generated_at).toLocaleString()} 기준 · ${escapeHtml(d.schedule || '')}</span>
-      <button type="button" class="btn btn-ghost" id="btn-crypto-reset">포트폴리오 리셋</button>
+      ${sparklineSvg(p.sparkline)}
+      <div class="rh-price-pill ${up ? 'up' : 'down'}">${rhMoney(p.price)}</div>
     </div>`;
-  $('crypto-body').innerHTML = html;
+  }).join('');
+}
+
+let lastCryptoData = null;
+let cryptoRefreshTimer = null;
+
+function scheduleCryptoRefresh(d) {
+  if (cryptoRefreshTimer) clearInterval(cryptoRefreshTimer);
+  cryptoRefreshTimer = null;
+  if (d?.robinhood_live && $('tab-crypto').classList.contains('active')) {
+    cryptoRefreshTimer = setInterval(() => loadCrypto({quiet: true}), 45000);
+  }
+}
+
+function bindCryptoEvents(d) {
   $('crypto-body').querySelectorAll('.btn-confirm-order').forEach(btn => {
     btn.addEventListener('click', () => confirmCryptoOrder(btn.dataset.oid));
   });
@@ -1003,20 +1036,125 @@ function renderCrypto(d) {
       if (e.key === 'Enter') saveCryptoPrincipal();
     });
   }
-  $('btn-crypto-reset').addEventListener('click', () => openConfirm(
-    '크립토 장부를 리셋할까요?',
-    '보유 내역, 주문 기록, 손익이 지워집니다. 로빈후드 실계좌에는 영향이 없습니다. 다음 스크린샷 업로드로 다시 동기화하세요.',
-    '리셋',
-    async () => {
-      $('crypto-body').innerHTML = '<div class="empty">리셋 중…</div>';
-      try {
-        const r = await api('/api/crypto/reset', {method: 'POST'});
-        renderCrypto(await r.json());
-      } catch (e) {
-        $('crypto-body').innerHTML = `<div class="empty">리셋 실패: ${escapeHtml(String(e.message || e))}</div>`;
-      }
-    },
-  ));
+  const resetBtn = $('btn-crypto-reset');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', () => openConfirm(
+      '크립토 장부를 리셋할까요?',
+      '보유 내역, 주문 기록, 손익이 지워집니다. 로빈후드 실계좌에는 영향이 없습니다. 다음 스크린샷 업로드로 다시 동기화하세요.',
+      '리셋',
+      async () => {
+        $('crypto-body').innerHTML = '<div class="empty">리셋 중…</div>';
+        try {
+          const r = await api('/api/crypto/reset', {method: 'POST'});
+          renderCrypto(await r.json());
+        } catch (e) {
+          $('crypto-body').innerHTML = `<div class="empty">리셋 실패: ${escapeHtml(String(e.message || e))}</div>`;
+        }
+      },
+    ));
+  }
+  scheduleCryptoRefresh(d);
+}
+
+function renderCrypto(d, {quiet = false} = {}) {
+  if (!d.ok) {
+    $('crypto-body').innerHTML = `<div class="empty">${escapeHtml(d.error || '분석 실패')}</div>`;
+    return;
+  }
+  lastCryptoData = d;
+  const m = d.market || {};
+  const s = d.summary || {};
+  const rh = d.robinhood_live;
+  const usd2 = v => '$' + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
+  const holdings = rh?.positions?.length ? rh.positions : (s.positions || []);
+  const total = rh?.total ?? s.total;
+  const cash = rh?.buying_power ?? s.cash;
+
+  let html = '<div class="rh-wrap">';
+
+  if (rh) {
+    const updated = rh.updated_at ? new Date(rh.updated_at).toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'}) : '';
+    html += `<div class="rh-portfolio">
+      <div class="rh-total">${rhMoney(total)}</div>
+      ${renderRhDayChange(rh.day_change, rh.day_change_pct)}
+      <div class="rh-live"><span class="rh-live-dot"></span> LIVE · Robinhood API${updated ? ` · ${updated}` : ''}</div>
+    </div>
+    <div class="rh-row">
+      <span>Buying power</span>
+      <span class="rh-row-val">${rhMoney(cash)}</span>
+    </div>
+    <div class="rh-section">
+      <div class="rh-section-head"><h3>Crypto</h3></div>
+      <div class="rh-section-sub">Offered by Robinhood Crypto · TradeSense는 조회만</div>
+      ${renderRhHoldings(holdings)}
+    </div>`;
+  } else {
+    html += `<div class="parsed-note" style="margin-bottom:16px">
+      설정에서 Robinhood API를 연결하면 앱과 같은 잔액·보유가 실시간으로 표시됩니다.
+    </div>`;
+    if (holdings.length) {
+      html += `<div class="rh-section">${renderRhHoldings(holdings.map(p => ({
+        ...p, sparkline: p.sparkline || [], day_change_pct: p.day_change_pct ?? 0,
+      })))}</div>`;
+    }
+  }
+
+  const {active, history} = splitCryptoOrders(d);
+  lastCryptoHistory = history;
+
+  html += `<div class="rh-advisor">
+    <h3>실행 가이드</h3>
+    <p class="rh-orders-note">매수·매도는 Robinhood 앱에서 직접 실행하세요. 실행 후 아래에서 금액을 확인(DENY 가능)합니다.</p>
+    <div class="section-head">
+      <h3 style="font-size:14px;color:var(--text);text-transform:none;letter-spacing:0">지금 할 일</h3>
+      <button type="button" class="btn btn-ghost btn-sm" id="btn-crypto-history">History${history.length ? ` (${history.length})` : ''}</button>
+    </div>`;
+
+  if (active.length) {
+    html += active.map(o => renderCryptoOrder(o)).join('');
+  } else {
+    html += `<div class="empty">할 일 없음 — 보유 유지</div>`;
+  }
+
+  html += `<div class="briefing-section" style="margin-top:16px"><h3>원금 회복</h3></div>
+    <div class="crypto-recovery">
+      <span class="principal-edit">
+        원금 $<input type="number" min="1" step="1" id="crypto-principal-input"
+          value="${Math.round(Number(s.principal || s.budget || 0))}" aria-label="원금 목표">
+        <button type="button" class="btn btn-ghost btn-sm" id="btn-crypto-principal">저장</button>
+      </span>
+      · 현재 <b>${usd2(total)}</b>
+      · 남음 <span class="${plClass(-(s.gap || 0))}">${usd2(s.gap || 0)}</span>
+      (${pct(s.recovered_pct || 0)})
+      <div class="bar"><span style="width:${Math.min(100, Math.max(0, (s.recovered_pct || 0) * 100)).toFixed(1)}%"></span></div>
+    </div>`;
+
+  if (s.positions && s.positions.length) {
+    html += table(s.positions, [
+      {h: '코인', f: r => `<b>${r.symbol}</b>${r.units > 1 ? ` <span style="color:var(--dim);font-size:11px">×${r.units}</span>` : ''}`},
+      {h: '평가액', f: r => usd2(r.value)},
+      {h: '평단', f: r => r.avg_cost ? '$' + cpx(r.avg_cost) : '—'},
+      {h: '익절가', f: r => '$' + cpx(r.sell_at)},
+      {h: '이탈', f: r => r.exit_at ? '$' + cpx(r.exit_at) : '—'},
+    ]);
+  }
+
+  html += `
+    <div class="crypto-market">
+      <span class="pill ${m.label}">${m.label}</span>
+      <div>${escapeHtml(m.comment || '')}
+        <span style="color:var(--dim);font-size:12px"><br>BTC $${cpx(m.btc_price)}
+        (30일 ${m.btc_ret30 >= 0 ? '+' : ''}${pct(m.btc_ret30 || 0)})</span>
+      </div>
+    </div>
+    <div class="btn-row" style="justify-content:space-between;align-items:center;margin-top:12px">
+      <span class="field-hint" style="margin:0">${new Date(d.generated_at).toLocaleString()} · ${escapeHtml(d.schedule || '')}</span>
+      <button type="button" class="btn btn-ghost" id="btn-crypto-reset">포트폴리오 리셋</button>
+    </div>
+  </div>`;
+
+  $('crypto-body').innerHTML = html;
+  bindCryptoEvents(d);
 }
 
 async function confirmCryptoOrder(id) {
@@ -1089,13 +1227,15 @@ async function saveCryptoPrincipal() {
   }
 }
 
-async function loadCrypto() {
-  $('crypto-body').innerHTML = '<div class="empty">분석 중…</div>';
+async function loadCrypto({quiet = false} = {}) {
+  if (!quiet) $('crypto-body').innerHTML = '<div class="empty">불러오는 중…</div>';
   try {
     const r = await api('/api/crypto/advice');
-    renderCrypto(await r.json());
+    renderCrypto(await r.json(), {quiet});
   } catch (e) {
-    $('crypto-body').innerHTML = `<div class="empty">불러오기 실패: ${escapeHtml(String(e.message || e))}</div>`;
+    if (!quiet) {
+      $('crypto-body').innerHTML = `<div class="empty">불러오기 실패: ${escapeHtml(String(e.message || e))}</div>`;
+    }
   }
 }
 
@@ -1222,6 +1362,8 @@ function switchTab(name) {
   });
   $('btn-settings').classList.toggle('active', name === 'settings');
   if (name === 'settings') loadSettings();
+  if (name === 'crypto' && lastCryptoData) scheduleCryptoRefresh(lastCryptoData);
+  else if (cryptoRefreshTimer) { clearInterval(cryptoRefreshTimer); cryptoRefreshTimer = null; }
 }
 document.querySelectorAll('.main-tab').forEach(btn => {
   btn.addEventListener('click', () => switchTab(btn.dataset.tab));

@@ -43,6 +43,7 @@ PENDING_KEY = "crypto_pending"
 NOTIFY_FP_KEY = "crypto_notify_fp"
 CACHE_KEY = "crypto_advice"
 CACHE_TTL = 900.0      # panel refresh window; scheduled runs bypass it
+LIVE_CACHE_TTL = 45.0  # when Robinhood API is linked, refresh more often
 
 MIN_STEP = 0.04        # never advise a step tighter than 4%
 MAX_STEP = 0.12
@@ -541,10 +542,26 @@ def notify_crypto_orders(data: dict, source: str, *, force: bool = False) -> boo
 
 def advise_and_apply(force: bool = False) -> dict:
     """Propose orders. Confirmed book is not touched until confirm_order()."""
+    rh_live = None
+    try:
+        from .robinhood_config import is_configured
+        from .robinhood_live import merge_live_into_summary, refresh_from_robinhood_live
+
+        if is_configured():
+            rh_live, _live_prices = refresh_from_robinhood_live()
+    except Exception:
+        log.exception("robinhood live refresh failed")
+
+    cache_ttl = LIVE_CACHE_TTL if rh_live else CACHE_TTL
     if not force:
         cached = store.get(CACHE_KEY)
-        if cached and time.time() - cached.get("cached_at", 0) < CACHE_TTL:
-            return _ensure_order_split(cached["data"])
+        if cached and time.time() - cached.get("cached_at", 0) < cache_ttl:
+            data = _ensure_order_split(cached["data"])
+            if rh_live:
+                data["robinhood_live"] = rh_live
+                if data.get("summary"):
+                    data["summary"] = merge_live_into_summary(data["summary"], rh_live)
+            return data
     try:
         frames = fetch_bars()
         if not frames:
@@ -557,8 +574,12 @@ def advise_and_apply(force: bool = False) -> dict:
     except Exception as exc:
         log.exception("crypto advice failed")
         return {"ok": False, "error": f"크립토 분석 실패: {exc}"}
+    if rh_live and view.get("summary"):
+        view["summary"] = merge_live_into_summary(view["summary"], rh_live)
     data = _panel(orders, view)
     data = _ensure_order_split(data)
+    if rh_live:
+        data["robinhood_live"] = rh_live
     store.set(CACHE_KEY, {"cached_at": time.time(), "data": data})
     return data
 
