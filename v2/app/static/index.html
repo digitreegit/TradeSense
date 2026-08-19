@@ -957,22 +957,32 @@ $('token-input').addEventListener('keydown', e => { if (e.key === 'Enter') submi
 
 $('btn-tg-test').addEventListener('click', async () => {
   const el = $('tg-msg');
+  const btn = $('btn-tg-test');
+  btn.disabled = true;
   el.textContent = '발송 중…'; el.className = 'msg';
-  setSettingsMsg('텔레그램 테스트 발송 중…', true);
   try {
-    const r = await api('/api/notify/test', {method: 'POST'});
+    const t = localStorage.getItem(TOKEN_KEY) || '';
+    const r = await fetch('/api/notify/test', {
+      method: 'POST',
+      headers: t ? {'X-Admin-Token': t} : {},
+    });
     const d = await r.json();
-    el.textContent = d.ok ? '발송 성공 — 텔레그램을 확인하세요.' : (d.error || '발송 실패');
-    el.className = 'msg ' + (d.ok ? 'ok' : 'err');
-    setSettingsMsg(
-      d.ok ? '텔레그램 테스트 발송 성공 — 텔레그램을 확인하세요.' : (d.error || '텔레그램 테스트 발송 실패'),
-      !!d.ok,
-    );
+    if (r.status === 401) {
+      el.textContent = '인증 실패 — 토큰을 다시 입력하세요.';
+      el.className = 'msg err';
+      showTokenGate('');
+    } else if (d.ok) {
+      el.textContent = '✓ 발송 성공 — 텔레그램을 확인하세요.';
+      el.className = 'msg ok';
+    } else {
+      el.textContent = d.error || '발송 실패';
+      el.className = 'msg err';
+    }
   } catch (e) {
-    const msg = String(e.message || e);
-    el.textContent = msg; el.className = 'msg err';
-    setSettingsMsg(`텔레그램 테스트 발송 실패: ${msg}`, false);
+    el.textContent = '네트워크 오류: ' + String(e.message || e);
+    el.className = 'msg err';
   }
+  btn.disabled = false;
 });
 
 $('btn-save-keys').addEventListener('click', saveKeys);
