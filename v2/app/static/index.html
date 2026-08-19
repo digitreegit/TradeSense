@@ -958,13 +958,20 @@ $('token-input').addEventListener('keydown', e => { if (e.key === 'Enter') submi
 $('btn-tg-test').addEventListener('click', async () => {
   const el = $('tg-msg');
   el.textContent = '발송 중…'; el.className = 'msg';
+  setSettingsMsg('텔레그램 테스트 발송 중…', true);
   try {
     const r = await api('/api/notify/test', {method: 'POST'});
     const d = await r.json();
     el.textContent = d.ok ? '발송 성공 — 텔레그램을 확인하세요.' : (d.error || '발송 실패');
     el.className = 'msg ' + (d.ok ? 'ok' : 'err');
+    setSettingsMsg(
+      d.ok ? '텔레그램 테스트 발송 성공 — 텔레그램을 확인하세요.' : (d.error || '텔레그램 테스트 발송 실패'),
+      !!d.ok,
+    );
   } catch (e) {
-    el.textContent = String(e.message || e); el.className = 'msg err';
+    const msg = String(e.message || e);
+    el.textContent = msg; el.className = 'msg err';
+    setSettingsMsg(`텔레그램 테스트 발송 실패: ${msg}`, false);
   }
 });
 
