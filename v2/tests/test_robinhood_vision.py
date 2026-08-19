@@ -21,6 +21,16 @@ def test_parse_screenshots_requires_api_key(monkeypatch):
         rv.parse_screenshots([b"fake"])
 
 
+def test_resolve_google_model_maps_deprecated_exp():
+    assert rv._resolve_google_model("gemini-2.0-flash-exp") == "gemini-2.0-flash"
+    assert rv._resolve_google_model("models/gemini-2.0-flash-exp") == "gemini-2.0-flash"
+    assert rv._resolve_google_model("gemini-2.0-flash") == "gemini-2.0-flash"
+
+
+def test_image_mime_detects_png():
+    assert rv._image_mime(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20) == "image/png"
+
+
 @patch("app.robinhood_vision.import_holdings")
 @patch("app.robinhood_vision.parse_screenshots")
 def test_analyze_and_advise_merges_parsed(mock_parse, mock_import):

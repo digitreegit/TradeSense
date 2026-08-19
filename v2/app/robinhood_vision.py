@@ -14,6 +14,32 @@ from .crypto_advisor import advise_and_apply, import_holdings
 
 log = logging.getLogger(__name__)
 
+# Google occasionally retires *-exp preview IDs; map them to stable names.
+_GOOGLE_MODEL_ALIASES = {
+    "gemini-2.0-flash-exp": "gemini-2.0-flash",
+    "gemini-2.0-flash-lite-exp": "gemini-2.0-flash-lite",
+    "gemini-1.5-flash-exp": "gemini-1.5-flash",
+    "gemini-1.5-pro-exp": "gemini-1.5-pro",
+}
+
+
+def _resolve_google_model(name: str) -> str:
+    model = (name or "gemini-2.0-flash").strip()
+    if model.startswith("models/"):
+        model = model[7:]
+    return _GOOGLE_MODEL_ALIASES.get(model, model)
+
+
+def _image_mime(data: bytes) -> str:
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:4] == b"RIFF" and len(data) > 12 and data[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/jpeg"
+
+
 PROMPT = """You extract a Robinhood crypto portfolio from mobile app screenshots.
 
 Return JSON only:
@@ -62,17 +88,18 @@ def _vision_via_openai(images: list[bytes]) -> dict[str, Any]:
 def _vision_via_gemini(images: list[bytes]) -> dict[str, Any]:
     if not settings.google_api_key:
         raise RuntimeError("GOOGLE_API_KEY가 설정되지 않았습니다.")
+    model = _resolve_google_model(settings.google_model)
     parts: list[dict] = [{"text": PROMPT}]
     for img in images:
         parts.append({
             "inline_data": {
-                "mime_type": "image/jpeg",
+                "mime_type": _image_mime(img),
                 "data": base64.standard_b64encode(img).decode(),
             }
         })
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{settings.google_model}:generateContent"
+        f"{model}:generateContent"
     )
     r = httpx.post(
         url,
