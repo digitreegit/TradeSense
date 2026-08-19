@@ -129,6 +129,10 @@ class Settings(BaseSettings):
     alpaca_api_key: str = ""
     alpaca_secret_key: str = ""
 
+    # Robinhood Crypto Trading API (read-only sync for manual crypto tab)
+    robinhood_api_key: str = ""
+    robinhood_private_key: str = ""
+
     # Engine
     trading_mode: str = "live"           # live only; kept for logging/compat
     initial_capital: float = 3000.0

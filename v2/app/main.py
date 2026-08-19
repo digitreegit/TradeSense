@@ -25,6 +25,10 @@ from .crypto_advisor import (
     run_scheduled, set_principal,
 )
 from .engine import Engine
+from .robinhood_config import clear_keys as clear_robinhood_keys
+from .robinhood_config import save_keys as save_robinhood_keys
+from .robinhood_config import status_dict as robinhood_status_dict
+from .robinhood_sync import sync_from_robinhood
 from .robinhood_vision import analyze_and_advise
 from .state import store
 
@@ -381,6 +385,53 @@ def crypto_principal(body: CryptoPrincipalBody, request: Request):
         return _unauthorized()
     result = set_principal(body.principal)
     return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+
+
+class RobinhoodKeysBody(BaseModel):
+    api_key: str
+    private_key: str
+
+
+@app.get("/api/robinhood/status")
+def robinhood_status(request: Request):
+    if not _admin_authorized(request):
+        return _unauthorized()
+    return JSONResponse(robinhood_status_dict())
+
+
+@app.post("/api/robinhood/keys")
+def robinhood_post_keys(body: RobinhoodKeysBody, request: Request):
+    if not _admin_authorized(request):
+        return _unauthorized()
+    try:
+        save_robinhood_keys(body.api_key, body.private_key)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    except Exception as exc:
+        log.exception("robinhood key save failed")
+        return JSONResponse({"ok": False, "error": f"키 저장 실패: {exc}"}, status_code=502)
+    return JSONResponse({"ok": True, **robinhood_status_dict()})
+
+
+@app.delete("/api/robinhood/keys")
+def robinhood_delete_keys(request: Request):
+    if not _admin_authorized(request):
+        return _unauthorized()
+    clear_robinhood_keys()
+    return JSONResponse({"ok": True, **robinhood_status_dict()})
+
+
+@app.post("/api/robinhood/sync")
+def robinhood_sync(request: Request):
+    """Robinhood API로 보유·현금 동기화 → 매수/매도 가이드."""
+    if not _admin_authorized(request):
+        return _unauthorized()
+    try:
+        result = sync_from_robinhood()
+        return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+    except Exception as exc:
+        log.exception("robinhood sync failed")
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
 
 @app.post("/api/crypto/reset")

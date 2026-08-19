@@ -249,6 +249,10 @@
   }
   .section-head h3 { margin: 0; }
   .btn-sm { padding: 6px 12px; font-size: 12px; }
+  .rh-panel { margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+  .rh-status { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 13px; }
+  .rh-keys { display: grid; gap: 8px; max-width: 420px; margin-top: 10px; }
+  .rh-keys .input { width: 100%; }
 </style>
 </head>
 <body>
@@ -280,12 +284,36 @@
 <div class="err" id="err"></div>
 
 <section id="tab-crypto" class="tab-panel active" role="tabpanel">
+  <div class="panel rh-panel">
+    <h2>Robinhood API</h2>
+    <p class="field-hint" style="margin-bottom:8px">
+      공식 크립토 API로 보유·현금을 자동 동기화합니다 (거래는 앱에서 직접).
+      <a class="link" href="https://robinhood.com/us/en/support/articles/crypto-api/" target="_blank" rel="noreferrer">키 발급 안내</a>
+    </p>
+    <div class="rh-status">
+      <span class="status-dot" id="rh-dot"></span>
+      <div class="status-text">
+        <span id="rh-label">연결 확인 중…</span>
+        <small id="rh-detail"></small>
+      </div>
+    </div>
+    <div class="rh-keys" id="rh-keys-wrap">
+      <span class="field-label">API Key</span>
+      <input type="password" class="input" id="rh-api-key" autocomplete="off" placeholder="rh-api-…">
+      <span class="field-label">Private Key (Base64)</span>
+      <input type="password" class="input" id="rh-private-key" autocomplete="off" placeholder="Ed25519 private key">
+      <div class="btn-row">
+        <button type="button" class="btn btn-primary btn-sm" id="btn-save-rh-keys">키 저장</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="btn-delete-rh-keys" style="display:none">키 삭제</button>
+        <button type="button" class="btn btn-primary btn-sm" id="btn-robinhood-sync">동기화 · 가이드 생성</button>
+      </div>
+    </div>
+    <p class="msg" id="rh-msg"></p>
+  </div>
   <div class="panel">
-    <h2>로빈후드 스크린샷</h2>
+    <h2>또는 스크린샷</h2>
     <p class="field-hint" style="margin-bottom:12px">
-      계좌·보유 화면 캡처를 올리면 AI가 읽고 매수/매도 가이드를 만듭니다.
-      <b>거래 실행만 직접</b> 하고, 확인 버튼으로 장부에 반영하세요.
-      매일 09:00 · 12:00 · 21:00 (ET) 텔레그램 알림.
+      API 없이 계좌·보유 화면 캡처를 올려도 됩니다. 평단 확인용으로 유용합니다.
     </p>
     <div class="upload-zone" id="upload-zone">
       <input type="file" id="screenshot-input" accept="image/*" multiple hidden>
@@ -302,7 +330,7 @@
     </div>
     <p class="msg" id="upload-msg"></p>
   </div>
-  <div id="crypto-body"><div class="empty">스크린샷을 업로드하거나 새로고침하세요.</div></div>
+  <div id="crypto-body"><div class="empty">Robinhood 동기화 또는 스크린샷 업로드 후 가이드를 확인하세요.</div></div>
 </section>
 
 <section id="tab-stocks" class="tab-panel" role="tabpanel">
@@ -1054,6 +1082,118 @@ async function loadCrypto() {
   }
 }
 
+function renderRobinhoodStatus(st) {
+  const dot = $('rh-dot');
+  const label = $('rh-label');
+  const detail = $('rh-detail');
+  const delBtn = $('btn-delete-rh-keys');
+  dot.className = 'status-dot';
+  if (!st?.configured) {
+    label.textContent = 'API 키 미설정';
+    detail.textContent = 'Robinhood 웹(classic) → 크립토 설정에서 API 키를 발급하세요.';
+    dot.classList.add('err');
+    if (delBtn) delBtn.style.display = 'none';
+    return;
+  }
+  label.textContent = `키 저장됨 (${st.key_hint || '••••'})`;
+  const conn = st.connection || {};
+  if (conn.connected) {
+    dot.classList.add('ok');
+    const bp = conn.account?.buying_power;
+    const n = conn.holdings_count ?? 0;
+    detail.textContent = `연결됨 · 매수가능 $${Number(bp || 0).toLocaleString()} · ${n}종목`;
+  } else {
+    dot.classList.add('err');
+    detail.textContent = conn.error === 'keys_not_configured'
+      ? '키를 저장하세요.'
+      : (conn.error || '연결 실패');
+  }
+  if (delBtn) delBtn.style.display = st.keys_source === 'dashboard' ? '' : 'none';
+}
+
+async function loadRobinhoodStatus() {
+  try {
+    const r = await api('/api/robinhood/status');
+    renderRobinhoodStatus(await r.json());
+  } catch {
+    $('rh-label').textContent = '상태 확인 실패';
+  }
+}
+
+async function saveRobinhoodKeys() {
+  const msg = $('rh-msg');
+  const key = ($('rh-api-key').value || '').trim();
+  const priv = ($('rh-private-key').value || '').trim();
+  if (!key || !priv) {
+    msg.textContent = 'API Key와 Private Key를 모두 입력하세요.';
+    msg.className = 'msg err';
+    return;
+  }
+  try {
+    const r = await api('/api/robinhood/keys', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({api_key: key, private_key: priv}),
+    });
+    const d = await r.json();
+    if (!d.ok) {
+      msg.textContent = d.error || '저장 실패';
+      msg.className = 'msg err';
+      return;
+    }
+    $('rh-api-key').value = '';
+    $('rh-private-key').value = '';
+    msg.textContent = '키가 저장되었습니다.';
+    msg.className = 'msg ok';
+    renderRobinhoodStatus(d);
+  } catch (e) {
+    msg.textContent = String(e.message || e);
+    msg.className = 'msg err';
+  }
+}
+
+async function deleteRobinhoodKeys() {
+  const msg = $('rh-msg');
+  try {
+    const r = await api('/api/robinhood/keys', {method: 'DELETE'});
+    const d = await r.json();
+    msg.textContent = '키가 삭제되었습니다.';
+    msg.className = 'msg ok';
+    renderRobinhoodStatus(d);
+  } catch (e) {
+    msg.textContent = String(e.message || e);
+    msg.className = 'msg err';
+  }
+}
+
+async function syncRobinhood() {
+  const msg = $('rh-msg');
+  const btn = $('btn-robinhood-sync');
+  btn.disabled = true;
+  msg.textContent = 'Robinhood에서 보유 내역을 가져오는 중…';
+  msg.className = 'msg';
+  $('crypto-body').innerHTML = '<div class="empty">동기화 중…</div>';
+  try {
+    const r = await api('/api/robinhood/sync', {method: 'POST'});
+    const d = await r.json();
+    if (!d.ok) {
+      msg.textContent = d.error || '동기화 실패';
+      msg.className = 'msg err';
+      $('crypto-body').innerHTML = `<div class="empty">${escapeHtml(d.error || '동기화 실패')}</div>`;
+      return;
+    }
+    msg.textContent = '동기화 완료 — 아래 가이드를 확인하세요.';
+    msg.className = 'msg ok';
+    renderCrypto(d);
+    loadRobinhoodStatus();
+  } catch (e) {
+    msg.textContent = String(e.message || e);
+    msg.className = 'msg err';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function switchTab(name) {
   document.querySelectorAll('.main-tab').forEach(btn => {
     const on = btn.dataset.tab === name;
@@ -1167,6 +1307,9 @@ screenshotInput.addEventListener('change', () => {
 });
 $('btn-analyze-screenshots').addEventListener('click', analyzeScreenshots);
 $('btn-refresh-crypto').addEventListener('click', loadCrypto);
+$('btn-save-rh-keys').addEventListener('click', saveRobinhoodKeys);
+$('btn-delete-rh-keys').addEventListener('click', deleteRobinhoodKeys);
+$('btn-robinhood-sync').addEventListener('click', syncRobinhood);
 
 $('btn-activity').addEventListener('click', () => {
   if (lastBriefing) renderBriefing(lastBriefing);
@@ -1269,6 +1412,7 @@ $('btn-confirm-action').addEventListener('click', async () => {
 });
 refresh();
 loadCrypto();
+loadRobinhoodStatus();
 loadSettings();
 setInterval(refresh, 30000);
 setInterval(() => {
