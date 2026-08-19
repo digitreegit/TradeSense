@@ -185,6 +185,7 @@ def generate_orders(
         })
 
     sold_this_run: set[str] = set()
+    bought_this_run: set[str] = set()
     for sym in list(sim["positions"]):
         m = metrics.get(sym)
         pos = sim["positions"][sym]
@@ -232,6 +233,7 @@ def generate_orders(
         ):
             _order("buy", sym, unit, price, f"−{step:.0%} 추가 매수", "add", step)
             apply_order(sim, orders[-1], unit)
+            bought_this_run.add(sym)
 
     def _can_deploy(new_slot: bool) -> bool:
         if sim["cash"] - floor < unit:
@@ -253,6 +255,7 @@ def generate_orders(
             and metrics[sym]["trend"] == "up"
             and metrics[sym]["rsi14"] < RSI_MAX
             and sym not in sold_this_run
+            and sym not in bought_this_run
             and not _underwater(sim["positions"][sym], metrics[sym]["price"])
             and len(sim["positions"][sym]["units"]) < MAX_UNITS
         ),
@@ -393,22 +396,59 @@ def _fp(o: dict) -> tuple:
     return (o["side"], o["pair"], o.get("kind", ""))
 
 
+def _action_key(o: dict) -> tuple:
+    return (o["side"], o["symbol"])
+
+
+_SELL_KIND_PRIORITY = {"exit": 0, "trim": 1, "take_profit": 2}
+_BUY_KIND_PRIORITY = {"rotate": 0, "add": 1, "entry": 2}
+
+
+def _action_priority(o: dict) -> tuple:
+    """Lower tuple wins. Tie-break: higher dollars wins."""
+    side = o["side"]
+    kind = o.get("kind") or ""
+    pri = (_SELL_KIND_PRIORITY if side == "sell" else _BUY_KIND_PRIORITY).get(kind, 99)
+    return (pri, -float(o.get("dollars") or 0))
+
+
+def _collapse_actionable(orders: list[dict]) -> list[dict]:
+    """Keep at most one pending order per (side, symbol). Confirmed untouched."""
+    confirmed = [o for o in orders if o.get("status") == "confirmed"]
+    pending = [o for o in orders if o.get("status") != "confirmed"]
+    best: dict[tuple, dict] = {}
+    for o in pending:
+        key = _action_key(o)
+        if key not in best or _action_priority(o) < _action_priority(best[key]):
+            best[key] = o
+    return confirmed + list(best.values())
+
+
 def _merge_pending(old: list[dict], fresh: list[dict]) -> list[dict]:
     """Keep confirmation state when the same action is re-proposed."""
     by_fp = {_fp(o): o for o in old}
+    by_action: dict[tuple, dict] = {}
+    for o in old:
+        if o.get("status") != "confirmed":
+            by_action[_action_key(o)] = o
     out: list[dict] = []
-    seen: set[tuple] = set()
+    seen_fp: set[tuple] = set()
+    seen_action: set[tuple] = set()
     for o in fresh:
-        prev = by_fp.get(_fp(o))
-        if prev and prev.get("status") == "confirmed":
-            # Same action re-recommended → new todo, keep old in history.
+        fp = _fp(o)
+        prev_fp = by_fp.get(fp)
+        if prev_fp and prev_fp.get("status") == "confirmed":
+            # Same fingerprint re-recommended → new todo, keep old in history.
             o = {**o, "id": str(uuid.uuid4())}
-        elif prev:
-            o = {**o, "id": prev["id"]}
-        seen.add(_fp(o))
+        else:
+            prev_action = by_action.get(_action_key(o))
+            if prev_action:
+                o = {**o, "id": prev_action["id"]}
+        seen_fp.add(fp)
+        seen_action.add(_action_key(o))
         out.append(o)
     for o in old:
-        if o.get("status") == "confirmed" and _fp(o) not in seen:
+        if o.get("status") == "confirmed" and _fp(o) not in seen_fp:
             out.append(o)
     return out
 
@@ -503,6 +543,7 @@ def advise_and_apply(force: bool = False) -> dict:
         book = store.get(BOOK_KEY) or _new_book()
         orders, _, view = generate_orders(frames, book)
         orders = _merge_pending(store.get(PENDING_KEY) or [], orders)
+        orders = _collapse_actionable(orders)
         store.set(PENDING_KEY, orders)
     except Exception as exc:
         log.exception("crypto advice failed")
@@ -533,6 +574,11 @@ def confirm_order(order_id: str, actual_dollars: float | None = None) -> dict:
     order["status"] = "confirmed"
     order["actual_dollars"] = round(dollars, 2)
     order["confirmed_at"] = datetime.now(timezone.utc).isoformat()
+    action = _action_key(order)
+    pending = [
+        o for o in pending
+        if o.get("status") == "confirmed" or _action_key(o) != action
+    ]
     store.set(BOOK_KEY, book)
     store.set(PENDING_KEY, pending)
     store.set(CACHE_KEY, None)

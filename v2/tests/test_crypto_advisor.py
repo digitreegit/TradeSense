@@ -359,3 +359,96 @@ def test_notify_crypto_orders_sends_when_actionable():
         assert notify_crypto_orders(data, "스크린샷", force=True) is True
         assert send.call_count == 1
         assert "XRP" in send.call_args[0][0]
+
+
+def test_collapse_actionable_keeps_one_sell_per_symbol():
+    from app.crypto_advisor import _collapse_actionable
+
+    orders = [
+        {"id": "1", "side": "sell", "symbol": "XRP", "pair": "XRP/USD",
+         "kind": "trim", "dollars": 500},
+        {"id": "2", "side": "sell", "symbol": "XRP", "pair": "XRP/USD",
+         "kind": "exit", "dollars": 1000},
+        {"id": "3", "side": "sell", "symbol": "XRP", "pair": "XRP/USD",
+         "kind": "take_profit", "dollars": 200, "status": "confirmed",
+         "confirmed_at": "2026-08-19T12:00:00+00:00"},
+    ]
+    collapsed = _collapse_actionable(orders)
+    pending = [o for o in collapsed if o.get("status") != "confirmed"]
+    confirmed = [o for o in collapsed if o.get("status") == "confirmed"]
+    assert len(pending) == 1
+    assert pending[0]["kind"] == "exit"
+    assert len(confirmed) == 1
+    assert confirmed[0]["kind"] == "take_profit"
+
+
+def test_collapse_actionable_keeps_one_buy_per_symbol():
+    from app.crypto_advisor import _collapse_actionable
+
+    orders = [
+        {"id": "1", "side": "buy", "symbol": "ETH", "pair": "ETH/USD",
+         "kind": "entry", "dollars": 125},
+        {"id": "2", "side": "buy", "symbol": "ETH", "pair": "ETH/USD",
+         "kind": "rotate", "dollars": 125},
+    ]
+    collapsed = _collapse_actionable(orders)
+    assert len(collapsed) == 1
+    assert collapsed[0]["kind"] == "rotate"
+
+
+def test_confirm_removes_sibling_pending_orders():
+    from unittest.mock import patch
+    from app.crypto_advisor import confirm_order
+    from app.state import store
+
+    store.set("crypto_book", _new_book())
+    pending = [
+        {"id": "exit1", "side": "sell", "symbol": "XRP", "pair": "XRP/USD",
+         "kind": "exit", "dollars": 1000, "price": 1.0, "step": 0.05,
+         "status": "pending"},
+        {"id": "trim1", "side": "sell", "symbol": "XRP", "pair": "XRP/USD",
+         "kind": "trim", "dollars": 500, "price": 1.0, "step": 0.05,
+         "status": "pending"},
+        {"id": "buy1", "side": "buy", "symbol": "SOL", "pair": "SOL/USD",
+         "kind": "entry", "dollars": 125, "price": 100.0, "step": 0.05,
+         "status": "pending"},
+    ]
+    store.set("crypto_pending", pending)
+    store.set("crypto_book", {
+        **_new_book(),
+        "positions": {
+            "XRP/USD": {
+                "units": [{"dollars": 1000.0, "price": 1.0, "qty": 1000.0}],
+                "anchor": 1.0, "step": 0.05,
+            },
+        },
+        "cash": 0.0,
+    })
+    with patch("app.crypto_advisor.advise_and_apply", return_value={"ok": True, "orders": [], "order_history": []}):
+        result = confirm_order("exit1", actual_dollars=1000.0)
+    assert result["ok"] is True
+    remaining = store.get("crypto_pending") or []
+    assert not any(o["id"] == "trim1" for o in remaining)
+    assert any(o["id"] == "exit1" and o.get("status") == "confirmed" for o in remaining)
+    assert any(o["id"] == "buy1" for o in remaining)
+
+
+def test_generate_orders_no_add_and_rotate_same_symbol():
+    closes = wavy_uptrend()
+    frames = {
+        "SOL/USD": make_frame(closes, daily_range=0.06),
+        "BTC/USD": make_frame(wavy_uptrend(), daily_range=0.03),
+    }
+    price = float(closes[-1])
+    anchor = price / 0.94
+    book = _new_book()
+    book["cash"] = 875.0
+    book["positions"]["SOL/USD"] = {
+        "units": [{"dollars": 125.0, "price": anchor, "qty": 125.0 / anchor}],
+        "anchor": anchor,
+        "step": 0.05,
+    }
+    orders, _, _ = generate_orders(frames, book)
+    sol_buys = [o for o in orders if o["side"] == "buy" and o["symbol"] == "SOL"]
+    assert len(sol_buys) == 1
+    assert sol_buys[0]["kind"] == "add"
