@@ -10,17 +10,31 @@ from .config import settings
 log = logging.getLogger(__name__)
 
 
-def send(text: str) -> None:
-    if not settings.telegram_bot_token or not settings.telegram_chat_id:
-        return
+def send(text: str) -> bool:
+    """Send a plain-text Telegram message. Returns True on success."""
+    if not settings.telegram_bot_token:
+        log.warning("telegram send skipped: TELEGRAM_BOT_TOKEN not set")
+        return False
+    if not settings.telegram_chat_id:
+        log.warning("telegram send skipped: TELEGRAM_CHAT_ID not set")
+        return False
     try:
-        httpx.post(
+        r = httpx.post(
             f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage",
-            json={"chat_id": settings.telegram_chat_id, "text": text, "parse_mode": "HTML"},
+            json={"chat_id": settings.telegram_chat_id, "text": text},
             timeout=10,
         )
+        body = r.json()
+        if not body.get("ok"):
+            log.warning(
+                "telegram send rejected: %s",
+                body.get("description", r.text[:200]),
+            )
+            return False
+        return True
     except Exception as exc:
         log.warning("telegram send failed: %s", exc)
+        return False
 
 
 def send_test() -> dict:
@@ -29,17 +43,7 @@ def send_test() -> dict:
         return {"ok": False, "error": "TELEGRAM_BOT_TOKEN이 설정되지 않았습니다."}
     if not settings.telegram_chat_id:
         return {"ok": False, "error": "TELEGRAM_CHAT_ID가 설정되지 않았습니다."}
-    try:
-        r = httpx.post(
-            f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage",
-            json={"chat_id": settings.telegram_chat_id,
-                  "text": "✅ TradeSense 텔레그램 테스트 — 알림이 정상 작동합니다."},
-            timeout=10,
-        )
-        body = r.json()
-        if not body.get("ok"):
-            return {"ok": False,
-                    "error": f"Telegram 오류: {body.get('description', r.text[:200])}"}
+    ok = send("✅ TradeSense 텔레그램 테스트 — 알림이 정상 작동합니다.")
+    if ok:
         return {"ok": True}
-    except Exception as exc:
-        return {"ok": False, "error": f"전송 실패: {exc}"}
+    return {"ok": False, "error": "Telegram API가 메시지를 거부했습니다. Vercel 로그를 확인하세요."}

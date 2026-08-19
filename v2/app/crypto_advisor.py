@@ -573,10 +573,16 @@ def run_scheduled(slot: str) -> bool:
     labels = {"am": "아침", "noon": "점심", "pm": "저녁"}
     when = labels.get(slot, slot)
     if lines:
-        send(f"🪙 크립토 {when} 주문 — 로빈후드에서 실행 후 대시보드에서 확인을 누르세요\n"
-             + "\n".join(lines) + "\n" + status)
+        body = (
+            f"🪙 크립토 {when} 주문 — 로빈후드에서 실행 후 대시보드에서 확인을 누르세요\n"
+            + "\n".join(lines) + "\n" + status
+        )
     else:
-        send(f"🪙 크립토 {when} 점검 — 주문 없음, 보유 유지\n{status}")
+        body = f"🪙 크립토 {when} 점검 — 주문 없음, 보유 유지\n{status}"
+
+    if not send(body):
+        log_activity("crypto", f"크립토 어드바이저({slot}) — 텔레그램 발송 실패")
+        return False
 
     n = len(pending_orders)
     log_activity("crypto", f"크립토 어드바이저({slot}) — 주문 {n}건, {status}")
