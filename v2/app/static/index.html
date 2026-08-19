@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TradeSense v2</title>
+<title>TradeSense v3</title>
 <link rel="icon" href="/favicon.png?v=4" type="image/png" sizes="any">
 <link rel="icon" href="/favicon.svg?v=4" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/favicon.png?v=4">
@@ -14,8 +14,15 @@
     --green: #3fb950; --red: #f85149; --amber: #d29922; --blue: #58a6ff;
   }
   * { box-sizing: border-box; margin: 0; }
-  body { background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, 'SF Pro', Segoe UI, sans-serif; padding: 24px; }
-  .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, 'SF Pro', Segoe UI, sans-serif;
+    margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+  }
+  .topbar {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+    padding: 16px 24px 0; flex-shrink: 0;
+  }
   .topbar-main { min-width: 0; }
   h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
   .sub { color: var(--dim); font-size: 12px; }
@@ -192,22 +199,52 @@
     background: transparent; color: var(--dim); cursor: pointer; font-size: 16px;
   }
   .holding-row .rm:hover { color: var(--red); }
+
+  /* v3 tabs */
+  .main-tabs { display: flex; gap: 6px; margin-top: 10px; }
+  .main-tab {
+    padding: 8px 18px; border-radius: 8px; border: 1px solid var(--border);
+    background: transparent; color: var(--dim); cursor: pointer;
+    font-size: 13px; font-weight: 700;
+  }
+  .main-tab.active { background: var(--panel); color: var(--text); border-color: #30363d; }
+  .main-tab:hover:not(.active) { border-color: #30363d; color: var(--text); }
+  .tab-panel { display: none; flex: 1; overflow-y: auto; padding: 16px 24px 32px; }
+  .tab-panel.active { display: block; }
+  .upload-zone {
+    border: 2px dashed var(--border); border-radius: 12px; padding: 32px 20px;
+    text-align: center; color: var(--dim); cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  .upload-zone.drag { border-color: var(--blue); background: #0d1117; color: var(--text); }
+  .upload-preview { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 4px; }
+  .upload-preview img {
+    width: 80px; height: 80px; object-fit: cover; border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .upload-thumb { position: relative; }
+  .upload-thumb button {
+    position: absolute; top: -6px; right: -6px; width: 20px; height: 20px;
+    border-radius: 50%; border: 1px solid var(--border); background: var(--panel);
+    color: var(--dim); cursor: pointer; font-size: 14px; line-height: 1;
+  }
+  .upload-thumb button:hover { color: var(--red); border-color: var(--red); }
+  .parsed-note {
+    margin: 0 0 12px; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: #0d1117; font-size: 13px; color: var(--dim);
+  }
 </style>
 </head>
 <body>
 
 <div class="topbar">
   <div class="topbar-main">
-    <h1>TradeSense <span class="blue">v2</span></h1>
-    <div class="sub" id="subtitle">buy low, sell high — momentum · dip · macro trend <span id="mode"></span></div>
+    <h1>TradeSense <span class="blue">v3</span></h1>
+    <nav class="main-tabs" role="tablist" aria-label="메인 탭">
+      <button type="button" class="main-tab active" data-tab="crypto" role="tab" aria-selected="true">크립토 · 로빈후드</button>
+      <button type="button" class="main-tab" data-tab="stocks" role="tab" aria-selected="false">주식 · Alpaca 자동</button>
+    </nav>
   </div>
   <div class="icon-bar">
-    <button type="button" class="icon-btn labeled" id="btn-crypto" title="크립토 분석" aria-label="크립토 분석">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>
-      </svg>
-      <span>CRYPTO</span>
-    </button>
     <button type="button" class="icon-btn" id="btn-activity" title="오늘의 액티비티" aria-label="오늘의 액티비티">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
         <path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022 23.848 23.848 0 0 0 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"/>
@@ -225,6 +262,35 @@
 
 <div class="err" id="err"></div>
 
+<section id="tab-crypto" class="tab-panel active" role="tabpanel">
+  <div class="panel">
+    <h2>로빈후드 스크린샷</h2>
+    <p class="field-hint" style="margin-bottom:12px">
+      계좌·보유 화면 캡처를 올리면 AI가 읽고 매수/매도 가이드를 만듭니다.
+      <b>거래 실행만 직접</b> 하고, 확인 버튼으로 장부에 반영하세요.
+      매일 09:00 · 12:00 · 21:00 (ET) 텔레그램 알림.
+    </p>
+    <div class="upload-zone" id="upload-zone">
+      <input type="file" id="screenshot-input" accept="image/*" multiple hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32" style="margin-bottom:8px;opacity:.6" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l3.182 3.182m-18.75 0V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18v-4.5M12 2.25v13.5"/>
+      </svg>
+      <div>탭하거나 드래그해서 스크린샷 추가</div>
+      <div style="font-size:12px;margin-top:4px">여러 장 올려도 됩니다 (총액 + 각 코인 보유)</div>
+    </div>
+    <div id="upload-preview" class="upload-preview"></div>
+    <div class="btn-row" style="margin-top:12px">
+      <button type="button" class="btn btn-primary" id="btn-analyze-screenshots">분석 · 가이드 생성</button>
+      <button type="button" class="btn btn-ghost" id="btn-refresh-crypto">새로고침</button>
+    </div>
+    <p class="msg" id="upload-msg"></p>
+  </div>
+  <div id="crypto-body"><div class="empty">스크린샷을 업로드하거나 새로고침하세요.</div></div>
+</section>
+
+<section id="tab-stocks" class="tab-panel" role="tabpanel">
+  <div class="sub" id="subtitle" style="margin-bottom:16px;color:var(--dim);font-size:12px">buy low, sell high — momentum · dip · macro trend <span id="mode"></span></div>
+
 <div class="grid">
   <div class="card"><div class="label">Equity</div><div class="value" id="equity">—</div></div>
   <div class="card"><div class="label">Cash</div><div class="value" id="cash">—</div></div>
@@ -237,6 +303,7 @@
 <div class="panel"><h2>Positions</h2><div id="positions"></div></div>
 <div class="panel"><h2>Queued for next open</h2><div id="pending"></div></div>
 <div class="panel"><h2>Recent trades</h2><div id="trades"></div></div>
+</section>
 
 <!-- Activity overlay -->
 <div class="overlay" id="overlay-activity" role="dialog" aria-modal="true" aria-labelledby="activity-title">
@@ -253,25 +320,6 @@
       <div class="headline" id="brief-headline">불러오는 중…</div>
       <div id="brief-sections"></div>
     </div>
-  </div>
-</div>
-
-<!-- Crypto advisor overlay -->
-<div class="overlay" id="overlay-crypto" role="dialog" aria-modal="true" aria-labelledby="crypto-title">
-  <div class="modal wide">
-    <div class="modal-head">
-      <h2 id="crypto-title">크립토 분석 · 수동 매매 가이드</h2>
-      <button type="button" class="modal-close" data-close="overlay-crypto" aria-label="닫기">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/>
-        </svg>
-      </button>
-    </div>
-    <p class="field-hint" style="margin-bottom:14px">
-      봇이 가상 $1,000 포트폴리오를 굴리며 주문을 지시합니다. 실행만 로빈후드에서 그대로 해주세요.
-      매일 09:00 · 12:00 · 21:00 (ET) 자동 점검. 로빈후드에서 실행한 뒤 아래 확인을 눌러야 장부에 반영됩니다.
-    </p>
-    <div id="crypto-body"><div class="empty">불러오는 중…</div></div>
   </div>
 </div>
 
@@ -722,7 +770,23 @@ function renderCrypto(d) {
   const m = d.market || {};
   const s = d.summary || {};
   const usd2 = v => '$' + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
-  let html = `<div class="briefing-section"><h3>지금 실행할 주문 (로빈후드)</h3></div>`;
+  let html = '';
+
+  if (d.parsed) {
+    const p = d.parsed;
+    html += `<div class="parsed-note">
+      <b style="color:var(--text)">스크린샷 분석</b> — ${escapeHtml(p.notes || '보유 내역을 읽었습니다.')}
+      · 현금 ${usd2(p.cash)} · ${(p.positions || []).length}종목
+      ${p.principal ? ` · 원금 목표 ${usd2(p.principal)}` : ''}
+    </div>`;
+  }
+  if (d.skipped && d.skipped.length) {
+    html += `<div class="parsed-note" style="border-color:#3b2e1a;color:var(--amber)">
+      지원하지 않거나 가격을 못 찾은 코인: ${escapeHtml(d.skipped.join(', '))}
+    </div>`;
+  }
+
+  html += `<div class="briefing-section"><h3>지금 실행할 주문 (로빈후드)</h3></div>`;
 
   if (d.orders && d.orders.length) {
     html += d.orders.map(o => {
@@ -772,27 +836,8 @@ function renderCrypto(d) {
       {h: '이탈/축소', f: r => r.exit_at ? '$' + cpx(r.exit_at) : '—'},
     ]);
   } else {
-    html += `<div class="empty">보유 없음 — 전액 현금</div>`;
+    html += `<div class="empty">보유 없음</div>`;
   }
-
-  // real-holdings editor (rebuilds the book from actual Robinhood positions)
-  html += `<div class="briefing-section" style="margin-top:16px"><h3>실보유 등록 (로빈후드와 동기화)</h3></div>
-    <p class="field-hint">실제 보유 수량·평단을 입력하고 저장하면 봇이 이 포트폴리오를 기준으로 주문을 지시합니다.</p>
-    <div id="holdings-rows"></div>
-    <div class="holding-row">
-      <span style="font-size:12px;color:var(--dim);width:84px;flex-shrink:0">현금 $</span>
-      <input type="number" id="holdings-cash" min="0" step="0.01" placeholder="Buying power">
-      <span style="width:30px;flex-shrink:0"></span>
-    </div>
-    <div class="holding-row">
-      <span style="font-size:12px;color:var(--dim);width:84px;flex-shrink:0">원금 $</span>
-      <input type="number" id="holdings-principal" min="0" step="0.01" placeholder="회복 목표 (예: 13500)">
-      <span style="width:30px;flex-shrink:0"></span>
-    </div>
-    <div class="btn-row" style="margin-top:8px">
-      <button type="button" class="btn btn-ghost" id="btn-holding-add">+ 코인 추가</button>
-      <button type="button" class="btn btn-primary" id="btn-holdings-save">저장 — 장부 재구성</button>
-    </div>`;
 
   html += `
     <div class="crypto-market">
@@ -810,19 +855,9 @@ function renderCrypto(d) {
   $('crypto-body').querySelectorAll('.btn-confirm-order').forEach(btn => {
     btn.addEventListener('click', () => confirmCryptoOrder(btn.dataset.oid));
   });
-  // holdings editor: prefill from the current book
-  const existing = (s.positions || []).map(p =>
-    ({symbol: p.symbol, qty: p.qty, avg_cost: p.avg_cost}));
-  (existing.length ? existing : [{}]).forEach(h => addHoldingRow(h));
-  if (Number.isFinite(s.cash)) $('holdings-cash').value = Number(s.cash).toFixed(2);
-  if (Number.isFinite(s.principal) && s.principal > 0) {
-    $('holdings-principal').value = Number(s.principal).toFixed(2);
-  }
-  $('btn-holding-add').addEventListener('click', () => addHoldingRow({}));
-  $('btn-holdings-save').addEventListener('click', saveHoldings);
   $('btn-crypto-reset').addEventListener('click', () => openConfirm(
-    '가상 크립토 포트폴리오를 리셋할까요?',
-    '가상 보유 내역과 손익 기록이 지워지고 $1,000 현금 상태에서 다시 시작합니다. 로빈후드 실계좌에는 아무 영향이 없습니다.',
+    '크립토 장부를 리셋할까요?',
+    '보유 내역, 주문 기록, 손익이 지워집니다. 로빈후드 실계좌에는 영향이 없습니다. 다음 스크린샷 업로드로 다시 동기화하세요.',
     '리셋',
     async () => {
       $('crypto-body').innerHTML = '<div class="empty">리셋 중…</div>';
@@ -859,59 +894,6 @@ async function confirmCryptoOrder(id) {
   }
 }
 
-const COIN_LIST = ['BTC','ETH','SOL','DOGE','XRP','AVAX','LINK','LTC','UNI','SHIB','BCH','AAVE'];
-
-function addHoldingRow(h) {
-  const row = document.createElement('div');
-  row.className = 'holding-row';
-  const opts = COIN_LIST.map(c =>
-    `<option value="${c}"${h.symbol === c ? ' selected' : ''}>${c}</option>`).join('');
-  row.innerHTML = `
-    <select aria-label="코인">${opts}</select>
-    <input type="number" min="0" step="any" placeholder="수량" value="${h.qty ?? ''}" aria-label="수량">
-    <input type="number" min="0" step="any" placeholder="평단 $ (선택)" value="${h.avg_cost ?? ''}" aria-label="평단">
-    <button type="button" class="rm" aria-label="삭제">&times;</button>`;
-  row.querySelector('.rm').addEventListener('click', () => row.remove());
-  $('holdings-rows').appendChild(row);
-}
-
-function saveHoldings() {
-  const positions = [];
-  $('holdings-rows').querySelectorAll('.holding-row').forEach(row => {
-    const [qtyEl, avgEl] = row.querySelectorAll('input');
-    const qty = Number(qtyEl.value);
-    if (!Number.isFinite(qty) || qty <= 0) return;
-    positions.push({
-      symbol: row.querySelector('select').value,
-      qty,
-      avg_cost: Number(avgEl.value) > 0 ? Number(avgEl.value) : null,
-    });
-  });
-  const cash = Number($('holdings-cash').value) || 0;
-  const principalRaw = Number($('holdings-principal').value);
-  const principal = Number.isFinite(principalRaw) && principalRaw > 0 ? principalRaw : null;
-  openConfirm(
-    '실보유 내역으로 장부를 재구성할까요?',
-    `${positions.length}개 코인 + 현금 $${cash.toFixed(2)} 기준으로 기존 장부를 덮어씁니다.` +
-    (principal ? ` 원금 회복 목표는 $${principal.toFixed(0)}입니다.` : '') +
-    ` 이후 봇은 XRP 같은 편중·물타기 대신 상대강도로 재배치해 원금 회복을 우선합니다.`,
-    '재구성',
-    async () => {
-      $('crypto-body').innerHTML = '<div class="empty">장부 재구성 중…</div>';
-      try {
-        const r = await api('/api/crypto/holdings', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({cash, positions, principal}),
-        });
-        renderCrypto(await r.json());
-      } catch (e) {
-        $('crypto-body').innerHTML = `<div class="empty">실패: ${escapeHtml(String(e.message || e))}</div>`;
-      }
-    },
-  );
-}
-
 async function loadCrypto() {
   $('crypto-body').innerHTML = '<div class="empty">분석 중…</div>';
   try {
@@ -922,10 +904,102 @@ async function loadCrypto() {
   }
 }
 
-$('btn-crypto').addEventListener('click', () => {
-  openOverlay('overlay-crypto');
-  loadCrypto();
+function switchTab(name) {
+  document.querySelectorAll('.main-tab').forEach(btn => {
+    const on = btn.dataset.tab === name;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  document.querySelectorAll('.tab-panel').forEach(panel => {
+    panel.classList.toggle('active', panel.id === `tab-${name}`);
+  });
+}
+document.querySelectorAll('.main-tab').forEach(btn => {
+  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
 });
+
+let pendingScreenshots = [];
+
+function renderUploadPreview() {
+  const el = $('upload-preview');
+  el.innerHTML = pendingScreenshots.map((f, i) => `
+    <div class="upload-thumb">
+      <img src="${URL.createObjectURL(f)}" alt="${escapeHtml(f.name)}">
+      <button type="button" data-idx="${i}" aria-label="제거">&times;</button>
+    </div>`).join('');
+  el.querySelectorAll('button[data-idx]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      pendingScreenshots.splice(Number(btn.dataset.idx), 1);
+      renderUploadPreview();
+    });
+  });
+}
+
+function addScreenshotFiles(fileList) {
+  for (const f of fileList) {
+    if (f.type.startsWith('image/')) pendingScreenshots.push(f);
+  }
+  renderUploadPreview();
+}
+
+async function analyzeScreenshots() {
+  const msg = $('upload-msg');
+  if (!pendingScreenshots.length) {
+    msg.textContent = '스크린샷을 먼저 추가하세요.';
+    msg.className = 'msg err';
+    return;
+  }
+  const btn = $('btn-analyze-screenshots');
+  btn.disabled = true;
+  msg.textContent = '분석 중…';
+  msg.className = 'msg';
+  $('crypto-body').innerHTML = '<div class="empty">AI가 스크린샷을 읽는 중…</div>';
+  try {
+    const fd = new FormData();
+    pendingScreenshots.forEach(f => fd.append('files', f));
+    const t = localStorage.getItem(TOKEN_KEY) || '';
+    const r = await fetch('/api/crypto/screenshots', {
+      method: 'POST',
+      headers: t ? {'X-Admin-Token': t} : {},
+      body: fd,
+    });
+    const d = await r.json();
+    if (r.status === 401) {
+      showTokenGate('');
+      return;
+    }
+    if (!d.ok) {
+      msg.textContent = d.error || '분석 실패';
+      msg.className = 'msg err';
+      $('crypto-body').innerHTML = `<div class="empty">${escapeHtml(d.error || '분석 실패')}</div>`;
+      return;
+    }
+    msg.textContent = '분석 완료 — 아래 가이드를 확인하세요.';
+    msg.className = 'msg ok';
+    renderCrypto(d);
+  } catch (e) {
+    msg.textContent = String(e.message || e);
+    msg.className = 'msg err';
+  }
+  btn.disabled = false;
+}
+
+const uploadZone = $('upload-zone');
+const screenshotInput = $('screenshot-input');
+uploadZone.addEventListener('click', () => screenshotInput.click());
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadZone.classList.remove('drag');
+  addScreenshotFiles(e.dataTransfer.files);
+});
+screenshotInput.addEventListener('change', () => {
+  addScreenshotFiles(screenshotInput.files);
+  screenshotInput.value = '';
+});
+$('btn-analyze-screenshots').addEventListener('click', analyzeScreenshots);
+$('btn-refresh-crypto').addEventListener('click', loadCrypto);
 
 $('btn-activity').addEventListener('click', () => {
   if (lastBriefing) renderBriefing(lastBriefing);
@@ -967,6 +1041,7 @@ async function submitToken() {
     closeOverlay('overlay-token');
     $('token-msg').textContent = '';
     refresh();
+    loadCrypto();
     loadSettings();
   } catch (e) {
     showTokenGate('서버에 연결할 수 없습니다.');
@@ -1026,6 +1101,7 @@ $('btn-confirm-action').addEventListener('click', async () => {
   if (action) await action();
 });
 refresh();
+loadCrypto();
 loadSettings();
 setInterval(refresh, 30000);
 setInterval(() => {

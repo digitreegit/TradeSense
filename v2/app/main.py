@@ -1,4 +1,4 @@
-"""TradeSense v2 entrypoint.
+"""TradeSense v3 entrypoint.
 
 Local / Docker : APScheduler runs jobs in-process.
 Vercel         : cron-job.org hits /api/cron/run every ~15 min (RuleFive와 동일).
@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -24,6 +24,7 @@ from .crypto_advisor import (
     advise_and_apply, confirm_order, import_holdings, reset_book, run_scheduled,
 )
 from .engine import Engine
+from .robinhood_vision import analyze_and_advise
 from .state import store
 
 logging.basicConfig(
@@ -205,15 +206,15 @@ async def lifespan(app: FastAPI):
     sched = None
     if not settings.on_vercel:
         sched = _start_scheduler()
-        log.info("TradeSense v2 started with in-process scheduler (mode=live)")
+        log.info("TradeSense v3 started with in-process scheduler (mode=live)")
     else:
-        log.info("TradeSense v2 on Vercel — cron-job.org → /api/cron/run (mode=live)")
+        log.info("TradeSense v3 on Vercel — cron-job.org → /api/cron/run (mode=live)")
     yield
     if sched is not None:
         sched.shutdown(wait=False)
 
 
-app = FastAPI(title="TradeSense v2", lifespan=lifespan,
+app = FastAPI(title="TradeSense v3", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -303,6 +304,24 @@ def snapshot(request: Request):
     if not _admin_authorized(request):
         return _unauthorized()
     return JSONResponse(engine.snapshot())
+
+
+@app.post("/api/crypto/screenshots")
+async def crypto_screenshots(
+    request: Request,
+    files: list[UploadFile] = File(...),
+):
+    """로빈후드 스크린샷 → 보유 추출 → 매수/매도 가이드."""
+    if not _admin_authorized(request):
+        return _unauthorized()
+    try:
+        images = [await f.read() for f in files]
+        images = [b for b in images if b]
+        result = analyze_and_advise(images)
+        return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+    except Exception as exc:
+        log.exception("screenshot analysis failed")
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
 
 @app.get("/api/crypto/advice")
