@@ -770,7 +770,18 @@ function renderCrypto(d) {
   const m = d.market || {};
   const s = d.summary || {};
   const usd2 = v => '$' + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
-  let html = '';
+  let html = `<div class="briefing-section"><h3>원금 회복</h3></div>
+    <div class="crypto-recovery">
+      원금 <b>${usd2(s.principal || s.budget)}</b>
+      · 현재 <b>${usd2(s.total)}</b>
+      · 남음 <span class="${plClass(-(s.gap || 0))}">${usd2(s.gap || 0)}</span>
+      (${pct(s.recovered_pct || 0)})
+      <div class="bar"><span style="width:${Math.min(100, Math.max(0, (s.recovered_pct || 0) * 100)).toFixed(1)}%"></span></div>
+    </div>
+    <div class="crypto-summary">
+      등록후 손익 <span class="${plClass(s.pl || 0)}">${s.pl >= 0 ? '+' : '−'}$${Math.abs(s.pl || 0).toFixed(0)}</span>
+      · 현금 ${usd2(s.cash)} · 실현손익 <span class="${plClass(s.realized_pl || 0)}">${s.realized_pl >= 0 ? '+' : '−'}$${Math.abs(s.realized_pl || 0).toFixed(0)}</span>
+    </div>`;
 
   if (d.parsed) {
     const p = d.parsed;
@@ -812,18 +823,6 @@ function renderCrypto(d) {
     html += `<div class="empty">할 일 없음 — 보유 유지. 다음 점검 때 다시 확인하세요.</div>`;
   }
 
-  html += `<div class="briefing-section" style="margin-top:16px"><h3>원금 회복</h3></div>
-    <div class="crypto-recovery">
-      원금 <b>${usd2(s.principal || s.budget)}</b>
-      · 현재 <b>${usd2(s.total)}</b>
-      · 남음 <span class="${plClass(-(s.gap || 0))}">${usd2(s.gap || 0)}</span>
-      (${pct(s.recovered_pct || 0)})
-      <div class="bar"><span style="width:${Math.min(100, Math.max(0, (s.recovered_pct || 0) * 100)).toFixed(1)}%"></span></div>
-    </div>
-    <div class="crypto-summary">
-      등록후 손익 <span class="${plClass(s.pl || 0)}">${s.pl >= 0 ? '+' : '−'}$${Math.abs(s.pl || 0).toFixed(0)}</span>
-      · 현금 ${usd2(s.cash)} · 실현손익 <span class="${plClass(s.realized_pl || 0)}">${s.realized_pl >= 0 ? '+' : '−'}$${Math.abs(s.realized_pl || 0).toFixed(0)}</span>
-    </div>`;
   if (s.positions && s.positions.length) {
     html += table(s.positions, [
       {h: '코인', f: r => `<b>${r.symbol}</b>${r.units > 1 ? ` <span style="color:var(--dim);font-size:11px">×${r.units}</span>` : ''}`},
