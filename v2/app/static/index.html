@@ -34,6 +34,7 @@
     transition: background .15s, border-color .15s;
   }
   .icon-btn:hover { background: #1c2128; border-color: #30363d; }
+  .icon-btn.active { background: #1c2128; border-color: var(--blue); color: var(--blue); }
   .icon-btn svg { width: 20px; height: 20px; }
   .icon-btn.labeled { width: auto; padding: 0 12px; gap: 6px; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
   .icon-btn.labeled svg { width: 18px; height: 18px; color: #f0b90b; }
@@ -255,6 +256,10 @@
   .rh-keys { display: grid; gap: 8px; max-width: 420px; margin-top: 10px; }
   .rh-keys .input { width: 100%; }
   .crypto-toolbar { padding: 0 0 8px; }
+  .settings-page-title { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
+  #tab-settings .upload-zone,
+  #tab-settings .upload-preview { max-width: 480px; }
+  #tab-settings .rh-keys { max-width: 480px; }
 </style>
 </head>
 <body>
@@ -310,45 +315,18 @@
 <div class="panel"><h2>Recent trades</h2><div id="trades"></div></div>
 </section>
 
-<!-- Activity overlay -->
-<div class="overlay" id="overlay-activity" role="dialog" aria-modal="true" aria-labelledby="activity-title">
-  <div class="modal wide">
-    <div class="modal-head">
-      <h2 id="activity-title">오늘의 액티비티</h2>
-      <button type="button" class="modal-close" data-close="overlay-activity" aria-label="닫기">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/>
-        </svg>
-      </button>
-    </div>
-    <div class="briefing">
-      <div class="headline" id="brief-headline">불러오는 중…</div>
-      <div id="brief-sections"></div>
-    </div>
-  </div>
-</div>
+<section id="tab-settings" class="tab-panel" role="tabpanel" aria-labelledby="settings-title">
+  <h2 class="settings-page-title" id="settings-title">설정</h2>
+  <p class="field-hint" style="margin-bottom:18px">
+    주식(Alpaca)과 크립토(Robinhood) 연동, 알림, 상태 관리.
+  </p>
 
-<!-- Settings overlay -->
-<div class="overlay" id="overlay-settings" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-  <div class="modal wide">
-    <div class="modal-head">
-      <h2 id="settings-title">설정</h2>
-      <button type="button" class="modal-close" data-close="overlay-settings" aria-label="닫기">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/>
-        </svg>
-      </button>
-    </div>
-    <p class="field-hint" style="margin-bottom:14px">
-      주식(Alpaca)과 크립토(Robinhood) 연동, 알림, 상태 관리.
+  <div class="panel settings-section">
+    <h3>주식 · Alpaca</h3>
+    <p class="field-hint" style="margin-bottom:10px">
+      실거래 전용. 라이브 API 키(AK…)를 연결하세요.
+      <a class="link" href="https://app.alpaca.markets/dashboard/overview" target="_blank" rel="noreferrer">Alpaca Live 대시보드</a>
     </p>
-
-    <div class="settings-section">
-      <h3>주식 · Alpaca</h3>
-      <p class="field-hint" style="margin-bottom:10px">
-        실거래 전용. 라이브 API 키(AK…)를 연결하세요.
-        <a class="link" href="https://app.alpaca.markets/dashboard/overview" target="_blank" rel="noreferrer">Alpaca Live 대시보드</a>
-      </p>
 
     <div class="status-row" id="conn-status">
       <span class="status-dot" id="conn-dot"></span>
@@ -372,76 +350,91 @@
 
     <ul class="acct-list" id="acct-summary" style="display:none"></ul>
     <p class="msg" id="settings-msg"></p>
+  </div>
+
+  <div class="panel settings-section">
+    <h3>크립토 · Robinhood API</h3>
+    <p class="field-hint" style="margin-bottom:8px">
+      보유·현금 자동 동기화 (거래는 앱에서 직접).
+      <a class="link" href="https://robinhood.com/us/en/support/articles/crypto-api/" target="_blank" rel="noreferrer">키 발급 안내</a>
+    </p>
+    <div class="rh-status">
+      <span class="status-dot" id="rh-dot"></span>
+      <div class="status-text">
+        <span id="rh-label">연결 확인 중…</span>
+        <small id="rh-detail"></small>
+      </div>
     </div>
-
-    <hr style="border:none;border-top:1px solid var(--border);margin:18px 0 14px">
-
-    <div class="settings-section">
-      <h3>크립토 · Robinhood API</h3>
-      <p class="field-hint" style="margin-bottom:8px">
-        보유·현금 자동 동기화 (거래는 앱에서 직접).
-        <a class="link" href="https://robinhood.com/us/en/support/articles/crypto-api/" target="_blank" rel="noreferrer">키 발급 안내</a>
-      </p>
-      <div class="rh-status">
-        <span class="status-dot" id="rh-dot"></span>
-        <div class="status-text">
-          <span id="rh-label">연결 확인 중…</span>
-          <small id="rh-detail"></small>
-        </div>
+    <div class="rh-keys" id="rh-keys-wrap">
+      <span class="field-label">API Key</span>
+      <input type="password" class="input" id="rh-api-key" autocomplete="off" placeholder="rh-api-…">
+      <span class="field-label">Private Key (Base64)</span>
+      <input type="password" class="input" id="rh-private-key" autocomplete="off" placeholder="Ed25519 private key">
+      <div class="btn-row">
+        <button type="button" class="btn btn-primary btn-sm" id="btn-save-rh-keys">키 저장</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="btn-delete-rh-keys" style="display:none">키 삭제</button>
+        <button type="button" class="btn btn-primary btn-sm" id="btn-robinhood-sync">동기화 · 가이드 생성</button>
       </div>
-      <div class="rh-keys" id="rh-keys-wrap">
-        <span class="field-label">API Key</span>
-        <input type="password" class="input" id="rh-api-key" autocomplete="off" placeholder="rh-api-…">
-        <span class="field-label">Private Key (Base64)</span>
-        <input type="password" class="input" id="rh-private-key" autocomplete="off" placeholder="Ed25519 private key">
-        <div class="btn-row">
-          <button type="button" class="btn btn-primary btn-sm" id="btn-save-rh-keys">키 저장</button>
-          <button type="button" class="btn btn-ghost btn-sm" id="btn-delete-rh-keys" style="display:none">키 삭제</button>
-          <button type="button" class="btn btn-primary btn-sm" id="btn-robinhood-sync">동기화 · 가이드 생성</button>
-        </div>
-      </div>
-      <p class="msg" id="rh-msg"></p>
     </div>
+    <p class="msg" id="rh-msg"></p>
+  </div>
 
-    <hr style="border:none;border-top:1px solid var(--border);margin:18px 0 14px">
-
-    <div class="settings-section">
-      <h3>또는 스크린샷</h3>
-      <p class="field-hint" style="margin-bottom:12px">
-        API 없이 계좌·보유 캡처 업로드. 평단 확인용으로 유용합니다.
-      </p>
-      <div class="upload-zone" id="upload-zone">
-        <input type="file" id="screenshot-input" accept="image/*" multiple hidden>
-        <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22" aria-hidden="true">
-          <path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l3.182 3.182m-18.75 0V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18v-4.5M12 2.25v13.5"/>
-        </svg>
-        <div>탭하거나 드래그해서 스크린샷 추가</div>
-        <div class="upload-hint">여러 장 올려도 됩니다 (총액 + 각 코인 보유)</div>
-      </div>
-      <div id="upload-preview" class="upload-preview"></div>
-      <div class="btn-row" style="margin-top:12px">
-        <button type="button" class="btn btn-primary btn-sm" id="btn-analyze-screenshots">분석 · 가이드 생성</button>
-      </div>
-      <p class="msg" id="upload-msg"></p>
+  <div class="panel settings-section">
+    <h3>또는 스크린샷</h3>
+    <p class="field-hint" style="margin-bottom:12px">
+      API 없이 계좌·보유 캡처 업로드. 평단 확인용으로 유용합니다.
+    </p>
+    <div class="upload-zone" id="upload-zone">
+      <input type="file" id="screenshot-input" accept="image/*" multiple hidden>
+      <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l3.182 3.182m-18.75 0V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18v-4.5M12 2.25v13.5"/>
+      </svg>
+      <div>탭하거나 드래그해서 스크린샷 추가</div>
+      <div class="upload-hint">여러 장 올려도 됩니다 (총액 + 각 코인 보유)</div>
     </div>
+    <div id="upload-preview" class="upload-preview"></div>
+    <div class="btn-row" style="margin-top:12px">
+      <button type="button" class="btn btn-primary btn-sm" id="btn-analyze-screenshots">분석 · 가이드 생성</button>
+    </div>
+    <p class="msg" id="upload-msg"></p>
+  </div>
 
-    <hr style="border:none;border-top:1px solid var(--border);margin:18px 0 14px">
+  <div class="panel settings-section">
     <span class="field-label">텔레그램 알림</span>
     <p class="field-hint">Vercel 환경변수 <b>TELEGRAM_BOT_TOKEN</b> / <b>TELEGRAM_CHAT_ID</b>를 사용합니다.
       올바른 chat ID: <b>8788110870</b> · 봇: <b>@TradeSenseDigtreeBot</b></p>
     <p class="field-hint" id="tg-status">서버 설정 확인 중…</p>
     <button type="button" class="btn btn-ghost" id="btn-tg-test">텔레그램 테스트 발송</button>
     <p class="msg" id="tg-msg" style="min-height:1.4em;font-size:14px"></p>
+  </div>
 
-    <hr style="border:none;border-top:1px solid var(--border);margin:18px 0 14px">
+  <div class="panel settings-section">
     <span class="field-label">상태 리셋</span>
     <p class="field-hint">계좌를 바꾼 뒤 이전 드로다운 기준점 때문에 거래가 중단되면 여기서 초기화하세요.
       드로다운·레짐·포지션 메타·예약 주문·에쿼티 곡선·거래 기록이 지워지고, Alpaca 키는 유지됩니다.</p>
     <button type="button" class="btn btn-ghost" id="btn-reset-state">드로다운·상태 리셋</button>
   </div>
+</section>
+
+<!-- Activity overlay -->
+<div class="overlay" id="overlay-activity" role="dialog" aria-modal="true" aria-labelledby="activity-title">
+  <div class="modal wide">
+    <div class="modal-head">
+      <h2 id="activity-title">오늘의 액티비티</h2>
+      <button type="button" class="modal-close" data-close="overlay-activity" aria-label="닫기">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <div class="briefing">
+      <div class="headline" id="brief-headline">불러오는 중…</div>
+      <div id="brief-sections"></div>
+    </div>
+  </div>
 </div>
 
-<!-- Confirmation overlay (always above activity/settings modals) -->
+<!-- Confirmation overlay -->
 <div class="overlay" id="overlay-confirm" role="alertdialog" aria-modal="true"
      aria-labelledby="confirm-title" aria-describedby="confirm-copy">
   <div class="modal">
@@ -714,7 +707,6 @@ async function loadSettings() {
 }
 
 function showCryptoGuide(d) {
-  closeOverlay('overlay-settings');
   switchTab('crypto');
   renderCrypto(d);
 }
@@ -1228,6 +1220,8 @@ function switchTab(name) {
   document.querySelectorAll('.tab-panel').forEach(panel => {
     panel.classList.toggle('active', panel.id === `tab-${name}`);
   });
+  $('btn-settings').classList.toggle('active', name === 'settings');
+  if (name === 'settings') loadSettings();
 }
 document.querySelectorAll('.main-tab').forEach(btn => {
   btn.addEventListener('click', () => switchTab(btn.dataset.tab));
@@ -1342,8 +1336,11 @@ $('btn-activity').addEventListener('click', () => {
   markSeen();
 });
 $('btn-settings').addEventListener('click', () => {
-  loadSettings();
-  openOverlay('overlay-settings');
+  if ($('tab-settings').classList.contains('active')) {
+    switchTab('crypto');
+  } else {
+    switchTab('settings');
+  }
 });
 document.querySelectorAll('.modal-close[data-close]').forEach(btn => {
   btn.addEventListener('click', () => closeOverlay(btn.dataset.close));
@@ -1440,7 +1437,7 @@ loadCrypto();
 loadSettings();
 setInterval(refresh, 30000);
 setInterval(() => {
-  if ($('overlay-settings').classList.contains('open')) loadSettings();
+  if ($('tab-settings').classList.contains('active')) loadSettings();
 }, 15000);
 </script>
 </body>
