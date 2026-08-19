@@ -21,7 +21,8 @@ from .alpaca_config import clear_keys, save_keys, status_dict
 
 from .config import settings
 from .crypto_advisor import (
-    advise_and_apply, confirm_order, deny_order, import_holdings, reset_book, run_scheduled,
+    advise_and_apply, confirm_order, deny_order, import_holdings, reset_book,
+    run_scheduled, set_principal,
 )
 from .engine import Engine
 from .robinhood_vision import analyze_and_advise
@@ -366,6 +367,19 @@ def crypto_deny(body: CryptoDenyBody, request: Request):
     if not _admin_authorized(request):
         return _unauthorized()
     result = deny_order(body.id)
+    return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+
+
+class CryptoPrincipalBody(BaseModel):
+    principal: float
+
+
+@app.post("/api/crypto/principal")
+def crypto_principal(body: CryptoPrincipalBody, request: Request):
+    """원금 회복 목표 금액 설정."""
+    if not _admin_authorized(request):
+        return _unauthorized()
+    result = set_principal(body.principal)
     return JSONResponse(result, status_code=200 if result.get("ok") else 400)
 
 

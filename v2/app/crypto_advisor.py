@@ -636,6 +636,19 @@ def reset_book() -> None:
     store.set(NOTIFY_FP_KEY, None)
 
 
+def set_principal(principal: float) -> dict:
+    """Update the recovery target without touching positions or orders."""
+    if principal <= 0:
+        return {"ok": False, "error": "원금은 0보다 커야 합니다."}
+    book = store.get(BOOK_KEY) or _new_book()
+    book["principal"] = round(float(principal), 2)
+    book["updated_at"] = datetime.now(timezone.utc).isoformat()
+    store.set(BOOK_KEY, book)
+    store.set(CACHE_KEY, None)
+    log_activity("crypto", f"원금 목표 ${principal:,.0f}로 설정")
+    return _ensure_order_split(advise_and_apply(force=True))
+
+
 def import_holdings(
     cash: float, holdings: list[dict], principal: float | None = None,
 ) -> dict:

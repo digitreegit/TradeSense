@@ -479,6 +479,20 @@ def test_deny_removes_sibling_pending_orders():
     assert any(o["id"] == "exit1" and o["status"] == "denied" for o in remaining)
 
 
+def test_set_principal_updates_book():
+    from unittest.mock import patch
+    from app.crypto_advisor import set_principal
+    from app.state import store
+
+    book = _new_book()
+    book["principal"] = 10000.0
+    store.set("crypto_book", book)
+    with patch("app.crypto_advisor.advise_and_apply", return_value={"ok": True, "summary": {"principal": 11598.0}}):
+        result = set_principal(11598.0)
+    assert result["ok"] is True
+    assert store.get("crypto_book")["principal"] == 11598.0
+
+
 def test_merge_pending_skips_denied_fingerprint():
     from app.crypto_advisor import _merge_pending
 

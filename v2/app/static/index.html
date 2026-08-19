@@ -176,7 +176,14 @@
   }
   .crypto-order .done { font-size: 12px; color: var(--green); }
   .crypto-order .done.denied { color: var(--amber); }
-  .crypto-summary { color: var(--dim); font-size: 13px; margin-bottom: 8px; }
+  .crypto-recovery .principal-edit {
+    display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  }
+  .crypto-recovery .principal-edit input {
+    width: 96px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--panel); color: var(--text); font-size: 13px; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
   .crypto-summary b { color: var(--text); }
   .crypto-recovery {
     margin: 0 0 12px; padding: 10px 12px; border-radius: 8px;
@@ -857,7 +864,11 @@ function renderCrypto(d) {
   const usd2 = v => '$' + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
   let html = `<div class="briefing-section"><h3>원금 회복</h3></div>
     <div class="crypto-recovery">
-      원금 <b>${usd2(s.principal || s.budget)}</b>
+      <span class="principal-edit">
+        원금 $<input type="number" min="1" step="1" id="crypto-principal-input"
+          value="${Math.round(Number(s.principal || s.budget || 0))}" aria-label="원금 목표">
+        <button type="button" class="btn btn-ghost btn-sm" id="btn-crypto-principal">저장</button>
+      </span>
       · 현재 <b>${usd2(s.total)}</b>
       · 남음 <span class="${plClass(-(s.gap || 0))}">${usd2(s.gap || 0)}</span>
       (${pct(s.recovered_pct || 0)})
@@ -937,6 +948,13 @@ function renderCrypto(d) {
       openOverlay('overlay-crypto-history');
     });
   }
+  const principalBtn = $('btn-crypto-principal');
+  if (principalBtn) {
+    principalBtn.addEventListener('click', () => saveCryptoPrincipal());
+    $('crypto-principal-input')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') saveCryptoPrincipal();
+    });
+  }
   $('btn-crypto-reset').addEventListener('click', () => openConfirm(
     '크립토 장부를 리셋할까요?',
     '보유 내역, 주문 기록, 손익이 지워집니다. 로빈후드 실계좌에는 영향이 없습니다. 다음 스크린샷 업로드로 다시 동기화하세요.',
@@ -993,6 +1011,33 @@ async function denyCryptoOrder(id) {
   } catch (e) {
     $('crypto-body').insertAdjacentHTML('afterbegin',
       `<div class="empty" style="color:var(--red)">${escapeHtml(String(e.message || e))}</div>`);
+  }
+}
+
+async function saveCryptoPrincipal() {
+  const input = $('crypto-principal-input');
+  const principal = input ? Number(input.value) : NaN;
+  if (!Number.isFinite(principal) || principal <= 0) return;
+  const btn = $('btn-crypto-principal');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api('/api/crypto/principal', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({principal}),
+    });
+    const d = await r.json();
+    if (!d.ok) {
+      $('crypto-body').insertAdjacentHTML('afterbegin',
+        `<div class="empty" style="color:var(--red)">${escapeHtml(d.error || '저장 실패')}</div>`);
+      return;
+    }
+    renderCrypto(d);
+  } catch (e) {
+    $('crypto-body').insertAdjacentHTML('afterbegin',
+      `<div class="empty" style="color:var(--red)">${escapeHtml(String(e.message || e))}</div>`);
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
