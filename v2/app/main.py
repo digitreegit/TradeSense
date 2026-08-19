@@ -98,16 +98,24 @@ def _start_scheduler() -> "object":
 
 
 def _authorized(request: Request) -> bool:
-    """Accept cron secrets only in headers (query strings leak into logs)."""
+    """Accept cron secrets from headers and query for compatibility.
+
+    Header is preferred (`Authorization: Bearer ...` or `x-cron-secret`), but
+    some existing cron-job.org entries still use `?secret=...`. Keep both so
+    scheduled jobs (including 09:00/12:00/21:00 crypto alerts) don't silently
+    stop after auth-hardening deploys.
+    """
     if not settings.cron_secret:
         return False
     secret = settings.cron_secret
     header = request.headers.get("authorization", "")
     bearer = header[7:] if header.startswith("Bearer ") else ""
     x_secret = request.headers.get("x-cron-secret", "")
+    q_secret = request.query_params.get("secret", "")
     return (
         secrets.compare_digest(bearer, secret)
         or secrets.compare_digest(x_secret, secret)
+        or secrets.compare_digest(q_secret, secret)
     )
 
 
