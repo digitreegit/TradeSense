@@ -209,11 +209,18 @@
   .holding-row .rm:hover { color: var(--red); }
 
   /* v3 tabs */
-  .main-tabs { display: flex; gap: 6px; margin-top: 10px; }
+  .main-tabs {
+    display: flex; gap: 6px; margin-top: 10px;
+    overflow-x: auto; flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%; scrollbar-width: none;
+  }
+  .main-tabs::-webkit-scrollbar { display: none; }
   .main-tab {
     padding: 8px 18px; border-radius: 8px; border: 1px solid var(--border);
     background: transparent; color: var(--dim); cursor: pointer;
     font-size: 13px; font-weight: 700;
+    white-space: nowrap; flex-shrink: 0;
   }
   .main-tab.active { background: var(--panel); color: var(--text); border-color: #30363d; }
   .main-tab:hover:not(.active) { border-color: #30363d; color: var(--text); }
@@ -333,18 +340,8 @@
       padding-right: max(16px, env(safe-area-inset-right));
     }
     h1 { font-size: 18px; }
-    .main-tabs {
-      overflow-x: auto; flex-wrap: nowrap;
-      -webkit-overflow-scrolling: touch;
-      max-width: 100%; padding-bottom: 2px;
-      scrollbar-width: none;
-    }
-    .main-tabs::-webkit-scrollbar { display: none; }
-    .main-tab {
-      flex-shrink: 0; padding: 7px 12px; font-size: 12px;
-    }
-    .main-tab .tab-long { display: none; }
-    .main-tab .tab-short { display: inline; }
+    .topbar-main { flex: 1 1 100%; min-width: 0; }
+    .main-tab { padding: 7px 12px; font-size: 12px; }
     .tab-panel {
       padding: 12px 16px 28px;
       padding-bottom: max(28px, env(safe-area-inset-bottom));
@@ -382,9 +379,6 @@
     .table-cards td:first-child { padding-top: 0; }
   }
 
-  @media (min-width: 641px) {
-    .main-tab .tab-short { display: none; }
-  }
 </style>
 </head>
 <body>
@@ -393,12 +387,8 @@
   <div class="topbar-main">
     <h1>TradeSense <span class="blue">v3</span></h1>
     <nav class="main-tabs" role="tablist" aria-label="메인 탭">
-      <button type="button" class="main-tab active" data-tab="crypto" role="tab" aria-selected="true">
-        <span class="tab-long">크립토 · 로빈후드</span><span class="tab-short">크립토</span>
-      </button>
-      <button type="button" class="main-tab" data-tab="stocks" role="tab" aria-selected="false">
-        <span class="tab-long">주식 · Alpaca 자동</span><span class="tab-short">주식</span>
-      </button>
+      <button type="button" class="main-tab active" data-tab="crypto" role="tab" aria-selected="true">크립토 · 로빈후드</button>
+      <button type="button" class="main-tab" data-tab="stocks" role="tab" aria-selected="false">주식 · Alpaca 자동</button>
     </nav>
   </div>
   <div class="icon-bar">
