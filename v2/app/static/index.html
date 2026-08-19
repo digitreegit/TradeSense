@@ -175,6 +175,7 @@
     background: var(--panel); color: var(--text); font-size: 13px; font-variant-numeric: tabular-nums;
   }
   .crypto-order .done { font-size: 12px; color: var(--green); }
+  .crypto-order .done.denied { color: var(--amber); }
   .crypto-summary { color: var(--dim); font-size: 13px; margin-bottom: 8px; }
   .crypto-summary b { color: var(--text); }
   .crypto-recovery {
@@ -415,7 +416,7 @@
         </svg>
       </button>
     </div>
-    <p class="field-hint" style="margin-bottom:12px">로빈후드에서 실행하고 대시보드에서 확인한 주문 기록입니다.</p>
+    <p class="field-hint" style="margin-bottom:12px">로빈후드에서 실행·거부한 추천 기록입니다.</p>
     <div id="crypto-history-body"><div class="empty">기록 없음</div></div>
   </div>
 </div>
@@ -793,16 +794,23 @@ const cpx = v => {
 
 function renderCryptoOrder(o, {history = false} = {}) {
   const usd2 = v => '$' + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
-  const when = o.confirmed_at
-    ? new Date(o.confirmed_at).toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'})
+  const whenTs = o.confirmed_at || o.denied_at;
+  const when = whenTs
+    ? new Date(whenTs).toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'})
     : '';
-  const fill = history || o.status === 'confirmed'
-    ? `<div class="fill"><span class="done">확인됨 · 실제 ${usd2(o.actual_dollars ?? o.dollars)}${when ? ` · ${when}` : ''}</span></div>`
-    : `<div class="fill">
+  let fill;
+  if (history || o.status === 'confirmed') {
+    fill = `<div class="fill"><span class="done">확인됨 · 실제 ${usd2(o.actual_dollars ?? o.dollars)}${when ? ` · ${when}` : ''}</span></div>`;
+  } else if (o.status === 'denied') {
+    fill = `<div class="fill"><span class="done denied">거부됨 (DENY)${when ? ` · ${when}` : ''}</span></div>`;
+  } else {
+    fill = `<div class="fill">
         <label>실제 금액 $</label>
         <input type="number" min="1" step="1" value="${Number(o.dollars)}" data-oid="${escapeHtml(o.id)}" aria-label="${o.symbol} 실제 금액">
+        <button type="button" class="btn btn-ghost btn-deny-order" data-oid="${escapeHtml(o.id)}">거부</button>
         <button type="button" class="btn btn-primary btn-confirm-order" data-oid="${escapeHtml(o.id)}">확인</button>
       </div>`;
+  }
   return `
   <div class="crypto-order">
     <span class="side ${o.side}">${o.side === 'buy' ? '매수' : '매도'}</span>
@@ -829,9 +837,13 @@ function splitCryptoOrders(d) {
     if (o && o.id) byId.set(o.id, o);
   }
   const all = [...byId.values()];
-  const history = all.filter(o => o.status === 'confirmed')
-    .sort((a, b) => (b.confirmed_at || '').localeCompare(a.confirmed_at || ''));
-  const active = all.filter(o => o.status !== 'confirmed');
+  const history = all.filter(o => o.status === 'confirmed' || o.status === 'denied')
+    .sort((a, b) => {
+      const ta = a.confirmed_at || a.denied_at || '';
+      const tb = b.confirmed_at || b.denied_at || '';
+      return tb.localeCompare(ta);
+    });
+  const active = all.filter(o => o.status !== 'confirmed' && o.status !== 'denied');
   return {active, history};
 }
 
@@ -915,6 +927,9 @@ function renderCrypto(d) {
   $('crypto-body').querySelectorAll('.btn-confirm-order').forEach(btn => {
     btn.addEventListener('click', () => confirmCryptoOrder(btn.dataset.oid));
   });
+  $('crypto-body').querySelectorAll('.btn-deny-order').forEach(btn => {
+    btn.addEventListener('click', () => denyCryptoOrder(btn.dataset.oid));
+  });
   const histBtn = $('btn-crypto-history');
   if (histBtn) {
     histBtn.addEventListener('click', () => {
@@ -952,6 +967,26 @@ async function confirmCryptoOrder(id) {
     if (!d.ok) {
       $('crypto-body').insertAdjacentHTML('afterbegin',
         `<div class="empty" style="color:var(--red)">${escapeHtml(d.error || '확인 실패')}</div>`);
+      return;
+    }
+    renderCrypto(d);
+  } catch (e) {
+    $('crypto-body').insertAdjacentHTML('afterbegin',
+      `<div class="empty" style="color:var(--red)">${escapeHtml(String(e.message || e))}</div>`);
+  }
+}
+
+async function denyCryptoOrder(id) {
+  try {
+    const r = await api('/api/crypto/deny', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id}),
+    });
+    const d = await r.json();
+    if (!d.ok) {
+      $('crypto-body').insertAdjacentHTML('afterbegin',
+        `<div class="empty" style="color:var(--red)">${escapeHtml(d.error || '거부 실패')}</div>`);
       return;
     }
     renderCrypto(d);

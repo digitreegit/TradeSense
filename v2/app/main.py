@@ -21,7 +21,7 @@ from .alpaca_config import clear_keys, save_keys, status_dict
 
 from .config import settings
 from .crypto_advisor import (
-    advise_and_apply, confirm_order, import_holdings, reset_book, run_scheduled,
+    advise_and_apply, confirm_order, deny_order, import_holdings, reset_book, run_scheduled,
 )
 from .engine import Engine
 from .robinhood_vision import analyze_and_advise
@@ -347,12 +347,25 @@ class CryptoConfirmBody(BaseModel):
     dollars: float | None = None
 
 
+class CryptoDenyBody(BaseModel):
+    id: str
+
+
 @app.post("/api/crypto/confirm")
 def crypto_confirm(body: CryptoConfirmBody, request: Request):
     """로빈후드 실행 확인 — 실제 체결 금액을 장부에 반영."""
     if not _admin_authorized(request):
         return _unauthorized()
     result = confirm_order(body.id, body.dollars)
+    return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+
+
+@app.post("/api/crypto/deny")
+def crypto_deny(body: CryptoDenyBody, request: Request):
+    """추천 거부 — 로빈후드에서 실행하지 않음."""
+    if not _admin_authorized(request):
+        return _unauthorized()
+    result = deny_order(body.id)
     return JSONResponse(result, status_code=200 if result.get("ok") else 400)
 
 

@@ -412,51 +412,60 @@ def _action_priority(o: dict) -> tuple:
     return (pri, -float(o.get("dollars") or 0))
 
 
+_TERMINAL = frozenset({"confirmed", "denied"})
+
+
 def _collapse_actionable(orders: list[dict]) -> list[dict]:
-    """Keep at most one pending order per (side, symbol). Confirmed untouched."""
-    confirmed = [o for o in orders if o.get("status") == "confirmed"]
-    pending = [o for o in orders if o.get("status") != "confirmed"]
+    """Keep at most one pending order per (side, symbol). Terminal orders untouched."""
+    terminal = [o for o in orders if o.get("status") in _TERMINAL]
+    pending = [o for o in orders if o.get("status") not in _TERMINAL]
     best: dict[tuple, dict] = {}
     for o in pending:
         key = _action_key(o)
         if key not in best or _action_priority(o) < _action_priority(best[key]):
             best[key] = o
-    return confirmed + list(best.values())
+    return terminal + list(best.values())
 
 
 def _merge_pending(old: list[dict], fresh: list[dict]) -> list[dict]:
-    """Keep confirmation state when the same action is re-proposed."""
+    """Keep confirmation/denial state when the same action is re-proposed."""
     by_fp = {_fp(o): o for o in old}
     by_action: dict[tuple, dict] = {}
     for o in old:
-        if o.get("status") != "confirmed":
+        if o.get("status") not in _TERMINAL:
             by_action[_action_key(o)] = o
     out: list[dict] = []
     seen_fp: set[tuple] = set()
-    seen_action: set[tuple] = set()
     for o in fresh:
         fp = _fp(o)
         prev_fp = by_fp.get(fp)
+        if prev_fp and prev_fp.get("status") == "denied":
+            seen_fp.add(fp)
+            if not any(x.get("id") == prev_fp.get("id") for x in out):
+                out.append(prev_fp)
+            continue
         if prev_fp and prev_fp.get("status") == "confirmed":
-            # Same fingerprint re-recommended → new todo, keep old in history.
             o = {**o, "id": str(uuid.uuid4())}
         else:
             prev_action = by_action.get(_action_key(o))
             if prev_action:
                 o = {**o, "id": prev_action["id"]}
         seen_fp.add(fp)
-        seen_action.add(_action_key(o))
         out.append(o)
     for o in old:
-        if o.get("status") == "confirmed" and _fp(o) not in seen_fp:
+        if o.get("status") in _TERMINAL and _fp(o) not in seen_fp:
             out.append(o)
     return out
 
 
+def _history_ts(o: dict) -> str:
+    return o.get("confirmed_at") or o.get("denied_at") or ""
+
+
 def _panel(orders: list[dict], view: dict) -> dict:
-    active = [o for o in orders if o.get("status") != "confirmed"]
-    history = [o for o in orders if o.get("status") == "confirmed"]
-    history.sort(key=lambda o: o.get("confirmed_at") or "", reverse=True)
+    active = [o for o in orders if o.get("status") not in _TERMINAL]
+    history = [o for o in orders if o.get("status") in _TERMINAL]
+    history.sort(key=_history_ts, reverse=True)
     return {
         "ok": True,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -468,7 +477,7 @@ def _panel(orders: list[dict], view: dict) -> dict:
 
 
 def _ensure_order_split(data: dict) -> dict:
-    """Guarantee confirmed orders live in order_history, not the active todo list."""
+    """Guarantee terminal orders live in order_history, not the active todo list."""
     if not data.get("ok"):
         return data
     combined: dict[str, dict] = {}
@@ -476,9 +485,9 @@ def _ensure_order_split(data: dict) -> dict:
         oid = o.get("id") or str(uuid.uuid4())
         combined[oid] = o
     orders = list(combined.values())
-    active = [o for o in orders if o.get("status") != "confirmed"]
-    history = [o for o in orders if o.get("status") == "confirmed"]
-    history.sort(key=lambda o: o.get("confirmed_at") or "", reverse=True)
+    active = [o for o in orders if o.get("status") not in _TERMINAL]
+    history = [o for o in orders if o.get("status") in _TERMINAL]
+    history.sort(key=_history_ts, reverse=True)
     return {**data, "orders": active, "order_history": history}
 
 
@@ -577,7 +586,7 @@ def confirm_order(order_id: str, actual_dollars: float | None = None) -> dict:
     action = _action_key(order)
     pending = [
         o for o in pending
-        if o.get("status") == "confirmed" or _action_key(o) != action
+        if o.get("status") in _TERMINAL or _action_key(o) != action
     ]
     store.set(BOOK_KEY, book)
     store.set(PENDING_KEY, pending)
@@ -588,6 +597,34 @@ def confirm_order(order_id: str, actual_dollars: float | None = None) -> dict:
         f"추천 ${order['dollars']:.0f} → 실제 ${dollars:.0f}",
     )
     # Rebuild the panel against the updated book (keep pending confirmations).
+    data = advise_and_apply(force=True)
+    return _ensure_order_split(data)
+
+
+def deny_order(order_id: str) -> dict:
+    """Dismiss a pending recommendation without updating the book."""
+    pending = store.get(PENDING_KEY) or []
+    order = next((o for o in pending if o.get("id") == order_id), None)
+    if order is None:
+        return {"ok": False, "error": "해당 주문을 찾을 수 없습니다. 패널을 새로고침하세요."}
+    if order.get("status") in _TERMINAL:
+        cached = store.get(CACHE_KEY)
+        raw = (cached or {}).get("data") or _panel(pending, {})
+        return _ensure_order_split(raw)
+    order["status"] = "denied"
+    order["denied_at"] = datetime.now(timezone.utc).isoformat()
+    action = _action_key(order)
+    pending = [
+        o for o in pending
+        if o.get("status") in _TERMINAL or _action_key(o) != action
+    ]
+    store.set(PENDING_KEY, pending)
+    store.set(CACHE_KEY, None)
+    log_activity(
+        "crypto",
+        f"추천 거부 {order['side']} {order['symbol']} "
+        f"${order['dollars']:.0f} — {order.get('reason', '')}",
+    )
     data = advise_and_apply(force=True)
     return _ensure_order_split(data)
 

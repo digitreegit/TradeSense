@@ -433,6 +433,66 @@ def test_confirm_removes_sibling_pending_orders():
     assert any(o["id"] == "buy1" for o in remaining)
 
 
+def test_deny_order_moves_to_history():
+    from unittest.mock import patch
+    from app.crypto_advisor import _panel, deny_order
+    from app.state import store
+
+    store.set("crypto_book", _new_book())
+    pending = [
+        {"id": "sell1", "side": "sell", "symbol": "XRP", "pair": "XRP/USD",
+         "kind": "trim", "dollars": 1000, "price": 1.0, "step": 0.05,
+         "reason": "축소", "status": "pending"},
+    ]
+    store.set("crypto_pending", pending)
+    with patch("app.crypto_advisor.advise_and_apply", return_value={"ok": True, "orders": [], "order_history": []}):
+        result = deny_order("sell1")
+    assert result["ok"] is True
+    remaining = store.get("crypto_pending") or []
+    denied = next(o for o in remaining if o["id"] == "sell1")
+    assert denied["status"] == "denied"
+    assert denied.get("denied_at")
+    panel = _panel(remaining, {})
+    assert not panel["orders"]
+    assert panel["order_history"][0]["id"] == "sell1"
+
+
+def test_deny_removes_sibling_pending_orders():
+    from unittest.mock import patch
+    from app.crypto_advisor import deny_order
+    from app.state import store
+
+    store.set("crypto_book", _new_book())
+    pending = [
+        {"id": "exit1", "side": "sell", "symbol": "XRP", "pair": "XRP/USD",
+         "kind": "exit", "dollars": 1000, "price": 1.0, "step": 0.05,
+         "status": "pending"},
+        {"id": "trim1", "side": "sell", "symbol": "XRP", "pair": "XRP/USD",
+         "kind": "trim", "dollars": 500, "price": 1.0, "step": 0.05,
+         "status": "pending"},
+    ]
+    store.set("crypto_pending", pending)
+    with patch("app.crypto_advisor.advise_and_apply", return_value={"ok": True, "orders": [], "order_history": []}):
+        deny_order("exit1")
+    remaining = store.get("crypto_pending") or []
+    assert not any(o["id"] == "trim1" for o in remaining)
+    assert any(o["id"] == "exit1" and o["status"] == "denied" for o in remaining)
+
+
+def test_merge_pending_skips_denied_fingerprint():
+    from app.crypto_advisor import _merge_pending
+
+    old = [{"id": "a", "side": "sell", "symbol": "XRP", "pair": "XRP/USD",
+            "kind": "trim", "dollars": 100, "status": "denied",
+            "denied_at": "2026-08-19T12:00:00+00:00"}]
+    fresh = [{"id": "b", "side": "sell", "symbol": "XRP", "pair": "XRP/USD",
+              "kind": "trim", "dollars": 120}]
+    merged = _merge_pending(old, fresh)
+    active = [o for o in merged if o.get("status") not in ("confirmed", "denied")]
+    assert active == []
+    assert len([o for o in merged if o.get("status") == "denied"]) == 1
+
+
 def test_generate_orders_no_add_and_rotate_same_symbol():
     closes = wavy_uptrend()
     frames = {
