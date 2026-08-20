@@ -279,6 +279,7 @@
     font-size: 12px; color: var(--dim); margin-top: 8px;
     display: flex; align-items: center; gap: 6px;
   }
+  .rh-scope { font-size: 11px; color: var(--dim); margin-top: 4px; line-height: 1.4; }
   .rh-live-dot {
     width: 7px; height: 7px; border-radius: 50%; background: var(--green);
     box-shadow: 0 0 6px rgba(63,185,80,.55);
@@ -991,7 +992,8 @@ function renderCryptoOrder(o, {history = false} = {}) {
     : '';
   let fill;
   if (history || o.status === 'confirmed') {
-    fill = `<div class="fill"><span class="done">확인됨 · 실제 ${usd2(o.actual_dollars ?? o.dollars)}${when ? ` · ${when}` : ''}</span></div>`;
+    const auto = o.auto_confirmed ? ' · RH 자동' : '';
+    fill = `<div class="fill"><span class="done">확인됨${auto} · 실제 ${usd2(o.actual_dollars ?? o.dollars)}${when ? ` · ${when}` : ''}</span></div>`;
   } else if (o.status === 'denied') {
     fill = `<div class="fill"><span class="done denied">거부됨 (DENY)${when ? ` · ${when}` : ''}</span></div>`;
   } else {
@@ -1167,7 +1169,8 @@ function renderCrypto(d, {quiet = false} = {}) {
     html += `<div class="rh-portfolio">
       <div class="rh-total">${rhMoney(total)}</div>
       ${renderRhDayChange(rh.day_change, rh.day_change_pct)}
-      <div class="rh-live"><span class="rh-live-dot"></span> LIVE · Robinhood API${updated ? ` · ${updated}` : ''}</div>
+      <div class="rh-live"><span class="rh-live-dot"></span> LIVE · 크립토만${updated ? ` · ${updated}` : ''}</div>
+      <div class="rh-scope">앱 Investing 총액과 다를 수 있음 — 주식·ETF는 제외</div>
     </div>
     <div class="rh-row">
       <span>Buying power</span>
@@ -1175,7 +1178,7 @@ function renderCrypto(d, {quiet = false} = {}) {
     </div>
     <div class="rh-section">
       <div class="rh-section-head"><h3>Crypto</h3></div>
-      <div class="rh-section-sub">Offered by Robinhood Crypto · TradeSense는 조회만</div>
+      <div class="rh-section-sub">Robinhood Crypto · 매매는 앱에서 · 체결되면 권고 자동 해제</div>
       ${renderRhHoldings(holdings)}
     </div>`;
   } else {

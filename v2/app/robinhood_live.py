@@ -144,14 +144,28 @@ def apply_robinhood_live(book: dict, snap: dict) -> None:
     book["updated_at"] = snap.get("updated_at") or datetime.now(timezone.utc).isoformat()
 
 
-def refresh_from_robinhood_live() -> tuple[dict | None, dict[str, float]]:
-    """Pull Robinhood live snapshot into the book. Returns (snap, live prices by pair)."""
+def book_qty_by_pair(book: dict | None) -> dict[str, float]:
+    """Current book quantities keyed by pair (e.g. XRP/USD)."""
+    out: dict[str, float] = {}
+    for pair, pos in ((book or {}).get("positions") or {}).items():
+        qty = sum(float(u.get("qty") or 0) for u in (pos.get("units") or []))
+        if qty > 0:
+            out[pair] = qty
+    return out
+
+
+def refresh_from_robinhood_live() -> tuple[dict | None, dict[str, float], dict[str, float]]:
+    """Pull Robinhood live snapshot into the book.
+
+    Returns (snap, live prices by pair, previous qty by pair before sync).
+    """
     if not is_configured():
-        return None, {}
+        return None, {}, {}
     snap = fetch_robinhood_snapshot()
     if not snap:
-        return None, {}
+        return None, {}, {}
     book = store.get(BOOK_KEY) or {}
+    prev_qty = book_qty_by_pair(book)
     principal = book.get("principal")
     avg_by_pair = {
         pair: pos.get("avg_cost")
@@ -180,7 +194,7 @@ def refresh_from_robinhood_live() -> tuple[dict | None, dict[str, float]]:
         for row in (snap.get("positions") or [])
         if row.get("pair") and float(row.get("price") or 0) > 0
     }
-    return snap, live_prices
+    return snap, live_prices, prev_qty
 
 
 def merge_live_into_summary(summary: dict, snap: dict) -> dict:

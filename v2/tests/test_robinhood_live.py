@@ -4,6 +4,10 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
+from app.crypto_advisor import (
+    auto_confirm_from_robinhood,
+    holdings_qty_changed,
+)
 from app.robinhood_live import fetch_robinhood_snapshot, merge_live_into_summary
 
 
@@ -69,3 +73,67 @@ def test_merge_live_into_summary_overrides_totals():
     assert out["gap"] == pytest.approx(11598 - 6941.69)
     assert out["positions"][0]["value"] == pytest.approx(107.0)
     assert out["positions"][0]["price"] == pytest.approx(1.07)
+
+
+def test_auto_confirm_buy_when_bought_more_than_recommended():
+    """User bought $1000 when we recommended $800 — clear the rec."""
+    prev = {"SOL/USD": 10.0}
+    snap = {
+        "positions": [
+            {"symbol": "SOL", "pair": "SOL/USD", "qty": 10.0 + (1000 / 82.0), "price": 82.0},
+        ],
+    }
+    pending = [{
+        "id": "abc", "side": "buy", "symbol": "SOL", "pair": "SOL/USD",
+        "dollars": 800, "status": "pending", "baseline_qty": 10.0,
+    }]
+    with patch("app.crypto_advisor.store") as mock_store, \
+         patch("app.crypto_advisor.log_activity"):
+        mock_store.get.return_value = pending
+        confirmed = auto_confirm_from_robinhood(prev, snap, pending)
+
+    assert len(confirmed) == 1
+    assert confirmed[0]["status"] == "confirmed"
+    assert confirmed[0]["auto_confirmed"] is True
+    assert confirmed[0]["actual_dollars"] == pytest.approx(1000.0, abs=1)
+
+
+def test_auto_confirm_uses_baseline_even_if_book_already_synced():
+    """After live sync already updated book qty, still clear via baseline_qty."""
+    prev = {"SOL/USD": 22.195}  # book already reflects the buy
+    snap = {
+        "positions": [
+            {"symbol": "SOL", "pair": "SOL/USD", "qty": 22.195, "price": 82.0},
+        ],
+    }
+    pending = [{
+        "id": "abc", "side": "buy", "symbol": "SOL", "pair": "SOL/USD",
+        "dollars": 800, "status": "pending", "baseline_qty": 10.0,
+    }]
+    with patch("app.crypto_advisor.store"), patch("app.crypto_advisor.log_activity"):
+        confirmed = auto_confirm_from_robinhood(prev, snap, pending)
+    assert len(confirmed) == 1
+    assert confirmed[0]["actual_dollars"] == pytest.approx(1000.0, abs=1)
+
+
+def test_auto_confirm_ignores_tiny_qty_noise():
+    prev = {"XRP/USD": 1755.663}
+    snap = {
+        "positions": [
+            {"symbol": "XRP", "pair": "XRP/USD", "qty": 1755.7, "price": 1.07},
+        ],
+    }
+    pending = [{
+        "id": "xyz", "side": "buy", "symbol": "XRP", "pair": "XRP/USD",
+        "dollars": 800, "status": "pending",
+    }]
+    confirmed = auto_confirm_from_robinhood(prev, snap, pending)
+    assert confirmed == []
+    assert pending[0]["status"] == "pending"
+
+
+def test_holdings_qty_changed():
+    prev = {"SOL/USD": 10.0}
+    snap = {"positions": [{"pair": "SOL/USD", "qty": 22.0}]}
+    assert holdings_qty_changed(prev, snap) is True
+    assert holdings_qty_changed(prev, {"positions": [{"pair": "SOL/USD", "qty": 10.0}]}) is False
