@@ -81,16 +81,19 @@ CREATE TABLE IF NOT EXISTS job_claims (
 """,
 )
 
-# Lock down PostgREST exposure: enable RLS with no anon/authenticated policies.
-# The app connects as the DB role (bypasses RLS as table owner / superuser).
-_PG_RLS = (
-    "ALTER TABLE pos_meta ENABLE ROW LEVEL SECURITY",
-    "ALTER TABLE pending_orders ENABLE ROW LEVEL SECURITY",
-    "ALTER TABLE equity_curve ENABLE ROW LEVEL SECURITY",
-    "ALTER TABLE trades ENABLE ROW LEVEL SECURITY",
-    "ALTER TABLE kv ENABLE ROW LEVEL SECURITY",
-    "ALTER TABLE job_claims ENABLE ROW LEVEL SECURITY",
+_APP_TABLES = (
+    "pos_meta",
+    "pending_orders",
+    "equity_curve",
+    "trades",
+    "kv",
+    "job_claims",
 )
+
+# Tables were created by the Vercel pooler role, which is not the SQL-editor
+# `postgres` user. That role also does not bypass RLS, so ENABLE RLS with no
+# matching policy blocked cron writes. Disable RLS here (as the table owner)
+# and revoke API roles so PostgREST still cannot read the tables.
 
 
 class Store:
@@ -135,12 +138,19 @@ class Store:
             with self._conn.cursor() as cur:
                 for stmt in _TABLES:
                     cur.execute(stmt.format(autoinc=autoinc))
-                for stmt in _PG_RLS:
+                for name in _APP_TABLES:
                     try:
-                        cur.execute(stmt)
+                        cur.execute(
+                            f"ALTER TABLE {name} DISABLE ROW LEVEL SECURITY"
+                        )
                     except Exception as exc:
-                        # Already enabled / insufficient privilege — non-fatal.
-                        log.debug("rls setup skipped: %s", exc)
+                        log.debug("rls disable skipped for %s: %s", name, exc)
+                    try:
+                        cur.execute(
+                            f"REVOKE ALL ON TABLE {name} FROM PUBLIC, anon, authenticated"
+                        )
+                    except Exception as exc:
+                        log.debug("revoke skipped for %s: %s", name, exc)
 
     def _pg_ensure(self) -> None:
         """Reconnect if the pooled connection was closed between lambda invokes."""
