@@ -143,6 +143,7 @@
   .msg { font-size: 13px; margin: 8px 0; }
   .msg.ok { color: var(--green); }
   .msg.err { color: var(--red); }
+  #tg-msg { display: block !important; min-height: 1.4em; }
   .acct-list { list-style: none; padding: 0; margin: 10px 0 0; font-size: 13px; line-height: 1.7; color: var(--dim); }
   .acct-list strong { color: var(--text); }
   .keys-locked { font-size: 12px; color: var(--dim); line-height: 1.5; margin-top: 8px; }
@@ -530,7 +531,8 @@
       올바른 chat ID: <b>8788110870</b> · 봇: <b>@TradeSenseDigtreeBot</b><br>
       알림이 안 오면 텔레그램에서 봇을 연 뒤 <b>Start /start</b>를 한 번 눌러주세요.</p>
     <p class="field-hint" id="tg-status">서버 설정 확인 중…</p>
-    <button type="button" class="btn btn-ghost" id="btn-tg-test">텔레그램 테스트 발송</button>
+    <button type="button" class="btn btn-ghost" id="btn-tg-test"
+      onclick="testTelegram(this)">텔레그램 테스트 발송</button>
     <p class="msg" id="tg-msg" style="min-height:1.4em;font-size:14px;margin-top:10px"></p>
   </div>
 
@@ -1622,20 +1624,23 @@ async function submitToken() {
 $('btn-token-save').addEventListener('click', submitToken);
 $('token-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitToken(); });
 
-$('btn-tg-test').addEventListener('click', async () => {
+async function testTelegram(clickedButton) {
   const el = $('tg-msg');
-  const btn = $('btn-tg-test');
+  const btn = clickedButton || $('btn-tg-test');
   btn.disabled = true;
+  el.style.display = 'block';
   el.textContent = '발송 중… 텔레그램 API 응답을 기다립니다.';
   el.className = 'msg';
   el.style.color = 'var(--dim)';
   try {
-    const t = localStorage.getItem(TOKEN_KEY) || '';
-    const r = await fetch('/api/notify/test', {
-      method: 'POST',
-      headers: t ? {'X-Admin-Token': t} : {},
-    });
-    const d = await r.json();
+    const r = await api('/api/notify/test', {method: 'POST'});
+    const raw = await r.text();
+    let d;
+    try {
+      d = raw ? JSON.parse(raw) : {};
+    } catch (_) {
+      throw new Error(`서버 응답 오류 (HTTP ${r.status}): ${raw.slice(0, 160)}`);
+    }
     if (r.status === 401) {
       el.textContent = '인증 실패 — 토큰을 다시 입력하세요.';
       el.className = 'msg err';
@@ -1656,7 +1661,7 @@ $('btn-tg-test').addEventListener('click', async () => {
     el.style.color = '';
   }
   btn.disabled = false;
-});
+}
 
 $('btn-save-keys').addEventListener('click', saveKeys);
 $('btn-delete-keys').addEventListener('click', () => openConfirm(

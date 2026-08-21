@@ -230,7 +230,13 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 @app.get("/")
 def dashboard():
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(
+        STATIC_DIR / "index.html",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
 
 
 @app.get("/favicon.svg", include_in_schema=False)
