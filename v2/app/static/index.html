@@ -271,8 +271,17 @@
   #tab-settings .upload-preview { max-width: 480px; }
   #tab-settings .rh-keys { max-width: 480px; }
 
+  /* Shared dashboard width: stocks and crypto align to the same centered rail. */
+  .crypto-toolbar,
+  .rh-wrap,
+  .stocks-wrap {
+    width: 100%;
+    max-width: 960px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
   /* Robinhood-style portfolio (dark theme) */
-  .rh-wrap { max-width: 440px; margin: 0 auto; }
   .rh-portfolio { padding: 4px 0 18px; }
   .rh-total {
     font-size: 40px; font-weight: 700; letter-spacing: -.02em;
@@ -327,7 +336,6 @@
   .table-scroll table { min-width: 100%; }
 
   /* stocks · Alpaca */
-  .stocks-wrap { max-width: 960px; }
   #tab-stocks .card .value {
     display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px;
   }
