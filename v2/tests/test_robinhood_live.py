@@ -1,4 +1,5 @@
-"""Tests for live Robinhood balance snapshot."""
+"""Tests for live Robinhood balance snapshot and auto-confirm."""
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -7,6 +8,7 @@ import pytest
 from app.crypto_advisor import (
     auto_confirm_from_robinhood,
     holdings_qty_changed,
+    _merge_pending,
 )
 from app.robinhood_live import fetch_robinhood_snapshot, merge_live_into_summary
 
@@ -89,7 +91,6 @@ def test_auto_confirm_buy_when_bought_more_than_recommended():
     }]
     with patch("app.crypto_advisor.store") as mock_store, \
          patch("app.crypto_advisor.log_activity"):
-        mock_store.get.return_value = pending
         confirmed = auto_confirm_from_robinhood(prev, snap, pending)
 
     assert len(confirmed) == 1
@@ -116,6 +117,36 @@ def test_auto_confirm_uses_baseline_even_if_book_already_synced():
     assert confirmed[0]["actual_dollars"] == pytest.approx(1000.0, abs=1)
 
 
+def test_auto_confirm_from_filled_order_when_qty_already_synced():
+    """RH filled-order history clears the tip even if qty watermark is stale."""
+    prev = {"SOL/USD": 22.195}
+    snap = {
+        "positions": [
+            {"symbol": "SOL", "pair": "SOL/USD", "qty": 22.195, "price": 82.0},
+        ],
+    }
+    now = datetime.now(timezone.utc)
+    pending = [{
+        "id": "abc", "side": "buy", "symbol": "SOL", "pair": "SOL/USD",
+        "dollars": 800, "status": "pending", "baseline_qty": 22.195,
+        "created_at": (now - timedelta(hours=1)).isoformat(),
+    }]
+    filled = [{
+        "id": "rh-1",
+        "symbol": "SOL-USD",
+        "side": "buy",
+        "state": "filled",
+        "filled_asset_quantity": "12.195",
+        "average_price": "82.0",
+        "updated_at": now.isoformat(),
+    }]
+    with patch("app.crypto_advisor.store"), patch("app.crypto_advisor.log_activity"):
+        confirmed = auto_confirm_from_robinhood(prev, snap, pending, filled)
+    assert len(confirmed) == 1
+    assert confirmed[0]["auto_confirm_source"] == "order"
+    assert confirmed[0]["actual_dollars"] == pytest.approx(1000.0, abs=1)
+
+
 def test_auto_confirm_ignores_tiny_qty_noise():
     prev = {"XRP/USD": 1755.663}
     snap = {
@@ -125,11 +156,44 @@ def test_auto_confirm_ignores_tiny_qty_noise():
     }
     pending = [{
         "id": "xyz", "side": "buy", "symbol": "XRP", "pair": "XRP/USD",
-        "dollars": 800, "status": "pending",
+        "dollars": 800, "status": "pending", "baseline_qty": 1755.663,
     }]
-    confirmed = auto_confirm_from_robinhood(prev, snap, pending)
+    with patch("app.crypto_advisor.store"):
+        confirmed = auto_confirm_from_robinhood(prev, snap, pending)
     assert confirmed == []
     assert pending[0]["status"] == "pending"
+
+
+def test_merge_pending_does_not_requeue_recently_confirmed():
+    confirmed = {
+        "id": "old", "side": "buy", "symbol": "SOL", "pair": "SOL/USD",
+        "kind": "entry", "dollars": 800, "status": "confirmed",
+        "confirmed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    fresh = {
+        "id": "new", "side": "buy", "symbol": "SOL", "pair": "SOL/USD",
+        "kind": "entry", "dollars": 800, "status": "pending",
+    }
+    out = _merge_pending([confirmed], [fresh])
+    assert all(o.get("status") == "confirmed" for o in out if o.get("symbol") == "SOL")
+    assert not any(o.get("status") == "pending" and o.get("symbol") == "SOL" for o in out)
+
+
+def test_merge_pending_requeues_after_cooldown():
+    confirmed = {
+        "id": "old", "side": "sell", "symbol": "XRP", "pair": "XRP/USD",
+        "kind": "trim", "dollars": 100, "status": "confirmed",
+        "confirmed_at": (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat(),
+    }
+    fresh = {
+        "id": "new", "side": "sell", "symbol": "XRP", "pair": "XRP/USD",
+        "kind": "trim", "dollars": 120, "status": "pending",
+    }
+    out = _merge_pending([confirmed], [fresh])
+    active = [o for o in out if o.get("status") != "confirmed"]
+    assert len(active) == 1
+    assert active[0]["dollars"] == 120
+
 
 
 def test_holdings_qty_changed():

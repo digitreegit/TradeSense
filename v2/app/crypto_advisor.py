@@ -42,8 +42,10 @@ BOOK_KEY = "crypto_book"
 PENDING_KEY = "crypto_pending"
 NOTIFY_FP_KEY = "crypto_notify_fp"
 CACHE_KEY = "crypto_advice"
+QTY_SEEN_KEY = "crypto_rh_qty_seen"  # last RH qty used for fill detection
 CACHE_TTL = 900.0      # panel refresh window; scheduled runs bypass it
 LIVE_CACHE_TTL = 45.0  # when Robinhood API is linked, refresh more often
+CONFIRM_COOLDOWN_HOURS = 24.0  # don't re-queue same side+symbol after confirm
 
 MIN_STEP = 0.04        # never advise a step tighter than 4%
 MAX_STEP = 0.12
@@ -186,6 +188,7 @@ def generate_orders(
             "kind": kind, "step": step,
             "status": "pending", "actual_dollars": None,
             "baseline_qty": baseline,
+            "created_at": datetime.now(timezone.utc).isoformat(),
         })
 
     sold_this_run: set[str] = set()
@@ -431,6 +434,35 @@ def _collapse_actionable(orders: list[dict]) -> list[dict]:
     return terminal + list(best.values())
 
 
+def _parse_ts(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _is_recent(ts: str | None, hours: float = CONFIRM_COOLDOWN_HOURS) -> bool:
+    when = _parse_ts(ts)
+    if when is None:
+        return False
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when >= datetime.now(timezone.utc) - timedelta(hours=hours)
+
+
+def _recently_confirmed_actions(orders: list[dict]) -> set[tuple]:
+    """(side, symbol) pairs confirmed recently — suppress re-queue."""
+    out: set[tuple] = set()
+    for o in orders:
+        if o.get("status") != "confirmed":
+            continue
+        if _is_recent(o.get("confirmed_at")):
+            out.add(_action_key(o))
+    return out
+
+
 def _merge_pending(old: list[dict], fresh: list[dict]) -> list[dict]:
     """Keep confirmation/denial state when the same action is re-proposed."""
     by_fp = {_fp(o): o for o in old}
@@ -438,10 +470,15 @@ def _merge_pending(old: list[dict], fresh: list[dict]) -> list[dict]:
     for o in old:
         if o.get("status") not in _TERMINAL:
             by_action[_action_key(o)] = o
+    recent_confirmed = _recently_confirmed_actions(old)
     out: list[dict] = []
     seen_fp: set[tuple] = set()
     for o in fresh:
         fp = _fp(o)
+        action = _action_key(o)
+        # Don't put a just-filled recommendation back on the main list.
+        if action in recent_confirmed:
+            continue
         prev_fp = by_fp.get(fp)
         if prev_fp and prev_fp.get("status") == "denied":
             seen_fp.add(fp)
@@ -449,9 +486,16 @@ def _merge_pending(old: list[dict], fresh: list[dict]) -> list[dict]:
                 out.append(prev_fp)
             continue
         if prev_fp and prev_fp.get("status") == "confirmed":
+            if _is_recent(prev_fp.get("confirmed_at")):
+                # Same tip already executed recently — keep history only.
+                seen_fp.add(fp)
+                if not any(x.get("id") == prev_fp.get("id") for x in out):
+                    out.append(prev_fp)
+                continue
+            # Cooldown expired — allow a fresh recommendation with a new id.
             o = {**o, "id": str(uuid.uuid4())}
         else:
-            prev_action = by_action.get(_action_key(o))
+            prev_action = by_action.get(action)
             if prev_action:
                 o = {**o, "id": prev_action["id"]}
                 if prev_action.get("baseline_qty") is not None:
@@ -545,17 +589,60 @@ def notify_crypto_orders(data: dict, source: str, *, force: bool = False) -> boo
     return True
 
 
-# Auto-confirm when RH holdings moved at least this fraction of the recommended $
+# Auto-confirm when RH holdings / fills moved at least this fraction of recommended $
 _AUTO_FILL_MIN_FRAC = 0.35
 _AUTO_FILL_MIN_DOLLARS = 25.0
 
 
+def _snap_qty_by_pair(snap: dict | None) -> dict[str, float]:
+    if not snap:
+        return {}
+    return {
+        row["pair"]: float(row.get("qty") or 0)
+        for row in (snap.get("positions") or [])
+        if row.get("pair")
+    }
+
+
+def _filled_order_notional(row: dict) -> float:
+    qty = float(row.get("filled_asset_quantity") or 0)
+    avg = float(row.get("average_price") or 0)
+    if qty > 0 and avg > 0:
+        return qty * avg
+    for key in ("market_order_config", "limit_order_config",
+                "stop_loss_order_config", "stop_limit_order_config"):
+        cfg = row.get(key) or {}
+        qa = cfg.get("quote_amount")
+        if qa is not None:
+            try:
+                return float(qa)
+            except (TypeError, ValueError):
+                pass
+        aq = cfg.get("asset_quantity")
+        if aq is not None and avg > 0:
+            try:
+                return float(aq) * avg
+            except (TypeError, ValueError):
+                pass
+    return 0.0
+
+
+def _rh_symbol_to_pair(symbol: str) -> str | None:
+    sym = str(symbol or "").upper().replace("-USD", "").replace("/USD", "").strip()
+    if not sym:
+        return None
+    for pair in CANDIDATES:
+        if pair.split("/")[0] == sym:
+            return pair
+    return None
+
+
 def _qty_delta_dollars(
-    prev_qty: dict[str, float],
+    baseline_qty: float,
     snap: dict,
     order: dict,
 ) -> float | None:
-    """Estimate fill notional from RH qty change. Positive dollars or None."""
+    """Estimate fill notional from RH qty change vs baseline. Positive or None."""
     pair = order.get("pair") or ""
     side = order.get("side")
     by_pair = {
@@ -564,13 +651,9 @@ def _qty_delta_dollars(
     }
     row = by_pair.get(pair)
     new_qty = float(row["qty"]) if row else 0.0
-    if order.get("baseline_qty") is not None:
-        old_qty = float(order["baseline_qty"])
-    else:
-        old_qty = float(prev_qty.get(pair) or 0.0)
+    old_qty = float(baseline_qty)
     price = float(row["price"]) if row and float(row.get("price") or 0) > 0 else 0.0
     if price <= 0 and side == "sell" and old_qty > new_qty:
-        # sold entire bag — use order price if quote row vanished
         price = float(order.get("price") or 0)
     if price <= 0:
         return None
@@ -583,20 +666,93 @@ def _qty_delta_dollars(
     return round(delta * price, 2)
 
 
+def _mark_confirmed(order: dict, dollars: float, *, source: str) -> None:
+    recommended = float(order.get("dollars") or 0)
+    order["status"] = "confirmed"
+    order["actual_dollars"] = round(float(dollars), 2)
+    order["confirmed_at"] = datetime.now(timezone.utc).isoformat()
+    order["auto_confirmed"] = True
+    order["auto_confirm_source"] = source
+    log_activity(
+        "crypto",
+        f"자동 확인 {order.get('side')} {order.get('symbol')} "
+        f"추천 ${recommended:.0f} → RH 반영 ${float(dollars):.0f}"
+        + (f" ({source})" if source else ""),
+    )
+
+
+def _save_pending_after_confirm(pending: list[dict], confirmed: list[dict]) -> None:
+    confirmed_actions = {_action_key(o) for o in confirmed}
+    keep = [
+        o for o in pending
+        if o.get("status") in _TERMINAL or _action_key(o) not in confirmed_actions
+    ]
+    by_id = {o.get("id"): o for o in keep}
+    for o in confirmed:
+        by_id[o.get("id")] = o
+    store.set(PENDING_KEY, list(by_id.values()))
+    store.set(CACHE_KEY, None)
+
+
 def auto_confirm_from_robinhood(
     prev_qty: dict[str, float],
     snap: dict | None,
     pending: list[dict],
+    filled_orders: list[dict] | None = None,
 ) -> list[dict]:
-    """Mark pending recs confirmed when Robinhood holdings moved the right way.
+    """Mark pending recs confirmed when Robinhood shows a matching fill.
 
-    Does not mutate the book — live sync already applied holdings. Returns the
-    orders that were auto-confirmed.
+    Prefers RH filled-order history; falls back to holdings qty delta vs a
+    stable baseline (order.baseline_qty or last seen qty). Does not mutate the
+    book — live sync already applied holdings.
     """
     if not snap or not pending:
         return []
     confirmed: list[dict] = []
     used_pairs: set[str] = set()
+    used_fill_ids: set[str] = set()
+    pending_changed = False
+
+    # 1) Match Robinhood filled orders (most reliable).
+    for fill in filled_orders or []:
+        state = str(fill.get("state") or "").lower()
+        if state not in ("filled", "partially_filled"):
+            continue
+        fill_id = str(fill.get("id") or "")
+        if fill_id and fill_id in used_fill_ids:
+            continue
+        pair = _rh_symbol_to_pair(str(fill.get("symbol") or ""))
+        if not pair or pair in used_pairs:
+            continue
+        side = str(fill.get("side") or "").lower()
+        if side not in ("buy", "sell"):
+            continue
+        dollars = _filled_order_notional(fill)
+        if dollars < _AUTO_FILL_MIN_DOLLARS:
+            continue
+        fill_ts = _parse_ts(fill.get("updated_at") or fill.get("created_at"))
+        for order in pending:
+            if order.get("status") in _TERMINAL:
+                continue
+            if order.get("pair") != pair or order.get("side") != side:
+                continue
+            recommended = float(order.get("dollars") or 0)
+            need = max(_AUTO_FILL_MIN_DOLLARS, recommended * _AUTO_FILL_MIN_FRAC)
+            if dollars < need:
+                continue
+            rec_ts = _parse_ts(order.get("created_at"))
+            # Ignore fills that clearly happened before this tip was created.
+            if fill_ts and rec_ts and fill_ts < rec_ts - timedelta(minutes=5):
+                continue
+            _mark_confirmed(order, dollars, source="order")
+            if fill_id:
+                order["rh_order_id"] = fill_id
+                used_fill_ids.add(fill_id)
+            used_pairs.add(pair)
+            confirmed.append(order)
+            break
+
+    # 2) Qty delta vs baseline (works when orders API is empty / delayed).
     for order in pending:
         if order.get("status") in _TERMINAL:
             continue
@@ -606,46 +762,35 @@ def auto_confirm_from_robinhood(
         side = order.get("side")
         if side not in ("buy", "sell"):
             continue
-        dollars = _qty_delta_dollars(prev_qty, snap, order)
+        if order.get("baseline_qty") is None:
+            # Seed once from last-seen qty so the *next* real fill can be detected.
+            order["baseline_qty"] = float(prev_qty.get(pair) or 0.0)
+            pending_changed = True
+        dollars = _qty_delta_dollars(float(order["baseline_qty"]), snap, order)
         if dollars is None:
             continue
         recommended = float(order.get("dollars") or 0)
         need = max(_AUTO_FILL_MIN_DOLLARS, recommended * _AUTO_FILL_MIN_FRAC)
         if dollars < need:
             continue
-        order["status"] = "confirmed"
-        order["actual_dollars"] = dollars
-        order["confirmed_at"] = datetime.now(timezone.utc).isoformat()
-        order["auto_confirmed"] = True
+        _mark_confirmed(order, dollars, source="qty")
         used_pairs.add(pair)
         confirmed.append(order)
-        log_activity(
-            "crypto",
-            f"자동 확인 {side} {order.get('symbol')} "
-            f"추천 ${recommended:.0f} → RH 반영 ${dollars:.0f}",
-        )
+
     if confirmed:
-        confirmed_actions = {_action_key(o) for o in confirmed}
-        keep = [
-            o for o in pending
-            if o.get("status") in _TERMINAL or _action_key(o) not in confirmed_actions
-        ]
-        by_id = {o.get("id"): o for o in keep}
-        for o in confirmed:
-            by_id[o.get("id")] = o
-        store.set(PENDING_KEY, list(by_id.values()))
-        store.set(CACHE_KEY, None)
+        _save_pending_after_confirm(pending, confirmed)
+    elif pending_changed:
+        store.set(PENDING_KEY, pending)
+
+    # Advance the durable qty watermark after we've had a chance to match fills.
+    store.set(QTY_SEEN_KEY, _snap_qty_by_pair(snap))
     return confirmed
 
 
 def holdings_qty_changed(prev_qty: dict[str, float], snap: dict | None) -> bool:
     if not snap:
         return False
-    new_qty = {
-        row["pair"]: float(row.get("qty") or 0)
-        for row in (snap.get("positions") or [])
-        if row.get("pair")
-    }
+    new_qty = _snap_qty_by_pair(snap)
     keys = set(prev_qty) | set(new_qty)
     for k in keys:
         if abs(float(prev_qty.get(k) or 0) - float(new_qty.get(k) or 0)) > 1e-9:
@@ -657,17 +802,29 @@ def advise_and_apply(force: bool = False) -> dict:
     """Propose orders. Confirmed book is not touched until confirm_order()."""
     rh_live = None
     prev_qty: dict[str, float] = {}
+    auto_confirmed: list[dict] = []
     try:
-        from .robinhood_config import is_configured
+        from .robinhood_config import is_configured, get_credentials
+        from .robinhood_client import RobinhoodCryptoClient
         from .robinhood_live import merge_live_into_summary, refresh_from_robinhood_live
 
         if is_configured():
-            rh_live, _live_prices, prev_qty = refresh_from_robinhood_live()
+            # Prefer durable last-seen qty over book (book may already include the fill).
+            seen = store.get(QTY_SEEN_KEY)
+            rh_live, _live_prices, book_prev = refresh_from_robinhood_live()
+            prev_qty = seen if isinstance(seen, dict) else book_prev
             if rh_live:
-                auto_confirm_from_robinhood(
-                    prev_qty, rh_live, store.get(PENDING_KEY) or [],
+                filled: list[dict] = []
+                try:
+                    api_key, private_key = get_credentials()
+                    if api_key and private_key:
+                        filled = RobinhoodCryptoClient(api_key, private_key).get_recent_filled_orders()
+                except Exception:
+                    log.exception("robinhood filled orders fetch failed")
+                auto_confirmed = auto_confirm_from_robinhood(
+                    prev_qty, rh_live, store.get(PENDING_KEY) or [], filled,
                 )
-                if holdings_qty_changed(prev_qty, rh_live):
+                if auto_confirmed or holdings_qty_changed(prev_qty, rh_live):
                     force = True
                     store.set(CACHE_KEY, None)
     except Exception:
@@ -689,6 +846,10 @@ def advise_and_apply(force: bool = False) -> dict:
             raise RuntimeError("no crypto bars returned")
         book = store.get(BOOK_KEY) or _new_book()
         orders, _, view = generate_orders(frames, book)
+        # Drop tips that were just (auto)confirmed so they can't bounce back.
+        recent = _recently_confirmed_actions(store.get(PENDING_KEY) or [])
+        if recent:
+            orders = [o for o in orders if _action_key(o) not in recent]
         orders = _merge_pending(store.get(PENDING_KEY) or [], orders)
         orders = _collapse_actionable(orders)
         store.set(PENDING_KEY, orders)
@@ -701,6 +862,12 @@ def advise_and_apply(force: bool = False) -> dict:
     data = _ensure_order_split(data)
     if rh_live:
         data["robinhood_live"] = rh_live
+    if auto_confirmed:
+        data["auto_confirmed"] = [
+            {"id": o.get("id"), "side": o.get("side"), "symbol": o.get("symbol"),
+             "actual_dollars": o.get("actual_dollars")}
+            for o in auto_confirmed
+        ]
     store.set(CACHE_KEY, {"cached_at": time.time(), "data": data})
     return data
 

@@ -90,3 +90,33 @@ class RobinhoodCryptoClient:
         path = f"/api/v1/crypto/marketdata/best_bid_ask/{query}"
         data = self.request("GET", path)
         return data if isinstance(data, dict) else {}
+
+    def get_orders(self, **params: str) -> list[dict]:
+        """List crypto orders (paginated). Optional filters: state, symbol, side."""
+        q = ""
+        if params:
+            q = "?" + "&".join(f"{k}={v}" for k, v in params.items() if v is not None)
+        path = f"/api/v1/crypto/trading/orders/{q}"
+        out: list[dict] = []
+        while path:
+            data = self.request("GET", path)
+            if not isinstance(data, dict):
+                break
+            out.extend(data.get("results") or [])
+            nxt = data.get("next") or ""
+            if not nxt:
+                break
+            parsed = urlparse(nxt)
+            path = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+        return out
+
+    def get_recent_filled_orders(self, *, limit: int = 50) -> list[dict]:
+        """Filled crypto orders, newest first when API provides timestamps."""
+        try:
+            rows = self.get_orders(state="filled", limit=str(limit))
+        except RobinhoodAPIError:
+            # Some keys / API versions reject state filter — fall back and filter client-side.
+            rows = self.get_orders(limit=str(limit))
+            rows = [r for r in rows if str(r.get("state") or "").lower() in ("filled", "partially_filled")]
+        rows.sort(key=lambda r: str(r.get("updated_at") or r.get("created_at") or ""), reverse=True)
+        return rows
