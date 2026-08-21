@@ -200,9 +200,12 @@ def cron_tick() -> dict:
             store.release_job_claim(claim)
             log.exception("job %s failed", job)
             results[job] = f"error: {exc}"
-    from .briefing import log_activity
-    summary = ", ".join(f"{k}={v}" for k, v in results.items())
-    log_activity("cron", f"스케줄러 tick — {summary}")
+    try:
+        from .briefing import log_activity
+        summary = ", ".join(f"{k}={v}" for k, v in results.items())
+        log_activity("cron", f"스케줄러 tick — {summary}")
+    except Exception:
+        log.exception("activity log failed")
     return {"ok": True, "time": now.isoformat(), "results": results}
 
 

@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS kv (
 )
 """,
     """
-CREATE TABLE IF NOT EXISTS job_claims (
+CREATE TABLE IF NOT EXISTS ts_job_claims (
     key TEXT PRIMARY KEY,
     claimed_at DOUBLE PRECISION NOT NULL
 )
@@ -87,7 +87,7 @@ _APP_TABLES = (
     "equity_curve",
     "trades",
     "kv",
-    "job_claims",
+    "ts_job_claims",
 )
 
 # Tables were created by the Vercel pooler role, which is not the SQL-editor
@@ -203,43 +203,55 @@ class Store:
         )
 
     def try_job_claim(self, key: str, stale_after: float = 600.0) -> bool:
-        """Atomically claim one cron execution window across server instances."""
+        """Atomically claim one cron execution window across server instances.
+
+        The legacy `job_claims` table is owned by another Postgres role, so
+        this uses `ts_job_claims` (created by the current connection). If the
+        lock table is still unusable, continue without a lock rather than 500.
+        """
         now = time.time()
-        with self._lock:
-            if self.pg:
-                self._pg_ensure()
-                with self._conn.cursor() as cur:
-                    cur.execute(
-                        "DELETE FROM job_claims WHERE claimed_at < %s",
-                        (now - 7 * 86400,),
-                    )
-                    cur.execute(
-                        "DELETE FROM job_claims WHERE key=%s AND claimed_at < %s",
-                        (key, now - stale_after),
-                    )
-                    cur.execute(
-                        "INSERT INTO job_claims(key,claimed_at) VALUES(%s,%s) "
-                        "ON CONFLICT(key) DO NOTHING RETURNING key",
-                        (key, now),
-                    )
-                    return cur.fetchone() is not None
-            self._conn.execute(
-                "DELETE FROM job_claims WHERE claimed_at < ?",
-                (now - 7 * 86400,),
-            )
-            self._conn.execute(
-                "DELETE FROM job_claims WHERE key=? AND claimed_at < ?",
-                (key, now - stale_after),
-            )
-            cur = self._conn.execute(
-                "INSERT OR IGNORE INTO job_claims(key,claimed_at) VALUES(?,?)",
-                (key, now),
-            )
-            self._conn.commit()
-            return cur.rowcount == 1
+        try:
+            with self._lock:
+                if self.pg:
+                    self._pg_ensure()
+                    with self._conn.cursor() as cur:
+                        cur.execute(
+                            "DELETE FROM ts_job_claims WHERE claimed_at < %s",
+                            (now - 7 * 86400,),
+                        )
+                        cur.execute(
+                            "DELETE FROM ts_job_claims WHERE key=%s AND claimed_at < %s",
+                            (key, now - stale_after),
+                        )
+                        cur.execute(
+                            "INSERT INTO ts_job_claims(key,claimed_at) VALUES(%s,%s) "
+                            "ON CONFLICT(key) DO NOTHING RETURNING key",
+                            (key, now),
+                        )
+                        return cur.fetchone() is not None
+                self._conn.execute(
+                    "DELETE FROM ts_job_claims WHERE claimed_at < ?",
+                    (now - 7 * 86400,),
+                )
+                self._conn.execute(
+                    "DELETE FROM ts_job_claims WHERE key=? AND claimed_at < ?",
+                    (key, now - stale_after),
+                )
+                cur = self._conn.execute(
+                    "INSERT OR IGNORE INTO ts_job_claims(key,claimed_at) VALUES(?,?)",
+                    (key, now),
+                )
+                self._conn.commit()
+                return cur.rowcount == 1
+        except Exception as exc:
+            log.warning("job claim unavailable (%s); running without lock", exc)
+            return True
 
     def release_job_claim(self, key: str) -> None:
-        self._exec("DELETE FROM job_claims WHERE key=?", (key,))
+        try:
+            self._exec("DELETE FROM ts_job_claims WHERE key=?", (key,))
+        except Exception as exc:
+            log.debug("job claim release skipped: %s", exc)
 
     # -- position metadata ----------------------------------------------
     def pos_meta_all(self) -> dict[str, dict]:
