@@ -41,6 +41,7 @@ def sync_from_robinhood() -> dict:
     data = import_holdings(
         cash, positions,
         principal if principal and principal > 0 else None,
+        notify_as="Robinhood 동기화",
     )
     if data.get("ok"):
         data["parsed"] = {

@@ -572,13 +572,19 @@ def _format_crypto_telegram(data: dict, source: str) -> str:
 
 
 def notify_crypto_orders(data: dict, source: str, *, force: bool = False) -> bool:
-    """Telegram alert when there are actionable buy/sell guides."""
+    """Telegram alert for crypto checks.
+
+    - force=False (ad-hoc): only ping when there are actionable tips, and skip
+      duplicates via fingerprint.
+    - force=True (09:00 / 12:00 / 21:00 ET): always send, including
+      "할 일 없음" status so the daily check is never silent.
+    """
     if not data.get("ok"):
         return False
     pending = data.get("orders") or []
-    if not pending:
+    if not pending and not force:
         return True
-    fp = _order_fingerprint(pending)
+    fp = _order_fingerprint(pending) if pending else ("empty",)
     if not force and store.get(NOTIFY_FP_KEY) == fp:
         return True
     body = _format_crypto_telegram(data, source)
@@ -960,6 +966,7 @@ def set_principal(principal: float) -> dict:
 
 def import_holdings(
     cash: float, holdings: list[dict], principal: float | None = None,
+    *, notify_as: str | None = "스크린샷 분석",
 ) -> dict:
     """Rebuild the book from the user's real Robinhood holdings.
 
@@ -1011,8 +1018,8 @@ def import_holdings(
         + (f", 제외: {', '.join(skipped)}" if skipped else ""),
     )
     data = advise_and_apply(force=True)
-    if data.get("ok"):
-        notify_crypto_orders(data, "스크린샷 분석", force=True)
+    if data.get("ok") and notify_as:
+        notify_crypto_orders(data, notify_as, force=True)
     if data.get("ok") and skipped:
         data["skipped"] = skipped
     return data

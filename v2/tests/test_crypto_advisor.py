@@ -342,6 +342,23 @@ def test_notify_crypto_orders_skips_when_empty():
         send.assert_not_called()
 
 
+def test_notify_crypto_orders_force_sends_even_when_empty():
+    """Scheduled 09/12/21 checks must always ping, including '할 일 없음'."""
+    from unittest.mock import patch
+    from app.crypto_advisor import notify_crypto_orders
+
+    data = {
+        "ok": True,
+        "orders": [],
+        "summary": {"total": 6000, "principal": 10000, "gap": 4000, "cash": 80},
+        "market": {"label": "CHOP"},
+    }
+    with patch("app.crypto_advisor.send", return_value=True) as send:
+        assert notify_crypto_orders(data, "아침", force=True) is True
+        assert send.call_count == 1
+        assert "주문 없음" in send.call_args[0][0]
+
+
 def test_notify_crypto_orders_sends_when_actionable():
     from unittest.mock import patch
     from app.crypto_advisor import notify_crypto_orders
