@@ -22,7 +22,7 @@ from .alpaca_config import clear_keys, save_keys, status_dict
 from .config import settings
 from .crypto_advisor import (
     advise_and_apply, confirm_order, deny_order, import_holdings, reset_book,
-    run_scheduled, set_principal,
+    run_scheduled, set_investing_total, set_principal, set_stocks_value,
 )
 from .engine import Engine
 from .robinhood_config import clear_keys as clear_robinhood_keys
@@ -393,6 +393,28 @@ def crypto_principal(body: CryptoPrincipalBody, request: Request):
     if not _admin_authorized(request):
         return _unauthorized()
     result = set_principal(body.principal)
+    return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+
+
+class CryptoStocksBody(BaseModel):
+    stocks_value: float | None = None
+    investing_total: float | None = None
+
+
+@app.post("/api/crypto/stocks")
+def crypto_stocks(body: CryptoStocksBody, request: Request):
+    """주식·ETF 평가액 또는 Investing 앱 총액으로 잔액 맞춤."""
+    if not _admin_authorized(request):
+        return _unauthorized()
+    if body.investing_total is not None:
+        result = set_investing_total(body.investing_total)
+    elif body.stocks_value is not None:
+        result = set_stocks_value(body.stocks_value)
+    else:
+        return JSONResponse(
+            {"ok": False, "error": "stocks_value 또는 investing_total이 필요합니다."},
+            status_code=400,
+        )
     return JSONResponse(result, status_code=200 if result.get("ok") else 400)
 
 

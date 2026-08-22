@@ -304,6 +304,23 @@
     padding: 14px 0; border-bottom: 1px solid var(--border); font-size: 15px;
   }
   .rh-row .rh-row-val { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .rh-hint { font-size: 12px; color: var(--dim); font-weight: 400; }
+  .rh-warn {
+    margin-top: 10px; padding: 10px 12px; border-radius: 8px;
+    background: rgba(210,153,34,.12); color: var(--amber); font-size: 12px; line-height: 1.4;
+  }
+  .rh-tag { font-size: 11px; font-weight: 500; color: var(--dim); }
+  .rh-sync {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin: 12px 0 4px; padding: 12px; border-radius: 10px;
+    background: rgba(88,166,255,.08); border: 1px solid rgba(88,166,255,.2);
+  }
+  .rh-sync label { font-size: 12px; color: var(--dim); margin-right: 4px; }
+  .rh-sync input {
+    width: 120px; padding: 6px 8px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
   .rh-section { margin-top: 22px; }
   .rh-section-head h3 { font-size: 20px; font-weight: 700; margin: 0 0 4px; }
   .rh-section-sub { font-size: 12px; color: var(--dim); margin-bottom: 10px; }
@@ -1101,13 +1118,18 @@ function renderRhHoldings(positions) {
   if (!positions?.length) return '<div class="empty">보유 없음</div>';
   return positions.map(p => {
     const up = (p.day_change_pct ?? 0) >= 0;
+    const priced = p.priced !== false && Number(p.price) > 0;
+    const pill = priced
+      ? `<div class="rh-price-pill ${up ? 'up' : 'down'}">${rhMoney(p.price)}</div>`
+      : `<div class="rh-price-pill down">시세 없음</div>`;
+    const note = p.supported === false ? ' · 조언 외' : '';
     return `<div class="rh-holding">
       <div>
-        <div class="rh-sym">${escapeHtml(p.symbol)}</div>
-        <div class="rh-qty">${rhQty(p.qty)}</div>
+        <div class="rh-sym">${escapeHtml(p.symbol)}${note ? `<span class="rh-tag">${note}</span>` : ''}</div>
+        <div class="rh-qty">${rhQty(p.qty)}${priced && p.value != null ? ` · ${rhMoney(p.value)}` : ''}</div>
       </div>
       ${sparklineSvg(p.sparkline)}
-      <div class="rh-price-pill ${up ? 'up' : 'down'}">${rhMoney(p.price)}</div>
+      ${pill}
     </div>`;
   }).join('');
 }
@@ -1142,6 +1164,13 @@ function bindCryptoEvents(d) {
     principalBtn.addEventListener('click', () => saveCryptoPrincipal());
     $('crypto-principal-input')?.addEventListener('keydown', e => {
       if (e.key === 'Enter') saveCryptoPrincipal();
+    });
+  }
+  const investingBtn = $('btn-crypto-investing');
+  if (investingBtn) {
+    investingBtn.addEventListener('click', () => saveCryptoInvestingTotal());
+    $('crypto-investing-input')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') saveCryptoInvestingTotal();
     });
   }
   const resetBtn = $('btn-crypto-reset');
@@ -1182,19 +1211,40 @@ function renderCrypto(d, {quiet = false} = {}) {
 
   if (rh) {
     const updated = rh.updated_at ? new Date(rh.updated_at).toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'}) : '';
+    const cryptoTotal = rh.crypto_total ?? ((rh.holdings_value || 0) + (cash || 0));
+    const stocksVal = Number(rh.stocks_value || s.stocks_value || 0);
+    const hasStocks = stocksVal > 0;
     html += `<div class="rh-portfolio">
       <div class="rh-total">${rhMoney(total)}</div>
       ${renderRhDayChange(rh.day_change, rh.day_change_pct)}
-      <div class="rh-live"><span class="rh-live-dot"></span> LIVE · 크립토만${updated ? ` · ${updated}` : ''}</div>
-      <div class="rh-scope">앱 Investing 총액과 다를 수 있음 — 주식·ETF는 제외</div>
+      <div class="rh-live"><span class="rh-live-dot"></span> LIVE${hasStocks ? ' · Investing 맞춤' : ' · 크립토+캐시'}${updated ? ` · ${updated}` : ''}</div>
+      <div class="rh-scope">${hasStocks
+        ? '크립토(API) + 주식(동기화) + Buying power = 앱 Investing 총액'
+        : '아래 Investing 총액을 넣으면 앱과 같은 숫자로 맞춥니다 (주식 API 없음)'}</div>
+    </div>
+    <div class="rh-row">
+      <span>Crypto</span>
+      <span class="rh-row-val">${rhMoney(rh.holdings_value ?? (cryptoTotal - cash))}</span>
+    </div>
+    <div class="rh-row">
+      <span>Stocks · ETF</span>
+      <span class="rh-row-val">${rhMoney(stocksVal)}</span>
     </div>
     <div class="rh-row">
       <span>Buying power</span>
       <span class="rh-row-val">${rhMoney(cash)}</span>
     </div>
+    <div class="rh-sync">
+      <label for="crypto-investing-input">앱 Investing 총액</label>
+      <input type="number" min="0" step="0.01" id="crypto-investing-input"
+        placeholder="${hasStocks ? Math.round(total * 100) / 100 : '8352.21'}"
+        aria-label="Robinhood Investing 총액">
+      <button type="button" class="btn btn-ghost btn-sm" id="btn-crypto-investing">맞추기</button>
+    </div>
+    ${rh.unpriced?.length ? `<div class="rh-warn">시세 미반영 ${rh.unpriced.map(u => escapeHtml(u.symbol)).join(', ')} — 총액이 앱보다 낮을 수 있음</div>` : ''}
     <div class="rh-section">
       <div class="rh-section-head"><h3>Crypto</h3></div>
-      <div class="rh-section-sub">Robinhood Crypto · 매매는 앱에서 · 체결되면 권고 자동 해제</div>
+      <div class="rh-section-sub">Robinhood Crypto 전 보유 · 매매는 앱에서 · 체결되면 권고 자동 해제</div>
       ${renderRhHoldings(holdings)}
     </div>`;
   } else {
@@ -1325,6 +1375,33 @@ async function saveCryptoPrincipal() {
     if (!d.ok) {
       $('crypto-body').insertAdjacentHTML('afterbegin',
         `<div class="empty" style="color:var(--red)">${escapeHtml(d.error || '저장 실패')}</div>`);
+      return;
+    }
+    renderCrypto(d);
+  } catch (e) {
+    $('crypto-body').insertAdjacentHTML('afterbegin',
+      `<div class="empty" style="color:var(--red)">${escapeHtml(String(e.message || e))}</div>`);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function saveCryptoInvestingTotal() {
+  const input = $('crypto-investing-input');
+  const investing_total = input ? Number(input.value) : NaN;
+  if (!Number.isFinite(investing_total) || investing_total <= 0) return;
+  const btn = $('btn-crypto-investing');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api('/api/crypto/stocks', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({investing_total}),
+    });
+    const d = await r.json();
+    if (!d.ok) {
+      $('crypto-body').insertAdjacentHTML('afterbegin',
+        `<div class="empty" style="color:var(--red)">${escapeHtml(d.error || '동기화 실패')}</div>`);
       return;
     }
     renderCrypto(d);

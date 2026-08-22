@@ -126,7 +126,7 @@ def _step_for(range30: float) -> float:
 def _new_book() -> dict:
     return {
         "budget": BUDGET, "cash": BUDGET, "positions": {},
-        "realized_pl": 0.0, "principal": BUDGET,
+        "realized_pl": 0.0, "principal": BUDGET, "stocks_value": 0.0,
     }
 
 
@@ -961,6 +961,59 @@ def set_principal(principal: float) -> dict:
     store.set(BOOK_KEY, book)
     store.set(CACHE_KEY, None)
     log_activity("crypto", f"원금 목표 ${principal:,.0f}로 설정")
+    return _ensure_order_split(advise_and_apply(force=True))
+
+
+def set_stocks_value(stocks_value: float) -> dict:
+    """Persist Robinhood equity (stocks/ETF) value so Investing totals match.
+
+    Crypto API has no equities endpoint — this bridges the gap so
+    crypto + stocks + buying power equals the Robinhood Investing total.
+    """
+    if stocks_value < 0:
+        return {"ok": False, "error": "주식 평가액은 0 이상이어야 합니다."}
+    book = store.get(BOOK_KEY) or _new_book()
+    book["stocks_value"] = round(float(stocks_value), 2)
+    book["updated_at"] = datetime.now(timezone.utc).isoformat()
+    store.set(BOOK_KEY, book)
+    store.set(CACHE_KEY, None)
+    log_activity("crypto", f"주식·ETF 평가액 ${stocks_value:,.2f}로 설정")
+    return _ensure_order_split(advise_and_apply(force=True))
+
+
+def set_investing_total(investing_total: float) -> dict:
+    """Infer stocks value from the Robinhood Investing account total.
+
+    stocks = investing_total − crypto_holdings − buying_power
+    """
+    if investing_total <= 0:
+        return {"ok": False, "error": "앱 총액은 0보다 커야 합니다."}
+    from .robinhood_live import fetch_robinhood_snapshot
+
+    snap = None
+    try:
+        snap = fetch_robinhood_snapshot()
+    except Exception:
+        log.exception("investing total: live snapshot failed")
+    book = store.get(BOOK_KEY) or _new_book()
+    if snap:
+        crypto_holdings = float(snap.get("holdings_value") or 0)
+        cash = float(snap.get("buying_power") or 0)
+    else:
+        cash = float(book.get("cash") or 0)
+        crypto_holdings = sum(
+            sum(float(u.get("dollars") or 0) for u in (pos.get("units") or []))
+            for pos in (book.get("positions") or {}).values()
+        )
+    stocks = round(max(0.0, float(investing_total) - crypto_holdings - cash), 2)
+    book["stocks_value"] = stocks
+    book["updated_at"] = datetime.now(timezone.utc).isoformat()
+    store.set(BOOK_KEY, book)
+    store.set(CACHE_KEY, None)
+    log_activity(
+        "crypto",
+        f"Investing 총액 ${investing_total:,.2f} 동기화 → 주식 ${stocks:,.2f}",
+    )
     return _ensure_order_split(advise_and_apply(force=True))
 
 

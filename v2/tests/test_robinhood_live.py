@@ -49,12 +49,56 @@ def test_fetch_robinhood_snapshot_totals_and_sparkline():
     holdings = 1755.663 * 1.07 + 21.82817 * 82.32
     assert snap["holdings_value"] == pytest.approx(round(holdings, 2))
     assert snap["total"] == pytest.approx(round(1686.47 + holdings, 2))
+    # Quotes requested for every held symbol, not only advice candidates.
+    mock_client.get_best_bid_ask.assert_called_once()
+    called_syms = set(mock_client.get_best_bid_ask.call_args[0])
+    assert called_syms == {"XRP-USD", "SOL-USD"}
+
+
+def test_fetch_robinhood_snapshot_includes_non_candidate_holdings():
+    """Coins outside CANDIDATES must still count toward total / buying-power sum."""
+    mock_client = MagicMock()
+    mock_client.get_account.return_value = {"buying_power": "100.00"}
+    mock_client.get_all_holdings.return_value = [
+        {"asset_code": "XRP", "total_quantity": "100"},
+        {"asset_code": "PEPE", "total_quantity": "1000000"},  # not in CANDIDATES
+    ]
+    mock_client.get_best_bid_ask.return_value = {
+        "results": [
+            {"symbol": "XRP-USD", "price": "1.50"},
+            {
+                "symbol": "PEPE-USD",
+                "price": None,
+                "bid_inclusive_of_sell_spread": "0.000009",
+                "ask_inclusive_of_buy_spread": "0.000011",
+            },
+        ]
+    }
+
+    with patch("app.robinhood_live.get_credentials", return_value=("key", "priv")), \
+         patch("app.robinhood_live.RobinhoodCryptoClient", return_value=mock_client), \
+         patch("app.robinhood_live.fetch_bars", return_value={}):
+        snap = fetch_robinhood_snapshot()
+
+    assert snap is not None
+    pepe = next(p for p in snap["positions"] if p["symbol"] == "PEPE")
+    assert pepe["supported"] is False
+    assert pepe["price"] == pytest.approx(0.00001)  # mid of bid/ask
+    pepe_val = 1_000_000 * 0.00001
+    xrp_val = 100 * 1.50
+    assert snap["holdings_value"] == pytest.approx(round(xrp_val + pepe_val, 2))
+    assert snap["total"] == pytest.approx(round(100 + xrp_val + pepe_val, 2))
+    called_syms = set(mock_client.get_best_bid_ask.call_args[0])
+    assert "PEPE-USD" in called_syms
 
 
 def test_merge_live_into_summary_overrides_totals():
     snap = {
         "buying_power": 1686.47,
         "total": 6941.69,
+        "crypto_total": 6941.69,
+        "stocks_value": 0,
+        "holdings_value": 5255.22,
         "positions": [
             {"symbol": "XRP", "qty": 100, "price": 1.07, "value": 107.0},
         ],
@@ -76,6 +120,27 @@ def test_merge_live_into_summary_overrides_totals():
     assert out["positions"][0]["value"] == pytest.approx(107.0)
     assert out["positions"][0]["price"] == pytest.approx(1.07)
 
+
+def test_fetch_snapshot_adds_stocks_value_to_total():
+    mock_client = MagicMock()
+    mock_client.get_account.return_value = {"buying_power": "724.82"}
+    mock_client.get_all_holdings.return_value = [
+        {"asset_code": "XRP", "total_quantity": "100"},
+    ]
+    mock_client.get_best_bid_ask.return_value = {
+        "results": [{"symbol": "XRP-USD", "price": "1.50"}],
+    }
+    with patch("app.robinhood_live.get_credentials", return_value=("key", "priv")), \
+         patch("app.robinhood_live.RobinhoodCryptoClient", return_value=mock_client), \
+         patch("app.robinhood_live.fetch_bars", return_value={}), \
+         patch("app.robinhood_live.store") as mock_store:
+        mock_store.get.return_value = {"stocks_value": 3133.53}
+        snap = fetch_robinhood_snapshot()
+    assert snap["buying_power"] == pytest.approx(724.82)
+    assert snap["holdings_value"] == pytest.approx(150.0)
+    assert snap["crypto_total"] == pytest.approx(874.82)
+    assert snap["stocks_value"] == pytest.approx(3133.53)
+    assert snap["total"] == pytest.approx(874.82 + 3133.53)
 
 def test_auto_confirm_buy_when_bought_more_than_recommended():
     """User bought $1000 when we recommended $800 — clear the rec."""
