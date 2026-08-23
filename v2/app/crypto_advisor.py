@@ -1022,6 +1022,7 @@ def import_holdings(
     *, notify_as: str | None = "스크린샷 분석",
     brokerage_cash: float | None = None,
     stock_positions: list[dict] | None = None,
+    rh_investing_total: float | None = None,
 ) -> dict:
     """Rebuild the book from the user's real Robinhood holdings.
 
@@ -1089,6 +1090,10 @@ def import_holdings(
         book["stocks_value"] = 0.0
     elif prev.get("stock_positions"):
         book["stock_positions"] = prev["stock_positions"]
+    if rh_investing_total is not None and rh_investing_total > 0:
+        book["rh_investing_total"] = round(float(rh_investing_total), 2)
+    elif prev.get("rh_investing_total"):
+        book["rh_investing_total"] = prev["rh_investing_total"]
     book["updated_at"] = datetime.now(timezone.utc).isoformat()
     store.set(BOOK_KEY, book)
     store.set(PENDING_KEY, [])

@@ -1225,14 +1225,18 @@ function renderCrypto(d, {quiet = false} = {}) {
       <span class="rh-row-val">${rhMoney(rh.holdings_value || 0)}</span>
     </div>
     <div class="rh-row">
-      <span>${escapeHtml(cashLabel)}${cashVal > bpVal + 1 ? ` <span class="rh-hint">· 매수가능 ${rhMoney(bpVal)}</span>` : ''}</span>
+      <span>${escapeHtml(cashLabel)}</span>
       <span class="rh-row-val">${rhMoney(cashVal)}</span>
     </div>
+    ${cashVal > bpVal + 1 ? `<div class="rh-row">
+      <span>Buying power <span class="rh-hint">(매수 가능)</span></span>
+      <span class="rh-row-val">${rhMoney(bpVal)}</span>
+    </div>` : ''}
     ${stocksVal > 0 || (rh.stock_positions || []).length ? `<div class="rh-row">
       <span>Stocks · ETF</span>
       <span class="rh-row-val">${rhMoney(stocksVal)}</span>
     </div>` : ''}
-    ${cashGap ? `<div class="rh-warn">앱 Cash가 Crypto API에 없음 (지금 Buying power ${rhMoney(bpVal)}만 표시). 설정 → Investing 스크린샷 1장 올리면 Cash·주식이 자동으로 맞춰집니다.</div>` : ''}
+    ${cashGap ? `<div class="rh-warn">앱 총액과 맞추려면 설정 → Investing 화면 스크린샷(상단 총액 보이게) 1장 업로드. Buying power(${rhMoney(bpVal)})만으로는 로빈후드 총액이 안 나옵니다.</div>` : ''}
     ${rh.unpriced?.length ? `<div class="rh-warn">시세 미반영 ${rh.unpriced.map(u => escapeHtml(u.symbol)).join(', ')}</div>` : ''}
     <div class="rh-section">
       <div class="rh-section-head"><h3>Crypto</h3></div>

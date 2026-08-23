@@ -144,6 +144,36 @@ def test_fetch_snapshot_adds_stocks_value_to_total():
     assert snap["cash_incomplete"] is True
 
 
+def test_fetch_snapshot_investing_total_implied_cash():
+    """RH Investing total minus live crypto/stocks yields full cash bucket."""
+    mock_client = MagicMock()
+    mock_client.get_account.return_value = {"buying_power": "2312.85"}
+    mock_client.get_all_holdings.return_value = [
+        {"asset_code": "XRP", "total_quantity": "1003.857"},
+    ]
+    mock_client.get_best_bid_ask.return_value = {
+        "results": [{"symbol": "XRP-USD", "price": "1.52"}],
+    }
+    with patch("app.robinhood_live.get_credentials", return_value=("key", "priv")), \
+         patch("app.robinhood_live.RobinhoodCryptoClient", return_value=mock_client), \
+         patch("app.robinhood_live.fetch_bars", return_value={}), \
+         patch("app.robinhood_live._stock_last_price", return_value=44.66), \
+         patch("app.robinhood_live.store") as mock_store:
+        mock_store.get.return_value = {
+            "rh_investing_total": 8598.23,
+            "stock_positions": [{"symbol": "IONQ", "qty": 16.47}],
+        }
+        snap = fetch_robinhood_snapshot()
+    hv = 1003.857 * 1.52
+    sv = round(16.47 * 44.66, 2)
+    implied_cash = round(8598.23 - hv - sv, 2)
+    assert snap["buying_power"] == pytest.approx(2312.85)
+    assert snap["cash"] == pytest.approx(implied_cash)
+    assert snap["cash"] > snap["buying_power"]
+    assert snap["total"] == pytest.approx(8598.23)
+    assert snap["cash_incomplete"] is False
+
+
 def test_fetch_snapshot_uses_brokerage_cash_and_stock_positions():
     mock_client = MagicMock()
     mock_client.get_account.return_value = {"buying_power": "724.82"}

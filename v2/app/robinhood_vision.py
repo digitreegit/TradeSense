@@ -68,6 +68,7 @@ Return JSON only:
 {
   "cash": <"Cash" or "Cash eligible to earn interest" amount — NOT buying power>,
   "buying_power": <Buying power if visible, else null>,
+  "investing_total": <large portfolio total at top of Investing screen, e.g. 8598.23, else null>,
   "principal": <original invested amount if visible, else null>,
   "positions": [
     {"symbol": "XRP", "qty": 5004.162, "avg_cost": 1.80, "asset_class": "crypto"}
@@ -80,6 +81,7 @@ Return JSON only:
 
 Rules:
 - cash: prefer the Investing "Cash" / "Cash eligible to earn interest" line. Do NOT use Buying power for cash when Cash is visible (Cash is often larger).
+- investing_total: the main portfolio balance at the top (Individual account total). Critical for matching the app.
 - positions: CRYPTO only (XRP, ETH, BTC, DOGE, SHIB, LINK, SOL, AVAX, AAVE, etc.)
 - stocks: stocks and ETFs only (IONQ, SPY, TSLA, etc.) with share qty; include price if shown
 - symbol: uppercase ticker only
@@ -219,7 +221,11 @@ def analyze_and_advise(images: list[bytes]) -> dict:
     positions = kept
 
     cash = float(parsed.get("cash") or 0)
-    if not positions and not cash and not stocks:
+    investing_raw = parsed.get("investing_total")
+    investing_f = (
+        float(investing_raw) if investing_raw not in (None, "", 0) else None
+    )
+    if not positions and not cash and not stocks and not investing_f:
         raise ValueError("스크린샷에서 보유·현금을 찾지 못했습니다.")
 
     principal = parsed.get("principal")
@@ -228,13 +234,14 @@ def analyze_and_advise(images: list[bytes]) -> dict:
     log_activity(
         "crypto",
         f"스크린샷 분석 — 크립토 {len(positions)} · 주식 {len(stocks)} · Cash ${cash:,.0f}"
+        + (f" · 총액 ${investing_f:,.2f}" if investing_f else "")
         + (f" · {parsed.get('notes', '')}" if parsed.get("notes") else ""),
     )
 
     from .robinhood_config import is_configured
 
-    if is_configured() and (cash > 0 or stocks):
-        # Live API owns crypto; screenshot only fills Cash + equities.
+    if is_configured() and (cash > 0 or stocks or investing_f):
+        # Live API owns crypto; screenshot fills Cash, equities, Investing total.
         book = store.get(BOOK_KEY) or {}
         if cash > 0:
             book["brokerage_cash"] = round(cash, 2)
@@ -242,6 +249,8 @@ def analyze_and_advise(images: list[bytes]) -> dict:
         if stocks:
             book["stock_positions"] = stocks
             book["stocks_value"] = 0.0
+        if investing_f and investing_f > 0:
+            book["rh_investing_total"] = round(investing_f, 2)
         if principal_f and principal_f > 0:
             book["principal"] = principal_f
         from datetime import datetime, timezone
@@ -254,10 +263,12 @@ def analyze_and_advise(images: list[bytes]) -> dict:
             cash, positions, principal_f,
             brokerage_cash=cash if cash > 0 else None,
             stock_positions=stocks or None,
+            rh_investing_total=investing_f,
         )
     if data.get("ok"):
         data["parsed"] = {
             "cash": cash,
+            "investing_total": investing_f,
             "principal": principal_f,
             "positions": positions,
             "stocks": stocks,

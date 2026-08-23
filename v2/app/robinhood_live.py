@@ -139,10 +139,10 @@ def fetch_robinhood_snapshot() -> dict | None:
     book = store.get(BOOK_KEY) or {}
     buying_power = cash
     display_cash, stocks_value, cash_label, stock_rows = _cash_and_stocks_from_book(
-        book, buying_power,
+        book, buying_power, holdings_value,
     )
-    # Investing-style total: crypto holdings + brokerage cash + stocks.
-    # Do NOT add buying_power on top when display_cash already includes it.
+    # Investing total = crypto + full cash bucket + stocks. Buying power is only
+    # the tradeable subset of cash — do not use it alone for the hero total.
     account_total = holdings_value + display_cash + stocks_value
     crypto_total = holdings_value + buying_power
     base = max(holdings_value, 1e-9)
@@ -187,13 +187,14 @@ def _stock_last_price(symbol: str) -> float | None:
 
 
 def _cash_and_stocks_from_book(
-    book: dict, buying_power: float,
+    book: dict, buying_power: float, holdings_value: float = 0.0,
 ) -> tuple[float, float, str, list[dict]]:
     """Resolve brokerage Cash + stocks for Investing-matching totals.
 
-    Crypto API only exposes buying_power. App "Cash" (often larger) and stock
-    quantities are stored from Investing screenshots (brokerage_cash,
-    stock_positions). stocks_value alone is treated as a stocks dollar mark.
+    Crypto API only exposes buying_power. Robinhood's Investing total also
+    includes cash that is not currently tradeable (unsettled / reserved). When
+    we have rh_investing_total from a screenshot, infer the full cash bucket as
+    total − live crypto − live stocks.
     """
     stock_positions = book.get("stock_positions") or []
     stock_rows: list[dict] = []
@@ -230,8 +231,19 @@ def _cash_and_stocks_from_book(
     brokerage_cash = book.get("brokerage_cash")
     if brokerage_cash is not None:
         try:
-            cash = max(0.0, float(brokerage_cash))
-            return cash, stocks_value, "Cash", stock_rows
+            bc = float(brokerage_cash)
+            if bc > buying_power + 0.01:
+                return bc, stocks_value, "Cash", stock_rows
+        except (TypeError, ValueError):
+            pass
+
+    rh_total = book.get("rh_investing_total")
+    if rh_total is not None:
+        try:
+            t = float(rh_total)
+            implied_cash = t - holdings_value - stocks_value
+            if implied_cash > buying_power + 0.01:
+                return round(implied_cash, 2), stocks_value, "Cash", stock_rows
         except (TypeError, ValueError):
             pass
 
@@ -312,6 +324,7 @@ def refresh_from_robinhood_live() -> tuple[dict | None, dict[str, float], dict[s
     stocks_value = book.get("stocks_value")
     brokerage_cash = book.get("brokerage_cash")
     stock_positions = book.get("stock_positions")
+    rh_investing_total = book.get("rh_investing_total")
     avg_by_pair = {
         pair: pos.get("avg_cost")
         for pair, pos in (book.get("positions") or {}).items()
@@ -336,6 +349,11 @@ def refresh_from_robinhood_live() -> tuple[dict | None, dict[str, float], dict[s
             pass
     if stock_positions is not None:
         book["stock_positions"] = stock_positions
+    if rh_investing_total is not None:
+        try:
+            book["rh_investing_total"] = float(rh_investing_total)
+        except (TypeError, ValueError):
+            pass
     for pair, pos in book.get("positions", {}).items():
         if avg_by_pair.get(pair):
             pos["avg_cost"] = float(avg_by_pair[pair])
