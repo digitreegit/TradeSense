@@ -1075,10 +1075,15 @@ function splitCryptoOrders(d) {
 
 function rhMoney(v, {cents = true} = {}) {
   if (v == null || Number.isNaN(Number(v))) return '—';
+  const n = Number(v);
+  // SHIB etc. — sub-cent prices must not round to $0.00
+  if (n > 0 && n < 0.01) {
+    return '$' + n.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8});
+  }
   const opts = cents
     ? {minimumFractionDigits: 2, maximumFractionDigits: 2}
     : {maximumFractionDigits: 0};
-  return '$' + Number(v).toLocaleString(undefined, opts);
+  return '$' + n.toLocaleString(undefined, opts);
 }
 
 function rhQty(v) {
@@ -1166,13 +1171,6 @@ function bindCryptoEvents(d) {
       if (e.key === 'Enter') saveCryptoPrincipal();
     });
   }
-  const investingBtn = $('btn-crypto-investing');
-  if (investingBtn) {
-    investingBtn.addEventListener('click', () => saveCryptoInvestingTotal());
-    $('crypto-investing-input')?.addEventListener('keydown', e => {
-      if (e.key === 'Enter') saveCryptoInvestingTotal();
-    });
-  }
   const resetBtn = $('btn-crypto-reset');
   if (resetBtn) {
     resetBtn.addEventListener('click', () => openConfirm(
@@ -1211,37 +1209,31 @@ function renderCrypto(d, {quiet = false} = {}) {
 
   if (rh) {
     const updated = rh.updated_at ? new Date(rh.updated_at).toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'}) : '';
-    const cryptoTotal = rh.crypto_total ?? ((rh.holdings_value || 0) + (cash || 0));
-    const stocksVal = Number(rh.stocks_value || s.stocks_value || 0);
-    const hasStocks = stocksVal > 0;
+    const cashVal = Number(rh.cash ?? cash ?? 0);
+    const bpVal = Number(rh.buying_power ?? cash ?? 0);
+    const stocksVal = Number(rh.stocks_value || 0);
+    const cashLabel = rh.cash_label || 'Cash';
+    const cashGap = rh.cash_incomplete !== false && cashVal <= bpVal + 1;
     html += `<div class="rh-portfolio">
       <div class="rh-total">${rhMoney(total)}</div>
       ${renderRhDayChange(rh.day_change, rh.day_change_pct)}
-      <div class="rh-live"><span class="rh-live-dot"></span> LIVE${hasStocks ? ' · Investing 맞춤' : ' · 크립토+캐시'}${updated ? ` · ${updated}` : ''}</div>
-      <div class="rh-scope">${hasStocks
-        ? '크립토(API) + 주식(동기화) + Buying power = 앱 Investing 총액'
-        : '아래 Investing 총액을 넣으면 앱과 같은 숫자로 맞춥니다 (주식 API 없음)'}</div>
+      <div class="rh-live"><span class="rh-live-dot"></span> LIVE · API${updated ? ` · ${updated}` : ''}</div>
+      <div class="rh-scope">크립토·Buying power는 API · Cash·주식은 Investing 스크린샷으로 자동</div>
     </div>
     <div class="rh-row">
       <span>Crypto</span>
-      <span class="rh-row-val">${rhMoney(rh.holdings_value ?? (cryptoTotal - cash))}</span>
+      <span class="rh-row-val">${rhMoney(rh.holdings_value || 0)}</span>
     </div>
     <div class="rh-row">
+      <span>${escapeHtml(cashLabel)}${cashVal > bpVal + 1 ? ` <span class="rh-hint">· 매수가능 ${rhMoney(bpVal)}</span>` : ''}</span>
+      <span class="rh-row-val">${rhMoney(cashVal)}</span>
+    </div>
+    ${stocksVal > 0 || (rh.stock_positions || []).length ? `<div class="rh-row">
       <span>Stocks · ETF</span>
       <span class="rh-row-val">${rhMoney(stocksVal)}</span>
-    </div>
-    <div class="rh-row">
-      <span>Buying power</span>
-      <span class="rh-row-val">${rhMoney(cash)}</span>
-    </div>
-    <div class="rh-sync">
-      <label for="crypto-investing-input">앱 Investing 총액</label>
-      <input type="number" min="0" step="0.01" id="crypto-investing-input"
-        placeholder="${hasStocks ? Math.round(total * 100) / 100 : '8352.21'}"
-        aria-label="Robinhood Investing 총액">
-      <button type="button" class="btn btn-ghost btn-sm" id="btn-crypto-investing">맞추기</button>
-    </div>
-    ${rh.unpriced?.length ? `<div class="rh-warn">시세 미반영 ${rh.unpriced.map(u => escapeHtml(u.symbol)).join(', ')} — 총액이 앱보다 낮을 수 있음</div>` : ''}
+    </div>` : ''}
+    ${cashGap ? `<div class="rh-warn">앱 Cash가 Crypto API에 없음 (지금 Buying power ${rhMoney(bpVal)}만 표시). 설정 → Investing 스크린샷 1장 올리면 Cash·주식이 자동으로 맞춰집니다.</div>` : ''}
+    ${rh.unpriced?.length ? `<div class="rh-warn">시세 미반영 ${rh.unpriced.map(u => escapeHtml(u.symbol)).join(', ')}</div>` : ''}
     <div class="rh-section">
       <div class="rh-section-head"><h3>Crypto</h3></div>
       <div class="rh-section-sub">Robinhood Crypto 전 보유 · 매매는 앱에서 · 체결되면 권고 자동 해제</div>
@@ -1375,33 +1367,6 @@ async function saveCryptoPrincipal() {
     if (!d.ok) {
       $('crypto-body').insertAdjacentHTML('afterbegin',
         `<div class="empty" style="color:var(--red)">${escapeHtml(d.error || '저장 실패')}</div>`);
-      return;
-    }
-    renderCrypto(d);
-  } catch (e) {
-    $('crypto-body').insertAdjacentHTML('afterbegin',
-      `<div class="empty" style="color:var(--red)">${escapeHtml(String(e.message || e))}</div>`);
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-
-async function saveCryptoInvestingTotal() {
-  const input = $('crypto-investing-input');
-  const investing_total = input ? Number(input.value) : NaN;
-  if (!Number.isFinite(investing_total) || investing_total <= 0) return;
-  const btn = $('btn-crypto-investing');
-  if (btn) btn.disabled = true;
-  try {
-    const r = await api('/api/crypto/stocks', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({investing_total}),
-    });
-    const d = await r.json();
-    if (!d.ok) {
-      $('crypto-body').insertAdjacentHTML('afterbegin',
-        `<div class="empty" style="color:var(--red)">${escapeHtml(d.error || '동기화 실패')}</div>`);
       return;
     }
     renderCrypto(d);

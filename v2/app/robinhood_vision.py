@@ -10,7 +10,10 @@ import httpx
 
 from .briefing import log_activity
 from .config import settings
-from .crypto_advisor import advise_and_apply, import_holdings
+from .crypto_advisor import (
+    BOOK_KEY, CACHE_KEY, advise_and_apply, import_holdings,
+)
+from .state import store
 
 log = logging.getLogger(__name__)
 
@@ -59,25 +62,31 @@ def _image_mime(data: bytes) -> str:
     return "image/jpeg"
 
 
-PROMPT = """You extract a Robinhood crypto portfolio from mobile app screenshots.
+PROMPT = """You extract a Robinhood Investing portfolio from mobile/web screenshots.
 
 Return JSON only:
 {
-  "cash": <buying power or available cash as number, 0 if unknown>,
+  "cash": <"Cash" or "Cash eligible to earn interest" amount — NOT buying power>,
+  "buying_power": <Buying power if visible, else null>,
   "principal": <original invested amount if visible, else null>,
   "positions": [
-    {"symbol": "XRP", "qty": 5004.162, "avg_cost": 1.80}
+    {"symbol": "XRP", "qty": 5004.162, "avg_cost": 1.80, "asset_class": "crypto"}
+  ],
+  "stocks": [
+    {"symbol": "IONQ", "qty": 16.47, "price": 44.66, "asset_class": "stock"}
   ],
   "notes": "<one Korean sentence summarizing what you saw>"
 }
 
 Rules:
-- symbol: uppercase ticker only (XRP, ETH, BTC, DOGE, SHIB, LINK, SOL, etc.)
-- qty: exact quantity from "Your position" or holdings list
-- avg_cost: from "Avg cost" field; null if not visible
-- If total portfolio value is shown but cash isn't, estimate cash as 0
-- Ignore stock/ETF positions (IONQ, SPY, etc.) — crypto only
-- Merge duplicate symbols across multiple screenshots
+- cash: prefer the Investing "Cash" / "Cash eligible to earn interest" line. Do NOT use Buying power for cash when Cash is visible (Cash is often larger).
+- positions: CRYPTO only (XRP, ETH, BTC, DOGE, SHIB, LINK, SOL, AVAX, AAVE, etc.)
+- stocks: stocks and ETFs only (IONQ, SPY, TSLA, etc.) with share qty; include price if shown
+- symbol: uppercase ticker only
+- qty: exact quantity from holdings list
+- avg_cost: from "Avg cost" if visible, else null
+- Ignore watchlists / "Lists" (no quantity) — only real holdings
+- Merge duplicates across screenshots
 - Do not invent positions not visible in the images
 """
 
@@ -162,7 +171,12 @@ def parse_screenshots(images: list[bytes]) -> dict[str, Any]:
 
 
 def analyze_and_advise(images: list[bytes]) -> dict:
-    """Vision → holdings import → buy/sell guide."""
+    """Vision → holdings import → buy/sell guide.
+
+    When Robinhood Crypto API is linked, crypto qty/prices stay live from the
+    API; the screenshot is used only to capture Investing Cash + stock qtys
+    (which the Crypto API does not expose).
+    """
     parsed = parse_screenshots(images)
     positions = []
     for p in parsed.get("positions") or []:
@@ -170,30 +184,83 @@ def analyze_and_advise(images: list[bytes]) -> dict:
         qty = float(p.get("qty") or 0)
         if not sym or qty <= 0:
             continue
+        asset = str(p.get("asset_class") or "crypto").lower()
+        if asset in ("stock", "etf", "equity"):
+            continue
         avg = p.get("avg_cost")
         positions.append({
             "symbol": sym,
             "qty": qty,
             "avg_cost": float(avg) if avg not in (None, "", 0) else None,
         })
-    if not positions and not float(parsed.get("cash") or 0):
-        raise ValueError("스크린샷에서 크립토 보유를 찾지 못했습니다.")
+    stocks = []
+    for p in parsed.get("stocks") or []:
+        sym = str(p.get("symbol", "")).upper().strip()
+        qty = float(p.get("qty") or 0)
+        if not sym or qty <= 0:
+            continue
+        row = {"symbol": sym, "qty": qty}
+        if p.get("price") not in (None, "", 0):
+            try:
+                row["price"] = float(p["price"])
+            except (TypeError, ValueError):
+                pass
+        stocks.append(row)
+    crypto_syms = {
+        "BTC", "ETH", "SOL", "DOGE", "XRP", "AVAX", "LINK", "LTC", "UNI",
+        "SHIB", "BCH", "AAVE", "ADA", "DOT", "MATIC", "POL", "PEPE", "BONK",
+    }
+    kept = []
+    for p in positions:
+        if p["symbol"] in crypto_syms or "/" in p["symbol"]:
+            kept.append(p)
+        else:
+            stocks.append({"symbol": p["symbol"], "qty": p["qty"]})
+    positions = kept
 
     cash = float(parsed.get("cash") or 0)
+    if not positions and not cash and not stocks:
+        raise ValueError("스크린샷에서 보유·현금을 찾지 못했습니다.")
+
     principal = parsed.get("principal")
     principal_f = float(principal) if principal not in (None, "", 0) else None
 
     log_activity(
         "crypto",
-        f"스크린샷 분석 — {len(positions)}종목, 현금 ${cash:,.0f}"
+        f"스크린샷 분석 — 크립토 {len(positions)} · 주식 {len(stocks)} · Cash ${cash:,.0f}"
         + (f" · {parsed.get('notes', '')}" if parsed.get("notes") else ""),
     )
-    data = import_holdings(cash, positions, principal_f)
+
+    from .robinhood_config import is_configured
+
+    if is_configured() and (cash > 0 or stocks):
+        # Live API owns crypto; screenshot only fills Cash + equities.
+        book = store.get(BOOK_KEY) or {}
+        if cash > 0:
+            book["brokerage_cash"] = round(cash, 2)
+            book["stocks_value"] = 0.0 if stocks else book.get("stocks_value", 0.0)
+        if stocks:
+            book["stock_positions"] = stocks
+            book["stocks_value"] = 0.0
+        if principal_f and principal_f > 0:
+            book["principal"] = principal_f
+        from datetime import datetime, timezone
+        book["updated_at"] = datetime.now(timezone.utc).isoformat()
+        store.set(BOOK_KEY, book)
+        store.set(CACHE_KEY, None)
+        data = advise_and_apply(force=True)
+    else:
+        data = import_holdings(
+            cash, positions, principal_f,
+            brokerage_cash=cash if cash > 0 else None,
+            stock_positions=stocks or None,
+        )
     if data.get("ok"):
         data["parsed"] = {
             "cash": cash,
             "principal": principal_f,
             "positions": positions,
+            "stocks": stocks,
             "notes": parsed.get("notes", ""),
         }
     return data

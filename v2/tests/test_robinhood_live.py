@@ -134,13 +134,40 @@ def test_fetch_snapshot_adds_stocks_value_to_total():
          patch("app.robinhood_live.RobinhoodCryptoClient", return_value=mock_client), \
          patch("app.robinhood_live.fetch_bars", return_value={}), \
          patch("app.robinhood_live.store") as mock_store:
-        mock_store.get.return_value = {"stocks_value": 3133.53}
+        mock_store.get.return_value = {"stocks_value": 733.70}
         snap = fetch_robinhood_snapshot()
     assert snap["buying_power"] == pytest.approx(724.82)
     assert snap["holdings_value"] == pytest.approx(150.0)
-    assert snap["crypto_total"] == pytest.approx(874.82)
-    assert snap["stocks_value"] == pytest.approx(3133.53)
-    assert snap["total"] == pytest.approx(874.82 + 3133.53)
+    assert snap["cash"] == pytest.approx(724.82)  # API BP until brokerage_cash set
+    assert snap["stocks_value"] == pytest.approx(733.70)
+    assert snap["total"] == pytest.approx(150.0 + 724.82 + 733.70)
+    assert snap["cash_incomplete"] is True
+
+
+def test_fetch_snapshot_uses_brokerage_cash_and_stock_positions():
+    mock_client = MagicMock()
+    mock_client.get_account.return_value = {"buying_power": "724.82"}
+    mock_client.get_all_holdings.return_value = [
+        {"asset_code": "XRP", "total_quantity": "100"},
+    ]
+    mock_client.get_best_bid_ask.return_value = {
+        "results": [{"symbol": "XRP-USD", "price": "1.50"}],
+    }
+    with patch("app.robinhood_live.get_credentials", return_value=("key", "priv")), \
+         patch("app.robinhood_live.RobinhoodCryptoClient", return_value=mock_client), \
+         patch("app.robinhood_live.fetch_bars", return_value={}), \
+         patch("app.robinhood_live._stock_last_price", return_value=44.66), \
+         patch("app.robinhood_live.store") as mock_store:
+        mock_store.get.return_value = {
+            "brokerage_cash": 3124.82,
+            "stock_positions": [{"symbol": "IONQ", "qty": 16.47}],
+        }
+        snap = fetch_robinhood_snapshot()
+    assert snap["cash"] == pytest.approx(3124.82)
+    assert snap["buying_power"] == pytest.approx(724.82)
+    assert snap["stocks_value"] == pytest.approx(round(16.47 * 44.66, 2))
+    assert snap["total"] == pytest.approx(150.0 + 3124.82 + round(16.47 * 44.66, 2))
+    assert snap["cash_incomplete"] is False
 
 def test_auto_confirm_buy_when_bought_more_than_recommended():
     """User bought $1000 when we recommended $800 — clear the rec."""

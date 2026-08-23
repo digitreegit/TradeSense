@@ -1020,6 +1020,8 @@ def set_investing_total(investing_total: float) -> dict:
 def import_holdings(
     cash: float, holdings: list[dict], principal: float | None = None,
     *, notify_as: str | None = "스크린샷 분석",
+    brokerage_cash: float | None = None,
+    stock_positions: list[dict] | None = None,
 ) -> dict:
     """Rebuild the book from the user's real Robinhood holdings.
 
@@ -1028,7 +1030,11 @@ def import_holdings(
     position for the truthful total-return display. `principal` is the
     recovery target (original capital); if omitted it is inferred from
     qty × avg_cost + cash.
+
+    `brokerage_cash` is Investing Cash (may exceed crypto buying_power).
+    `stock_positions` are equities shown on the Investing screen.
     """
+    prev = store.get(BOOK_KEY) or {}
     valid = {p.split("/")[0]: p for p in CANDIDATES}
     frames = fetch_bars()
     metrics = {s: m for s, m in
@@ -1061,6 +1067,28 @@ def import_holdings(
         sum(u["dollars"] for u in p["units"]) for p in book["positions"].values()
     )
     book["principal"] = float(principal) if principal and principal > 0 else inferred
+    if brokerage_cash is not None and float(brokerage_cash) >= 0:
+        book["brokerage_cash"] = round(float(brokerage_cash), 2)
+        book["stocks_value"] = 0.0  # clear legacy lump
+    elif prev.get("brokerage_cash") is not None:
+        book["brokerage_cash"] = prev["brokerage_cash"]
+    if stock_positions is not None:
+        cleaned = []
+        for s in stock_positions:
+            sym = str(s.get("symbol") or "").upper().strip()
+            qty = float(s.get("qty") or 0)
+            if sym and qty > 0:
+                row = {"symbol": sym, "qty": qty}
+                if s.get("price") not in (None, ""):
+                    try:
+                        row["price"] = float(s["price"])
+                    except (TypeError, ValueError):
+                        pass
+                cleaned.append(row)
+        book["stock_positions"] = cleaned
+        book["stocks_value"] = 0.0
+    elif prev.get("stock_positions"):
+        book["stock_positions"] = prev["stock_positions"]
     book["updated_at"] = datetime.now(timezone.utc).isoformat()
     store.set(BOOK_KEY, book)
     store.set(PENDING_KEY, [])

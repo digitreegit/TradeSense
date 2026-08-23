@@ -135,31 +135,107 @@ def fetch_robinhood_snapshot() -> dict | None:
 
     positions.sort(key=lambda p: p.get("value") or 0, reverse=True)
     day_change = round(sum(float(p.get("day_change") or 0) for p in positions), 2)
-    crypto_total = cash + holdings_value
-    # Stocks live outside the Crypto API — pulled from book when the user
-    # syncs Investing total / stocks value so the hero matches the app.
+
     book = store.get(BOOK_KEY) or {}
-    try:
-        stocks_value = max(0.0, float(book.get("stocks_value") or 0))
-    except (TypeError, ValueError):
-        stocks_value = 0.0
-    account_total = crypto_total + stocks_value
-    base = crypto_total - day_change
+    buying_power = cash
+    display_cash, stocks_value, cash_label, stock_rows = _cash_and_stocks_from_book(
+        book, buying_power,
+    )
+    # Investing-style total: crypto holdings + brokerage cash + stocks.
+    # Do NOT add buying_power on top when display_cash already includes it.
+    account_total = holdings_value + display_cash + stocks_value
+    crypto_total = holdings_value + buying_power
+    base = max(holdings_value, 1e-9)
     day_change_pct = (day_change / base) if base > 0 else 0.0
 
     return {
-        "buying_power": round(cash, 2),
+        "buying_power": round(buying_power, 2),
+        "cash": round(display_cash, 2),
+        "cash_label": cash_label,
         "holdings_value": round(holdings_value, 2),
         "crypto_total": round(crypto_total, 2),
         "stocks_value": round(stocks_value, 2),
-        # Hero total matches Robinhood Investing when stocks_value is set.
+        "stock_positions": stock_rows,
         "total": round(account_total, 2),
+        "cash_incomplete": display_cash <= buying_power + 0.01,
         "day_change": day_change,
         "day_change_pct": day_change_pct,
         "positions": positions,
         "unpriced": unpriced,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def _stock_last_price(symbol: str) -> float | None:
+    try:
+        from .alpaca_config import get_credentials
+        api_key, secret_key = get_credentials()
+        if not api_key or not secret_key:
+            return None
+        from alpaca.data.historical import StockHistoricalDataClient
+        from alpaca.data.requests import StockLatestTradeRequest
+        client = StockHistoricalDataClient(api_key, secret_key)
+        trade = client.get_stock_latest_trade(StockLatestTradeRequest(symbol_or_symbols=symbol))
+        row = trade.get(symbol) if isinstance(trade, dict) else None
+        if row is None and hasattr(trade, "get"):
+            row = trade.get(symbol)
+        px = getattr(row, "price", None) if row is not None else None
+        return float(px) if px else None
+    except Exception as exc:
+        log.debug("stock quote %s failed: %s", symbol, exc)
+        return None
+
+
+def _cash_and_stocks_from_book(
+    book: dict, buying_power: float,
+) -> tuple[float, float, str, list[dict]]:
+    """Resolve brokerage Cash + stocks for Investing-matching totals.
+
+    Crypto API only exposes buying_power. App "Cash" (often larger) and stock
+    quantities are stored from Investing screenshots (brokerage_cash,
+    stock_positions). stocks_value alone is treated as a stocks dollar mark.
+    """
+    stock_positions = book.get("stock_positions") or []
+    stock_rows: list[dict] = []
+    stocks_value = 0.0
+    for raw in stock_positions:
+        sym = str(raw.get("symbol") or "").upper().strip()
+        try:
+            qty = float(raw.get("qty") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not sym or qty <= 0:
+            continue
+        px = raw.get("price")
+        try:
+            price = float(px) if px not in (None, "") else 0.0
+        except (TypeError, ValueError):
+            price = 0.0
+        if price <= 0:
+            price = _stock_last_price(sym) or 0.0
+        value = qty * price if price > 0 else float(raw.get("value") or 0)
+        stocks_value += value
+        stock_rows.append({
+            "symbol": sym, "qty": qty, "price": price, "value": round(value, 2),
+        })
+
+    if not stock_rows:
+        try:
+            legacy_stocks = float(book.get("stocks_value") or 0)
+        except (TypeError, ValueError):
+            legacy_stocks = 0.0
+        if legacy_stocks > 0:
+            stocks_value = legacy_stocks
+
+    brokerage_cash = book.get("brokerage_cash")
+    if brokerage_cash is not None:
+        try:
+            cash = max(0.0, float(brokerage_cash))
+            return cash, stocks_value, "Cash", stock_rows
+        except (TypeError, ValueError):
+            pass
+
+    return buying_power, stocks_value, "Cash", stock_rows
 
 
 def apply_robinhood_live(book: dict, snap: dict) -> None:
@@ -234,6 +310,8 @@ def refresh_from_robinhood_live() -> tuple[dict | None, dict[str, float], dict[s
     prev_qty = book_qty_by_pair(book)
     principal = book.get("principal")
     stocks_value = book.get("stocks_value")
+    brokerage_cash = book.get("brokerage_cash")
+    stock_positions = book.get("stock_positions")
     avg_by_pair = {
         pair: pos.get("avg_cost")
         for pair, pos in (book.get("positions") or {}).items()
@@ -251,6 +329,13 @@ def refresh_from_robinhood_live() -> tuple[dict | None, dict[str, float], dict[s
             book["stocks_value"] = max(0.0, float(stocks_value))
         except (TypeError, ValueError):
             pass
+    if brokerage_cash is not None:
+        try:
+            book["brokerage_cash"] = max(0.0, float(brokerage_cash))
+        except (TypeError, ValueError):
+            pass
+    if stock_positions is not None:
+        book["stock_positions"] = stock_positions
     for pair, pos in book.get("positions", {}).items():
         if avg_by_pair.get(pair):
             pos["avg_cost"] = float(avg_by_pair[pair])
@@ -278,11 +363,13 @@ def merge_live_into_summary(summary: dict, snap: dict) -> dict:
     principal = float(summary.get("principal") or summary.get("budget") or 0)
     total = float(snap.get("total") or 0)
     summary = {**summary}
-    summary["cash"] = float(snap.get("buying_power") or 0)
+    summary["cash"] = float(snap.get("cash") or snap.get("buying_power") or 0)
     summary["total"] = total
     summary["crypto_total"] = float(snap.get("crypto_total") or total)
     summary["stocks_value"] = float(snap.get("stocks_value") or 0)
     summary["holdings_value"] = float(snap.get("holdings_value") or 0)
+    summary["buying_power"] = float(snap.get("buying_power") or 0)
+    summary["cash_label"] = snap.get("cash_label") or "Cash"
     if principal > 0:
         summary["gap"] = max(0.0, principal - total)
         summary["recovered_pct"] = total / principal
