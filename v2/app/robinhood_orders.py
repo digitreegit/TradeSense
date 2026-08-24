@@ -59,6 +59,11 @@ def _mid_price(client: RobinhoodCryptoClient, rh_symbol: str) -> float:
     raise RobinhoodAPIError(f"{rh_symbol} 시세를 가져올 수 없습니다.")
 
 
+def _buying_power(client: RobinhoodCryptoClient) -> float:
+    acc = client.get_account()
+    return float(acc.get("buying_power") or 0)
+
+
 def _available_qty(client: RobinhoodCryptoClient, asset_code: str) -> float:
     code = asset_code.upper().replace("-USD", "")
     for row in client.get_all_holdings():
@@ -109,6 +114,26 @@ def place_market_dollars(
     cid = client_order_id or str(uuid.uuid4())
 
     try:
+        if not client.is_symbol_api_tradable(rh_symbol):
+            return {
+                "ok": False,
+                "error": (
+                    f"{rh_symbol}는 Robinhood API로 주문할 수 없습니다. "
+                    "앱에서 수동으로 실행하세요."
+                ),
+                "client_order_id": cid,
+            }
+        acc_v2 = client.get_primary_account_v2()
+        if acc_v2.get("is_api_tradable") is False:
+            return {
+                "ok": False,
+                "error": "이 크립토 계좌는 API 주문이 꺼져 있습니다. Robinhood 지원에 문의하세요.",
+                "client_order_id": cid,
+            }
+    except RobinhoodAPIError as exc:
+        log.warning("order preflight skipped: %s", exc)
+
+    try:
         price = _mid_price(client, rh_symbol)
     except Exception as exc:
         if fallback_price and float(fallback_price) > 0:
@@ -133,6 +158,28 @@ def place_market_dollars(
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
 
+    if side == "buy":
+        bp = _buying_power(client)
+        if bp <= 0:
+            return {
+                "ok": False,
+                "error": "크립토 매수 가능 금액(Buying power)이 없습니다.",
+                "client_order_id": cid,
+            }
+        # Leave a little headroom for spread/fees.
+        max_buy = round(bp * 0.98, 2)
+        if dollars > max_buy:
+            return {
+                "ok": False,
+                "error": (
+                    f"매수 금액 ${dollars:,.0f}이(가) 크립토 Buying power "
+                    f"${bp:,.2f}보다 큽니다. ${max_buy:,.0f} 이하로 입력하세요. "
+                    "(Investing Cash와 Buying power는 다릅니다.)"
+                ),
+                "client_order_id": cid,
+                "buying_power": bp,
+            }
+
     body = {
         "client_order_id": cid,
         "side": side,
@@ -146,11 +193,22 @@ def place_market_dollars(
         log.exception("robinhood place_order failed")
         msg = str(exc)
         if "403" in msg or "permission" in msg.lower():
+            from .robinhood_config import keys_from_dashboard, mask_key
+
+            src = "대시보드" if keys_from_dashboard() else "Vercel 환경변수"
             msg = (
-                "Robinhood API 키에 주문 권한이 없습니다. "
-                "웹 classic → 크립토 설정 → API 키를 새로 만들고 "
-                "Place crypto orders(주문) 권한을 켠 뒤 TradeSense에 다시 저장하세요. "
+                "Robinhood API 주문 권한 거부(403). "
+                f"현재 키({mask_key(api_key)}, {src})가 주문용인지 확인하세요. "
+                "키 재발급 시 Place crypto orders( fee tiers 포함) 권한을 켜고, "
+                "설정에 API Key + Private Key를 다시 저장하세요. "
                 f"({exc})"
+            )
+        elif "400" in msg and "buying power" in msg.lower():
+            bp = _buying_power(client)
+            msg = (
+                f"크립토 Buying power(${bp:,.2f})보다 큰 매수 주문입니다. "
+                f"금액을 ${round(bp * 0.98):,.0f} 이하로 줄이거나 Robinhood 앱에서 "
+                "Investing Cash → Crypto로 자금을 옮기세요."
             )
         return {"ok": False, "error": msg, "client_order_id": cid}
     except Exception as exc:

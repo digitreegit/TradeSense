@@ -181,6 +181,11 @@ def generate_orders(
     if bear:
         unit = max(MIN_UNIT, round(unit * BEAR_SIZE, 0))
     floor = CASH_FLOOR * total_value
+    deployable = max(0.0, sim["cash"] - floor)
+    if deployable >= MIN_UNIT:
+        unit = min(unit, deployable)
+    else:
+        unit = 0.0
 
     def _order(side: str, sym: str, dollars: float, price: float,
                reason: str, kind: str, step: float):
@@ -248,6 +253,8 @@ def generate_orders(
             bought_this_run.add(sym)
 
     def _can_deploy(new_slot: bool) -> bool:
+        if unit < MIN_UNIT:
+            return False
         if sim["cash"] - floor < unit:
             return False
         if new_slot and len(sim["positions"]) >= MAX_POSITIONS:
@@ -898,6 +905,15 @@ def advise_and_apply(force: bool = False) -> dict:
             orders = [o for o in orders if _action_key(o) not in recent]
         orders = _merge_pending(store.get(PENDING_KEY) or [], orders)
         orders = _collapse_actionable(orders)
+        if rh_live:
+            bp = float(rh_live.get("buying_power") or 0)
+            max_buy = max(0.0, round(bp * 0.98, 0))
+            for o in orders:
+                if o.get("side") != "buy" or o.get("status") in _TERMINAL:
+                    continue
+                if max_buy < MIN_UNIT:
+                    continue
+                o["dollars"] = min(float(o.get("dollars") or 0), max_buy)
         store.set(PENDING_KEY, orders)
     except Exception as exc:
         log.exception("crypto advice failed")

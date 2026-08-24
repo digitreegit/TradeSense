@@ -97,6 +97,15 @@ def test_connection() -> dict:
         client = RobinhoodCryptoClient(api_key, private_key)
         account = client.get_account()
         holdings = client.get_all_holdings()
+        account_v2: dict = {}
+        try:
+            v2 = client.get_primary_account_v2()
+            account_v2 = {
+                "is_api_tradable": v2.get("is_api_tradable"),
+                "fee_tier_status": v2.get("fee_tier_status"),
+            }
+        except Exception:
+            pass
         return {
             "connected": True,
             "account": {
@@ -104,6 +113,7 @@ def test_connection() -> dict:
                 "status": account.get("status"),
                 "buying_power": float(account.get("buying_power") or 0),
                 "currency": account.get("buying_power_currency") or "USD",
+                **account_v2,
             },
             "holdings_count": len(holdings),
         }

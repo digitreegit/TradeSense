@@ -19,6 +19,9 @@ def test_place_market_dollars_buy():
     mock.get_best_bid_ask.return_value = {
         "results": [{"symbol": "XRP-USD", "price": "1.50"}],
     }
+    mock.get_trading_pairs.return_value = [{"symbol": "XRP-USD", "is_api_tradable": True}]
+    mock.get_primary_account_v2.return_value = {"is_api_tradable": True}
+    mock.get_account.return_value = {"buying_power": "500"}
     mock.place_order.return_value = {
         "id": "ord-1",
         "state": "filled",
@@ -43,6 +46,9 @@ def test_place_market_dollars_sell_all_uses_available():
     mock.get_best_bid_ask.return_value = {
         "results": [{"symbol": "XRP-USD", "price": "1.50"}],
     }
+    mock.get_trading_pairs.return_value = [{"symbol": "XRP-USD", "is_api_tradable": True}]
+    mock.get_primary_account_v2.return_value = {"is_api_tradable": True}
+    mock.get_account.return_value = {"buying_power": "5000"}
     mock.get_all_holdings.return_value = [
         {"asset_code": "XRP", "total_quantity": "100", "quantity_available_for_trading": "90"},
     ]
@@ -61,3 +67,16 @@ def test_place_market_dollars_sell_all_uses_available():
     assert out["ok"] is True
     body = mock.place_order.call_args[0][0]
     assert body["market_order_config"]["asset_quantity"] == "90"
+
+
+def test_place_market_dollars_buy_rejects_over_buying_power():
+    mock = MagicMock()
+    mock.get_trading_pairs.return_value = [{"symbol": "XRP-USD", "is_api_tradable": True}]
+    mock.get_primary_account_v2.return_value = {"is_api_tradable": True}
+    mock.get_account.return_value = {"buying_power": "100"}
+    with patch("app.robinhood_orders.get_credentials", return_value=("k", "p")), \
+         patch("app.robinhood_orders.RobinhoodCryptoClient", return_value=mock):
+        out = place_market_dollars(side="buy", pair="XRP/USD", dollars=200)
+    assert out["ok"] is False
+    assert "Buying power" in out["error"]
+    mock.place_order.assert_not_called()

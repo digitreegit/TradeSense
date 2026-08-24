@@ -124,11 +124,68 @@ class RobinhoodCryptoClient:
         data = self.request("GET", f"/api/v1/crypto/trading/orders/{order_id}/")
         return data if isinstance(data, dict) else {}
 
+    def get_trading_pairs(self, *symbols: str) -> list[dict]:
+        query = self._query_params("symbol", *symbols) if symbols else ""
+        path = f"/api/v1/crypto/trading/trading_pairs/{query}"
+        data = self.request("GET", path)
+        if isinstance(data, dict):
+            return list(data.get("results") or [])
+        return []
+
+    def is_symbol_api_tradable(self, rh_symbol: str) -> bool:
+        sym = rh_symbol.upper()
+        for row in self.get_trading_pairs(sym):
+            if str(row.get("symbol") or "").upper() == sym:
+                return bool(row.get("is_api_tradable"))
+        return False
+
+    def get_accounts_v2(self) -> list[dict]:
+        data = self.request("GET", "/api/v2/crypto/trading/accounts/")
+        if isinstance(data, dict):
+            return list(data.get("results") or [])
+        return []
+
+    def get_primary_account_v2(self) -> dict:
+        rows = self.get_accounts_v2()
+        if not rows:
+            raise RobinhoodAPIError("크립토 계좌를 찾을 수 없습니다.")
+        return rows[0]
+
+    def get_account_number(self) -> str:
+        acc = self.get_account()
+        num = acc.get("account_number")
+        if num:
+            return str(num)
+        v2 = self.get_primary_account_v2()
+        num = v2.get("account_number")
+        if num:
+            return str(num)
+        raise RobinhoodAPIError("account_number를 찾을 수 없습니다.")
+
     def place_order(self, body: dict) -> dict:
-        """POST /api/v1/crypto/trading/orders/ — body must be JSON-serializable."""
+        """Place order via v1; on 403 retry v2 (fee-tier keys)."""
         payload = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
-        data = self.request("POST", "/api/v1/crypto/trading/orders/", body=payload)
+        v1_err: RobinhoodAPIError | None = None
+        try:
+            data = self.request("POST", "/api/v1/crypto/trading/orders/", body=payload)
+            if isinstance(data, dict):
+                return data
+            raise RobinhoodAPIError("주문 응답을 읽을 수 없습니다.")
+        except RobinhoodAPIError as exc:
+            if "403" not in str(exc):
+                raise
+            v1_err = exc
+        account_number = self.get_account_number()
+        path = f"/api/v2/crypto/trading/orders/?account_number={account_number}"
+        try:
+            data = self.request("POST", path, body=payload)
+        except RobinhoodAPIError:
+            if v1_err:
+                raise v1_err
+            raise
         if not isinstance(data, dict):
+            if v1_err:
+                raise v1_err
             raise RobinhoodAPIError("주문 응답을 읽을 수 없습니다.")
         return data
 
