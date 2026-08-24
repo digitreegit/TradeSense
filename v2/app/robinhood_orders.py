@@ -144,7 +144,15 @@ def place_market_dollars(
         placed = client.place_order(body)
     except RobinhoodAPIError as exc:
         log.exception("robinhood place_order failed")
-        return {"ok": False, "error": str(exc), "client_order_id": cid}
+        msg = str(exc)
+        if "403" in msg or "permission" in msg.lower():
+            msg = (
+                "Robinhood API 키에 주문 권한이 없습니다. "
+                "웹 classic → 크립토 설정 → API 키를 새로 만들고 "
+                "Place crypto orders(주문) 권한을 켠 뒤 TradeSense에 다시 저장하세요. "
+                f"({exc})"
+            )
+        return {"ok": False, "error": msg, "client_order_id": cid}
     except Exception as exc:
         log.exception("robinhood place_order unexpected")
         return {"ok": False, "error": f"주문 실패: {exc}", "client_order_id": cid}
