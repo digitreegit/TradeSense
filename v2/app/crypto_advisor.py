@@ -4,7 +4,8 @@ on Robinhood. Primary objective: recover original principal.
 Alpaca cannot trade crypto in this account's state, so no real orders are
 ever placed here. Proposed orders stay pending until the user confirms
 (optionally with the actual Robinhood fill size). The book is updated only
-on confirm. Checks run 09:00 / 12:00 / 21:00 ET.
+on confirm. Checks run every ~15 min while awake (06:00–23:59 ET);
+Telegram only when a tip needs approval (quiet 00:00–05:59 ET).
 
 Recovery playbook: do not average down a concentrated bag (XRP). Trim
 overweight names, dump dust, and redeploy proceeds into relative-strength
@@ -18,10 +19,12 @@ import logging
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 from .briefing import log_activity
+from .config import settings
 from .indicators import ema, rsi, sma
 from .notify import send
 from .state import store
@@ -59,7 +62,9 @@ BEAR_SIZE = 0.75       # recovery: deploy 75% size in a bear, not half
 CASH_FLOOR = 0.15      # keep 15% cash; the rest can work
 RSI_MAX = 75.0         # skip only clearly overbought strength
 NO_AVERAGEDOWN = 0.15  # never add if price is >15% below original avg cost
-SCHEDULE = "매일 09:00 · 12:00 · 21:00 (ET)"
+SCHEDULE = "수시 점검 (06:00–24:00 ET) · 거래 필요할 때만 텔레그램 · 00–06시 조용"
+QUIET_START_HOUR = 0   # inclusive ET
+QUIET_END_HOUR = 6     # exclusive — no Telegram midnight–6 AM ET
 
 
 def fetch_bars(days: int = 400) -> dict[str, pd.DataFrame]:
@@ -589,19 +594,33 @@ def _format_crypto_telegram(data: dict, source: str) -> str:
     return header + "\n" + "\n".join(lines) + "\n" + status
 
 
-def notify_crypto_orders(data: dict, source: str, *, force: bool = False) -> bool:
-    """Telegram alert for crypto checks.
+def _in_quiet_hours(now: datetime | None = None) -> bool:
+    """True during ET quiet window (default midnight–06:00)."""
+    tz = ZoneInfo(settings.timezone)
+    local = (now or datetime.now(tz)).astimezone(tz)
+    return QUIET_START_HOUR <= local.hour < QUIET_END_HOUR
 
-    - force=False (ad-hoc): only ping when there are actionable tips, and skip
-      duplicates via fingerprint.
-    - force=True (09:00 / 12:00 / 21:00 ET): always send, including
-      "할 일 없음" status so the daily check is never silent.
+
+def notify_crypto_orders(data: dict, source: str, *, force: bool = False) -> bool:
+    """Telegram when crypto tips need attention.
+
+    - Sends only when there are actionable pending tips (unless force=True).
+    - Dedupes identical tip sets via fingerprint.
+    - Quiet hours (00:00–05:59 ET): never send, even with force.
     """
     if not data.get("ok"):
         return False
+    if _in_quiet_hours():
+        log.info("crypto telegram skipped — quiet hours (%s)", source)
+        return True
     pending = data.get("orders") or []
     if not pending and not force:
         return True
+    # Prefer not to spam empty "할 일 없음" — force empty is reserved for rare ops.
+    if not pending and force:
+        # Still allow empty pings only outside quiet hours when explicitly forced
+        # for diagnostics; scheduled checks no longer force empty.
+        pass
     fp = _order_fingerprint(pending) if pending else ("empty",)
     if not force and store.get(NOTIFY_FP_KEY) == fp:
         return True
@@ -1224,8 +1243,8 @@ def _fmt_px(v: float) -> str:
     return f"{v:.6g}"
 
 
-def run_scheduled(slot: str) -> bool:
-    """Three daily checks (09:00 / 12:00 / 21:00 ET). Telegram on every slot."""
+def run_scheduled(slot: str = "check") -> bool:
+    """Frequent awake-hours check. Telegram only when tips need approval."""
     data = advise_and_apply(force=True)
     if not data.get("ok"):
         log_activity("crypto", f"크립토 어드바이저 실패: {data.get('error')}")
@@ -1237,13 +1256,13 @@ def run_scheduled(slot: str) -> bool:
         log_activity("crypto", f"자동 실행 — 성공 {ok_n}/{len(auto_results)}")
         data = advise_and_apply(force=True)
 
-    labels = {"am": "아침", "noon": "점심", "pm": "저녁"}
-    when = labels.get(slot, slot)
-    if not notify_crypto_orders(data, when, force=True):
-        log_activity("crypto", f"크립토 어드바이저({slot}) — 텔레그램 발송 실패")
-        return False
-
     n = len(data.get("orders") or [])
+    # Only notify when there is something to approve/execute (deduped).
+    if n:
+        if not notify_crypto_orders(data, "승인 요청", force=False):
+            log_activity("crypto", f"크립토 어드바이저({slot}) — 텔레그램 발송 실패")
+            return False
+
     s = data.get("summary") or {}
     gap = s.get("gap") or 0
     principal = s.get("principal") or s.get("budget") or 0

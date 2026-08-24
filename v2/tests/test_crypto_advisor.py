@@ -342,21 +342,35 @@ def test_notify_crypto_orders_skips_when_empty():
         send.assert_not_called()
 
 
-def test_notify_crypto_orders_force_sends_even_when_empty():
-    """Scheduled 09/12/21 checks must always ping, including '할 일 없음'."""
+def test_notify_crypto_orders_quiet_hours():
+    """No Telegram between midnight and 6 AM ET."""
+    from datetime import datetime
     from unittest.mock import patch
+    from zoneinfo import ZoneInfo
     from app.crypto_advisor import notify_crypto_orders
+    from app.state import store
 
+    store.set("crypto_notify_fp", None)
     data = {
         "ok": True,
-        "orders": [],
+        "orders": [{
+            "id": "a1", "side": "buy", "symbol": "XRP",
+            "dollars": 100, "price": 1.5, "reason": "test",
+        }],
         "summary": {"total": 6000, "principal": 10000, "gap": 4000, "cash": 80},
         "market": {"label": "CHOP"},
     }
-    with patch("app.crypto_advisor.send", return_value=True) as send:
-        assert notify_crypto_orders(data, "아침", force=True) is True
+    quiet = datetime(2026, 8, 24, 2, 30, tzinfo=ZoneInfo("America/New_York"))
+    with patch("app.crypto_advisor.send") as send, \
+         patch("app.crypto_advisor._in_quiet_hours", return_value=True):
+        assert notify_crypto_orders(data, "승인 요청", force=True) is True
+        send.assert_not_called()
+    awake = datetime(2026, 8, 24, 10, 0, tzinfo=ZoneInfo("America/New_York"))
+    with patch("app.crypto_advisor.send", return_value=True) as send, \
+         patch("app.crypto_advisor._in_quiet_hours", return_value=False):
+        assert notify_crypto_orders(data, "승인 요청", force=False) is True
         assert send.call_count == 1
-        assert "주문 없음" in send.call_args[0][0]
+        assert "승인 필요" in send.call_args[0][0] or "매수" in send.call_args[0][0]
 
 
 def test_notify_crypto_orders_sends_when_actionable():
@@ -372,7 +386,8 @@ def test_notify_crypto_orders_sends_when_actionable():
         "summary": {"total": 6000, "principal": 10000, "gap": 4000, "cash": 80},
         "market": {"label": "CHOP"},
     }
-    with patch("app.crypto_advisor.send", return_value=True) as send:
+    with patch("app.crypto_advisor.send", return_value=True) as send, \
+         patch("app.crypto_advisor._in_quiet_hours", return_value=False):
         assert notify_crypto_orders(data, "스크린샷", force=True) is True
         assert send.call_count == 1
         assert "XRP" in send.call_args[0][0]

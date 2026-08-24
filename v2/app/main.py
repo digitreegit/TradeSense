@@ -47,10 +47,8 @@ JOBS = {
     "stops": engine.job_intraday_stops,
     "decision": engine.job_daily_decision,
     "crypto": engine.job_crypto,
-    # Crypto advisor (manual trading via Robinhood): 09:00 / 12:00 / 21:00 ET.
-    "crypto_am": lambda: run_scheduled("am"),
-    "crypto_noon": lambda: run_scheduled("noon"),
-    "crypto_pm": lambda: run_scheduled("pm"),
+    # Crypto advisor: awake-hours checks; Telegram only when tips need approval.
+    "crypto_advise": lambda: run_scheduled("check"),
 }
 
 # (weekdays_only, time predicate, dedupe once per ET day)
@@ -62,9 +60,8 @@ GUARDS = {
     "stops": (True, lambda h, m: (h == 9 and m >= 31) or 10 <= h < 16, False),
     "decision": (True, lambda h, m: (h == 16 and m >= 30) or h == 17, True),
     "crypto": (False, lambda h, m: True, False),
-    "crypto_am": (False, lambda h, m: h == 9, True),
-    "crypto_noon": (False, lambda h, m: h == 12, True),
-    "crypto_pm": (False, lambda h, m: h == 21, True),
+    # Every cron tick (~15m) between 06:00 and 23:59 ET (quiet 00:00–05:59).
+    "crypto_advise": (False, lambda h, m: 6 <= h <= 23, False),
 }
 
 
@@ -94,12 +91,9 @@ def _start_scheduler() -> "object":
     sched.add_job(wrap(engine.job_daily_decision),
                   CronTrigger(day_of_week="mon-fri", hour=16, minute=35, timezone=tz))
     sched.add_job(wrap(engine.job_crypto), CronTrigger(minute=5, timezone=tz))
-    sched.add_job(wrap(lambda: run_scheduled("am")),
-                  CronTrigger(hour=9, minute=0, timezone=tz))
-    sched.add_job(wrap(lambda: run_scheduled("noon")),
-                  CronTrigger(hour=12, minute=0, timezone=tz))
-    sched.add_job(wrap(lambda: run_scheduled("pm")),
-                  CronTrigger(hour=21, minute=0, timezone=tz))
+    # Crypto advisor: every 15 min while awake (06:00–23:45 ET). Quiet overnight.
+    sched.add_job(wrap(lambda: run_scheduled("check")),
+                  CronTrigger(hour="6-23", minute="0,15,30,45", timezone=tz))
     sched.start()
     return sched
 
@@ -109,7 +103,7 @@ def _authorized(request: Request) -> bool:
 
     Header is preferred (`Authorization: Bearer ...` or `x-cron-secret`), but
     some existing cron-job.org entries still use `?secret=...`. Keep both so
-    scheduled jobs (including 09:00/12:00/21:00 crypto alerts) don't silently
+    scheduled jobs (including crypto advise ticks) don't silently
     stop after auth-hardening deploys.
     """
     if not settings.cron_secret:
