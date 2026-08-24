@@ -67,6 +67,23 @@ def set_execution_mode(mode: str) -> str:
     if mode in ("semi", "auto") and not is_configured():
         raise ValueError("API 주문을 쓰려면 Robinhood 키를 먼저 연결하세요.")
     store.set(EXEC_MODE_KEY, mode)
+    # Switching into semi with pending tips → notify immediately.
+    if mode == "semi":
+        try:
+            from .crypto_advisor import PENDING_KEY, notify_crypto_orders
+            from .state import store as st
+            pending = [
+                o for o in (st.get(PENDING_KEY) or [])
+                if o.get("status") not in ("confirmed", "denied")
+            ]
+            if pending:
+                notify_crypto_orders(
+                    {"ok": True, "orders": pending, "summary": {}, "market": {}},
+                    "모드 전환",
+                    force=True,
+                )
+        except Exception:
+            pass
     return mode
 
 
