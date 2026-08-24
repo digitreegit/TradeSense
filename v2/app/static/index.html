@@ -443,7 +443,7 @@
 
 <section id="tab-crypto" class="tab-panel active" role="tabpanel">
   <div class="crypto-toolbar btn-row" style="justify-content:space-between;align-items:center">
-    <span class="field-hint" style="margin:0">Robinhood 잔액 · 주문은 앱에서 실행 후 여기서 확인</span>
+    <span class="field-hint" style="margin:0">Robinhood 잔액 · 설정에서 실행 모드(수동/반자동/자동)</span>
     <button type="button" class="btn btn-ghost btn-sm" id="btn-refresh-crypto">새로고침</button>
   </div>
   <div id="crypto-body"><div class="empty">설정에서 Robinhood 동기화 후 가이드를 확인하세요.</div></div>
@@ -508,7 +508,7 @@
   <div class="panel settings-section">
     <h3>크립토 · Robinhood API</h3>
     <p class="field-hint" style="margin-bottom:8px">
-      보유·현금 자동 동기화 (거래는 앱에서 직접).
+      보유·현금 동기화 + (선택) API로 크립토 주문.
       <a class="link" href="https://robinhood.com/us/en/support/articles/crypto-api/" target="_blank" rel="noreferrer">키 발급 안내</a>
     </p>
     <div class="rh-status">
@@ -523,8 +523,16 @@
       <input type="password" class="input" id="rh-api-key" autocomplete="off" placeholder="rh-api-…">
       <span class="field-label">Private Key (Base64)</span>
       <input type="password" class="input" id="rh-private-key" autocomplete="off" placeholder="Ed25519 private key">
+      <span class="field-label">실행 모드</span>
+      <select class="input" id="rh-exec-mode" aria-label="크립토 실행 모드">
+        <option value="manual">수동 — 앱에서 직접 거래 후 확인</option>
+        <option value="semi">반자동 — 확인 누르면 API 주문</option>
+        <option value="auto">완전자동 — 스케줄이 주문까지 실행</option>
+      </select>
+      <p class="field-hint" id="rh-exec-hint" style="margin:4px 0 8px">반자동부터 쓰세요. 완전자동은 검증 후.</p>
       <div class="btn-row">
         <button type="button" class="btn btn-primary btn-sm" id="btn-save-rh-keys">키 저장</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="btn-save-rh-mode">모드 저장</button>
         <button type="button" class="btn btn-ghost btn-sm" id="btn-delete-rh-keys" style="display:none">키 삭제</button>
         <button type="button" class="btn btn-primary btn-sm" id="btn-robinhood-sync">동기화 · 가이드 생성</button>
       </div>
@@ -1017,7 +1025,7 @@ const cpx = v => {
   return Number(v).toPrecision(3);
 };
 
-function renderCryptoOrder(o, {history = false} = {}) {
+function renderCryptoOrder(o, {history = false, mode = 'manual'} = {}) {
   const usd2 = v => '$' + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
   const whenTs = o.confirmed_at || o.denied_at;
   const when = whenTs
@@ -1025,10 +1033,17 @@ function renderCryptoOrder(o, {history = false} = {}) {
     : '';
   let fill;
   if (history || o.status === 'confirmed') {
-    const auto = o.auto_confirmed ? ' · RH 자동' : '';
-    fill = `<div class="fill"><span class="done">확인됨${auto} · 실제 ${usd2(o.actual_dollars ?? o.dollars)}${when ? ` · ${when}` : ''}</span></div>`;
+    const via = o.api_executed ? ' · API' : (o.auto_confirmed ? ' · RH 감지' : '');
+    fill = `<div class="fill"><span class="done">확인됨${via} · 실제 ${usd2(o.actual_dollars ?? o.dollars)}${when ? ` · ${when}` : ''}</span></div>`;
   } else if (o.status === 'denied') {
     fill = `<div class="fill"><span class="done denied">거부됨 (DENY)${when ? ` · ${when}` : ''}</span></div>`;
+  } else if (mode === 'semi' || mode === 'auto') {
+    fill = `<div class="fill">
+        <label>금액 $</label>
+        <input type="number" min="1" step="1" value="${Number(o.dollars)}" data-oid="${escapeHtml(o.id)}" aria-label="${o.symbol} 금액">
+        <button type="button" class="btn btn-ghost btn-deny-order" data-oid="${escapeHtml(o.id)}">거부</button>
+        <button type="button" class="btn btn-primary btn-confirm-order" data-oid="${escapeHtml(o.id)}">${mode === 'auto' ? '지금 실행' : 'API 주문'}</button>
+      </div>`;
   } else {
     fill = `<div class="fill">
         <label>실제 금액 $</label>
@@ -1256,17 +1271,23 @@ function renderCrypto(d, {quiet = false} = {}) {
 
   const {active, history} = splitCryptoOrders(d);
   lastCryptoHistory = history;
+  const execMode = d.execution_mode || 'manual';
+  const modeNote = {
+    manual: '매수·매도는 Robinhood 앱에서 직접 실행한 뒤 아래에서 확인하세요.',
+    semi: '아래 <b>API 주문</b>을 누르면 TradeSense가 Robinhood에 시장가 주문을 넣습니다.',
+    auto: '완전자동 — 스케줄 점검 시 대기 주문을 API로 실행합니다. 지금 바로도 실행 가능.',
+  }[execMode] || '';
 
   html += `<div class="rh-advisor">
-    <h3>실행 가이드</h3>
-    <p class="rh-orders-note">매수·매도는 Robinhood 앱에서 직접 실행하세요. 실행 후 아래에서 금액을 확인(DENY 가능)합니다.</p>
+    <h3>실행 가이드 <span class="rh-hint">· ${execMode === 'manual' ? '수동' : execMode === 'semi' ? '반자동' : '완전자동'}</span></h3>
+    <p class="rh-orders-note">${modeNote}</p>
     <div class="section-head">
       <h3 style="font-size:14px;color:var(--text);text-transform:none;letter-spacing:0">지금 할 일</h3>
       <button type="button" class="btn btn-ghost btn-sm" id="btn-crypto-history">History${history.length ? ` (${history.length})` : ''}</button>
     </div>`;
 
   if (active.length) {
-    html += active.map(o => renderCryptoOrder(o)).join('');
+    html += active.map(o => renderCryptoOrder(o, {mode: execMode})).join('');
   } else {
     html += `<div class="empty">할 일 없음 — 보유 유지</div>`;
   }
@@ -1421,6 +1442,33 @@ function renderRobinhoodStatus(st) {
       : (conn.error || '연결 실패');
   }
   if (delBtn) delBtn.style.display = st.keys_source === 'dashboard' ? '' : 'none';
+  const modeSel = $('rh-exec-mode');
+  if (modeSel && st.execution_mode) modeSel.value = st.execution_mode;
+}
+
+async function saveRobinhoodMode() {
+  const msg = $('rh-msg');
+  const mode = ($('rh-exec-mode')?.value || 'manual').trim();
+  try {
+    const r = await api('/api/crypto/execution-mode', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({mode}),
+    });
+    const d = await r.json();
+    if (!d.ok) {
+      msg.textContent = d.error || '모드 저장 실패';
+      msg.className = 'msg err';
+      return;
+    }
+    const labels = {manual: '수동', semi: '반자동', auto: '완전자동'};
+    msg.textContent = `실행 모드: ${labels[d.mode] || d.mode}`;
+    msg.className = 'msg ok';
+    loadCrypto({quiet: true});
+  } catch (e) {
+    msg.textContent = String(e.message || e);
+    msg.className = 'msg err';
+  }
 }
 
 async function loadRobinhoodStatus() {
@@ -1625,6 +1673,7 @@ screenshotInput.addEventListener('change', () => {
 $('btn-analyze-screenshots').addEventListener('click', analyzeScreenshots);
 $('btn-refresh-crypto').addEventListener('click', loadCrypto);
 $('btn-save-rh-keys').addEventListener('click', saveRobinhoodKeys);
+$('btn-save-rh-mode')?.addEventListener('click', saveRobinhoodMode);
 $('btn-delete-rh-keys').addEventListener('click', deleteRobinhoodKeys);
 $('btn-robinhood-sync').addEventListener('click', syncRobinhood);
 

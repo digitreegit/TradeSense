@@ -1,7 +1,8 @@
-"""Robinhood Crypto Trading API client (read-only)."""
+"""Robinhood Crypto Trading API client."""
 from __future__ import annotations
 
 import base64
+import json
 import logging
 from typing import Any
 from urllib.parse import urlparse
@@ -19,7 +20,7 @@ class RobinhoodAPIError(RuntimeError):
 
 
 class RobinhoodCryptoClient:
-    """Signed requests per https://docs.robinhood.com/ — no order placement here."""
+    """Signed requests per https://docs.robinhood.com/crypto/trading/."""
 
     def __init__(self, api_key: str, private_key_base64: str):
         self.api_key = api_key.strip()
@@ -58,7 +59,12 @@ class RobinhoodCryptoClient:
         if resp.status_code >= 400:
             detail = resp.text[:300]
             raise RobinhoodAPIError(f"Robinhood API {resp.status_code}: {detail}")
-        return resp.json()
+        if not resp.content:
+            return {}
+        try:
+            return resp.json()
+        except Exception:
+            return {"raw": resp.text}
 
     def get_account(self) -> dict:
         data = self.request("GET", "/api/v1/crypto/trading/accounts/")
@@ -110,13 +116,34 @@ class RobinhoodCryptoClient:
             path = parsed.path + (f"?{parsed.query}" if parsed.query else "")
         return out
 
+    def get_order(self, order_id: str) -> dict:
+        """Fetch one order by id (list filter — path form is undocumented)."""
+        rows = self.get_orders(id=order_id)
+        if rows:
+            return rows[0]
+        data = self.request("GET", f"/api/v1/crypto/trading/orders/{order_id}/")
+        return data if isinstance(data, dict) else {}
+
+    def place_order(self, body: dict) -> dict:
+        """POST /api/v1/crypto/trading/orders/ — body must be JSON-serializable."""
+        payload = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
+        data = self.request("POST", "/api/v1/crypto/trading/orders/", body=payload)
+        if not isinstance(data, dict):
+            raise RobinhoodAPIError("주문 응답을 읽을 수 없습니다.")
+        return data
+
     def get_recent_filled_orders(self, *, limit: int = 50) -> list[dict]:
         """Filled crypto orders, newest first when API provides timestamps."""
         try:
             rows = self.get_orders(state="filled", limit=str(limit))
         except RobinhoodAPIError:
-            # Some keys / API versions reject state filter — fall back and filter client-side.
             rows = self.get_orders(limit=str(limit))
-            rows = [r for r in rows if str(r.get("state") or "").lower() in ("filled", "partially_filled")]
-        rows.sort(key=lambda r: str(r.get("updated_at") or r.get("created_at") or ""), reverse=True)
+            rows = [
+                r for r in rows
+                if str(r.get("state") or "").lower() in ("filled", "partially_filled")
+            ]
+        rows.sort(
+            key=lambda r: str(r.get("updated_at") or r.get("created_at") or ""),
+            reverse=True,
+        )
         return rows

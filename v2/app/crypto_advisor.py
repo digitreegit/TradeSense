@@ -513,6 +513,8 @@ def _history_ts(o: dict) -> str:
 
 
 def _panel(orders: list[dict], view: dict) -> dict:
+    from .robinhood_config import get_execution_mode, is_configured
+
     active = [o for o in orders if o.get("status") not in _TERMINAL]
     history = [o for o in orders if o.get("status") in _TERMINAL]
     history.sort(key=_history_ts, reverse=True)
@@ -522,6 +524,8 @@ def _panel(orders: list[dict], view: dict) -> dict:
         "schedule": SCHEDULE,
         "orders": active,
         "order_history": history,
+        "execution_mode": get_execution_mode(),
+        "robinhood_configured": is_configured(),
         **view,
     }
 
@@ -845,6 +849,9 @@ def advise_and_apply(force: bool = False) -> dict:
                 data["robinhood_live"] = rh_live
                 if data.get("summary"):
                     data["summary"] = merge_live_into_summary(data["summary"], rh_live)
+            from .robinhood_config import get_execution_mode, is_configured
+            data["execution_mode"] = get_execution_mode()
+            data["robinhood_configured"] = is_configured()
             return data
     try:
         frames = fetch_bars()
@@ -878,8 +885,36 @@ def advise_and_apply(force: bool = False) -> dict:
     return data
 
 
+def _execute_on_robinhood(order: dict, dollars: float) -> dict:
+    """Place market order via Crypto API. Mutates order with fill metadata."""
+    from .robinhood_orders import place_market_dollars
+
+    cid = order.get("rh_client_order_id")
+    sell_all = order.get("kind") in ("exit",) and order.get("side") == "sell"
+    result = place_market_dollars(
+        side=order["side"],
+        pair=order.get("pair") or f"{order['symbol']}/USD",
+        dollars=dollars,
+        client_order_id=cid,
+        fallback_price=float(order.get("price") or 0) or None,
+        sell_all=sell_all,
+    )
+    if result.get("client_order_id"):
+        order["rh_client_order_id"] = result["client_order_id"]
+    if not result.get("ok"):
+        return result
+    order["rh_order_id"] = result.get("rh_order_id")
+    order["rh_state"] = result.get("state")
+    order["api_executed"] = True
+    if result.get("price"):
+        order["price"] = float(result["price"])
+    return result
+
+
 def confirm_order(order_id: str, actual_dollars: float | None = None) -> dict:
-    """Mark a pending order executed and size the book to the real fill."""
+    """Confirm a tip. In semi/auto mode, places the order on Robinhood first."""
+    from .robinhood_config import get_execution_mode, is_configured
+
     pending = store.get(PENDING_KEY) or []
     order = next((o for o in pending if o.get("id") == order_id), None)
     if order is None:
@@ -888,7 +923,23 @@ def confirm_order(order_id: str, actual_dollars: float | None = None) -> dict:
         cached = store.get(CACHE_KEY)
         raw = (cached or {}).get("data") or _panel(pending, {})
         return _ensure_order_split(raw)
+
     dollars = float(actual_dollars) if actual_dollars is not None else float(order["dollars"])
+    mode = get_execution_mode()
+    if mode in ("semi", "auto"):
+        if not is_configured():
+            return {"ok": False, "error": "API 실행 모드인데 Robinhood 키가 없습니다."}
+        placed = _execute_on_robinhood(order, dollars)
+        # Persist client_order_id even on failure so retries stay idempotent.
+        store.set(PENDING_KEY, pending)
+        if not placed.get("ok"):
+            return {
+                "ok": False,
+                "error": placed.get("error") or "Robinhood 주문 실패",
+                "execution_mode": mode,
+            }
+        dollars = float(placed.get("dollars") or dollars)
+
     book = store.get(BOOK_KEY) or _new_book()
     try:
         apply_order(book, order, dollars)
@@ -906,14 +957,48 @@ def confirm_order(order_id: str, actual_dollars: float | None = None) -> dict:
     store.set(BOOK_KEY, book)
     store.set(PENDING_KEY, pending)
     store.set(CACHE_KEY, None)
+    via = "API" if order.get("api_executed") else "수동"
     log_activity(
         "crypto",
-        f"실행 확인 {order['side']} {order['symbol']} "
+        f"실행 확인({via}) {order['side']} {order['symbol']} "
         f"추천 ${order['dollars']:.0f} → 실제 ${dollars:.0f}",
     )
-    # Rebuild the panel against the updated book (keep pending confirmations).
     data = advise_and_apply(force=True)
     return _ensure_order_split(data)
+
+
+def execute_pending_auto(*, limit: int = 4) -> list[dict]:
+    """Place up to `limit` pending tips when execution_mode == auto."""
+    from .robinhood_config import get_execution_mode
+
+    if get_execution_mode() != "auto":
+        return []
+    pending = [
+        o for o in (store.get(PENDING_KEY) or [])
+        if o.get("status") not in _TERMINAL
+    ]
+    done: list[dict] = []
+    for order in pending[:limit]:
+        result = confirm_order(order["id"], float(order.get("dollars") or 0))
+        done.append({
+            "id": order.get("id"),
+            "symbol": order.get("symbol"),
+            "side": order.get("side"),
+            "ok": bool(result.get("ok")),
+            "error": result.get("error"),
+            "dollars": result.get("summary") and None,
+        })
+        if result.get("ok"):
+            # Pull filled dollars from history tip if present
+            hist = (result.get("order_history") or []) + (result.get("orders") or [])
+            match = next((h for h in hist if h.get("id") == order["id"]), None)
+            if match and match.get("actual_dollars") is not None:
+                done[-1]["dollars"] = match["actual_dollars"]
+            else:
+                done[-1]["dollars"] = float(order.get("dollars") or 0)
+        else:
+            break  # stop on first failure so we don't cascade
+    return done
 
 
 def deny_order(order_id: str) -> dict:
@@ -1127,6 +1212,12 @@ def run_scheduled(slot: str) -> bool:
     if not data.get("ok"):
         log_activity("crypto", f"크립토 어드바이저 실패: {data.get('error')}")
         return False
+
+    auto_results = execute_pending_auto()
+    if auto_results:
+        ok_n = sum(1 for r in auto_results if r.get("ok"))
+        log_activity("crypto", f"자동 실행 — 성공 {ok_n}/{len(auto_results)}")
+        data = advise_and_apply(force=True)
 
     labels = {"am": "아침", "noon": "점심", "pm": "저녁"}
     when = labels.get(slot, slot)

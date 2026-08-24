@@ -26,6 +26,7 @@ from .crypto_advisor import (
 )
 from .engine import Engine
 from .robinhood_config import clear_keys as clear_robinhood_keys
+from .robinhood_config import get_execution_mode, set_execution_mode
 from .robinhood_config import save_keys as save_robinhood_keys
 from .robinhood_config import status_dict as robinhood_status_dict
 from .robinhood_sync import sync_from_robinhood
@@ -367,11 +368,39 @@ class CryptoDenyBody(BaseModel):
 
 @app.post("/api/crypto/confirm")
 def crypto_confirm(body: CryptoConfirmBody, request: Request):
-    """로빈후드 실행 확인 — 실제 체결 금액을 장부에 반영."""
+    """추천 확인 — manual은 장부만, semi/auto는 Robinhood API 주문 후 장부."""
     if not _admin_authorized(request):
         return _unauthorized()
     result = confirm_order(body.id, body.dollars)
     return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+
+
+class CryptoExecModeBody(BaseModel):
+    mode: str
+
+
+@app.get("/api/crypto/execution-mode")
+def crypto_exec_mode_get(request: Request):
+    if not _admin_authorized(request):
+        return _unauthorized()
+    return JSONResponse({
+        "ok": True,
+        "mode": get_execution_mode(),
+        "modes": ["manual", "semi", "auto"],
+    })
+
+
+@app.post("/api/crypto/execution-mode")
+def crypto_exec_mode_set(body: CryptoExecModeBody, request: Request):
+    if not _admin_authorized(request):
+        return _unauthorized()
+    try:
+        mode = set_execution_mode(body.mode)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    from .briefing import log_activity
+    log_activity("crypto", f"실행 모드 → {mode}")
+    return JSONResponse({"ok": True, "mode": mode})
 
 
 @app.post("/api/crypto/deny")

@@ -1,10 +1,16 @@
-"""Robinhood Crypto Trading API credentials (read-only sync)."""
+"""Robinhood Crypto Trading API credentials + execution mode."""
 from __future__ import annotations
 
 from .config import settings
 from .state import store
 
 CONFIG_KEY = "robinhood_config"
+EXEC_MODE_KEY = "crypto_exec_mode"
+
+# manual = advise only, user trades in app
+# semi   = user confirms in TradeSense → API places order
+# auto   = scheduled check places pending orders without confirm
+EXEC_MODES = ("manual", "semi", "auto")
 
 
 def get_stored_config() -> dict:
@@ -49,6 +55,21 @@ def clear_keys() -> None:
     store.set(CONFIG_KEY, {})
 
 
+def get_execution_mode() -> str:
+    mode = (store.get(EXEC_MODE_KEY) or "manual").strip().lower()
+    return mode if mode in EXEC_MODES else "manual"
+
+
+def set_execution_mode(mode: str) -> str:
+    mode = (mode or "").strip().lower()
+    if mode not in EXEC_MODES:
+        raise ValueError(f"모드는 {', '.join(EXEC_MODES)} 중 하나여야 합니다.")
+    if mode in ("semi", "auto") and not is_configured():
+        raise ValueError("API 주문을 쓰려면 Robinhood 키를 먼저 연결하세요.")
+    store.set(EXEC_MODE_KEY, mode)
+    return mode
+
+
 def test_connection() -> dict:
     api_key, private_key = get_credentials()
     if not api_key or not private_key:
@@ -83,4 +104,6 @@ def status_dict() -> dict:
         "keys_source": "dashboard" if keys_from_dashboard() else ("env" if env_keys else "none"),
         "key_hint": mask_key(api_key) if configured else "",
         "connection": conn,
+        "execution_mode": get_execution_mode(),
+        "execution_modes": list(EXEC_MODES),
     }

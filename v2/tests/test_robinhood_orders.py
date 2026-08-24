@@ -1,0 +1,63 @@
+"""Tests for Robinhood market order placement helpers."""
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from app.robinhood_orders import _qty_str, place_market_dollars
+
+
+def test_qty_str_formatting():
+    assert float(_qty_str(0.00123456789)) > 0
+    assert _qty_str(12.5) == "12.5"
+    assert _qty_str(1000000) == "1000000"
+    with pytest.raises(ValueError):
+        _qty_str(0)
+
+
+def test_place_market_dollars_buy():
+    mock = MagicMock()
+    mock.get_best_bid_ask.return_value = {
+        "results": [{"symbol": "XRP-USD", "price": "1.50"}],
+    }
+    mock.place_order.return_value = {
+        "id": "ord-1",
+        "state": "filled",
+        "filled_asset_quantity": "66.66666666",
+        "average_price": "1.50",
+    }
+    with patch("app.robinhood_orders.get_credentials", return_value=("k", "p")), \
+         patch("app.robinhood_orders.RobinhoodCryptoClient", return_value=mock), \
+         patch("app.robinhood_orders.time.sleep"):
+        out = place_market_dollars(side="buy", pair="XRP/USD", dollars=100)
+    assert out["ok"] is True
+    assert out["dollars"] == pytest.approx(100.0)
+    body = mock.place_order.call_args[0][0]
+    assert body["side"] == "buy"
+    assert body["type"] == "market"
+    assert body["symbol"] == "XRP-USD"
+    assert "asset_quantity" in body["market_order_config"]
+
+
+def test_place_market_dollars_sell_all_uses_available():
+    mock = MagicMock()
+    mock.get_best_bid_ask.return_value = {
+        "results": [{"symbol": "XRP-USD", "price": "1.50"}],
+    }
+    mock.get_all_holdings.return_value = [
+        {"asset_code": "XRP", "total_quantity": "100", "quantity_available_for_trading": "90"},
+    ]
+    mock.place_order.return_value = {
+        "id": "ord-2",
+        "state": "filled",
+        "filled_asset_quantity": "90",
+        "average_price": "1.50",
+    }
+    with patch("app.robinhood_orders.get_credentials", return_value=("k", "p")), \
+         patch("app.robinhood_orders.RobinhoodCryptoClient", return_value=mock), \
+         patch("app.robinhood_orders.time.sleep"):
+        out = place_market_dollars(
+            side="sell", pair="XRP/USD", dollars=9999, sell_all=True,
+        )
+    assert out["ok"] is True
+    body = mock.place_order.call_args[0][0]
+    assert body["market_order_config"]["asset_quantity"] == "90"
