@@ -553,8 +553,11 @@ def _order_fingerprint(orders: list[dict]) -> tuple:
 
 
 def _format_crypto_telegram(data: dict, source: str) -> str:
+    from .robinhood_config import get_execution_mode
+
     s = data.get("summary") or {}
     pending = data.get("orders") or []
+    mode = get_execution_mode()
     lines = [
         f"{'🟢 매수' if o['side'] == 'buy' else '🔴 매도'} {o['symbol']} "
         f"${o['dollars']:,.0f} (@${_fmt_px(o['price'])}) — {o['reason']}"
@@ -567,12 +570,23 @@ def _format_crypto_telegram(data: dict, source: str) -> str:
         f"(남음 ${gap:,.0f}) · 현금 ${s.get('cash', 0):,.0f} · "
         f"시장 {(data.get('market') or {}).get('label', '?')}"
     )
-    if lines:
-        return (
-            f"🪙 크립토 {source} — 로빈후드에서 실행 후 대시보드에서 확인\n"
-            + "\n".join(lines) + "\n" + status
+    if not lines:
+        return f"🪙 크립토 {source} — 주문 없음, 보유 유지\n{status}"
+
+    if mode == "semi":
+        header = (
+            f"⚠️ 거래 승인 필요 ({source})\n"
+            f"앱 열고 → 크립토 탭 → [API 주문] 눌러 주세요\n"
+            f"https://tradesense.skyface.com"
         )
-    return f"🪙 크립토 {source} — 주문 없음, 보유 유지\n{status}"
+    elif mode == "auto":
+        header = f"🤖 크립토 자동실행 대기/진행 ({source})"
+    else:
+        header = (
+            f"🪙 크립토 {source} — 로빈후드 앱에서 실행 후 대시보드에서 확인\n"
+            f"https://tradesense.skyface.com"
+        )
+    return header + "\n" + "\n".join(lines) + "\n" + status
 
 
 def notify_crypto_orders(data: dict, source: str, *, force: bool = False) -> bool:
@@ -882,6 +896,10 @@ def advise_and_apply(force: bool = False) -> dict:
             for o in auto_confirmed
         ]
     store.set(CACHE_KEY, {"cached_at": time.time(), "data": data})
+    # Semi-auto: ping Telegram whenever actionable tips appear (deduped).
+    from .robinhood_config import get_execution_mode
+    if get_execution_mode() == "semi" and (data.get("orders") or []):
+        notify_crypto_orders(data, "승인 요청", force=False)
     return data
 
 
