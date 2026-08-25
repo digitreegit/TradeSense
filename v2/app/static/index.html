@@ -1211,6 +1211,17 @@ function bindCryptoEvents(d) {
       },
     ));
   }
+  const manualBtn = $('btn-crypto-manual-now');
+  if (manualBtn) {
+    manualBtn.addEventListener('click', async () => {
+      const r = await api('/api/crypto/execution-mode', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({mode: 'manual'}),
+      });
+      if (r.ok) loadCrypto();
+    });
+  }
   scheduleCryptoRefresh(d);
 }
 
@@ -1232,6 +1243,7 @@ function renderCrypto(d, {quiet = false} = {}) {
 
   if (rh) {
     const updated = rh.updated_at ? new Date(rh.updated_at).toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'}) : '';
+    const captured = rh.investing_snapshot_at ? new Date(rh.investing_snapshot_at).toLocaleString() : '';
     const cashVal = Number(rh.cash ?? cash ?? 0);
     const bpVal = Number(rh.buying_power ?? cash ?? 0);
     const stocksVal = Number(rh.stocks_value || 0);
@@ -1240,8 +1252,8 @@ function renderCrypto(d, {quiet = false} = {}) {
     html += `<div class="rh-portfolio">
       <div class="rh-total">${rhMoney(total)}</div>
       ${renderRhDayChange(rh.day_change, rh.day_change_pct)}
-      <div class="rh-live"><span class="rh-live-dot"></span> LIVE · API${updated ? ` · ${updated}` : ''}</div>
-      <div class="rh-scope">크립토·Buying power는 API · Cash·주식은 Investing 스크린샷으로 자동</div>
+      <div class="rh-live"><span class="rh-live-dot"></span> Crypto · LIVE API${updated ? ` · ${updated}` : ''}</div>
+      <div class="rh-scope">전체는 실시간 크립토 + ${rh.cash_source === 'screenshot' ? '스크린샷 Cash' : 'API Buying power'} + 주식 혼합 추정치${captured ? ` · 캡처 ${escapeHtml(captured)}` : ''}</div>
     </div>
     <div class="rh-row">
       <span>Crypto</span>
@@ -1260,6 +1272,7 @@ function renderCrypto(d, {quiet = false} = {}) {
       <span class="rh-row-val">${rhMoney(stocksVal)}</span>
     </div>` : ''}
     ${cashGap ? `<div class="rh-warn">앱 총액과 맞추려면 설정 → Investing 화면 스크린샷(상단 총액 보이게) 1장 업로드. Buying power(${rhMoney(bpVal)})만으로는 로빈후드 총액이 안 나옵니다.</div>` : ''}
+    ${rh.cash_stale || rh.stocks_stale ? `<div class="rh-warn">스크린샷 잔액이 24시간 이상 지나 오래되었습니다. Cash는 API Buying power로 대체되며 주식 수량은 새 캡처가 필요합니다.</div>` : ''}
     ${rh.unpriced?.length ? `<div class="rh-warn">시세 미반영 ${rh.unpriced.map(u => escapeHtml(u.symbol)).join(', ')}</div>` : ''}
     <div class="rh-section">
       <div class="rh-section-head"><h3>Crypto</h3></div>
@@ -1283,12 +1296,14 @@ function renderCrypto(d, {quiet = false} = {}) {
   const modeNote = {
     manual: '매수·매도는 Robinhood 앱에서 직접 실행한 뒤 아래에서 확인하세요.',
     semi: '아래 <b>API 주문</b>을 누르면 TradeSense가 Robinhood에 시장가 주문을 넣습니다.',
-    auto: '완전자동 — 스케줄 점검 시 대기 주문을 API로 실행합니다. 지금 바로도 실행 가능.',
+    auto: '완전자동 — 시장가 주문으로 손실이 날 수 있습니다. 주문 실패 시 즉시 수동으로 잠기며 다음 점검까지 거래를 중단합니다.',
   }[execMode] || '';
 
   html += `<div class="rh-advisor">
     <h3>실행 가이드 <span class="rh-hint">· ${execMode === 'manual' ? '수동' : execMode === 'semi' ? '반자동' : '완전자동'}</span></h3>
     <p class="rh-orders-note">${modeNote}</p>
+    ${execMode === 'auto' ? '<button type="button" class="btn btn-ghost btn-sm" id="btn-crypto-manual-now">즉시 수동 전환</button>' : ''}
+    ${d.last_auto_run ? `<div class="rh-section-sub">마지막 자동 점검 · ${escapeHtml(new Date(d.last_auto_run.checked_at).toLocaleString())} · ${escapeHtml(d.last_auto_run.result || '')}${d.last_auto_run.error ? ` · ${escapeHtml(d.last_auto_run.error)}` : ''}${d.last_auto_run.quote_at ? ` · 시세 ${escapeHtml(new Date(d.last_auto_run.quote_at).toLocaleTimeString())}` : ''}</div>` : ''}
     <div class="section-head">
       <h3 style="font-size:14px;color:var(--text);text-transform:none;letter-spacing:0">지금 할 일</h3>
       <button type="button" class="btn btn-ghost btn-sm" id="btn-crypto-history">History${history.length ? ` (${history.length})` : ''}</button>
@@ -1319,8 +1334,10 @@ function renderCrypto(d, {quiet = false} = {}) {
       {h: '코인', f: r => `<b>${r.symbol}</b>${r.units > 1 ? ` <span style="color:var(--dim);font-size:11px">×${r.units}</span>` : ''}`},
       {h: '평가액', f: r => usd2(r.value)},
       {h: '평단', f: r => r.avg_cost ? '$' + cpx(r.avg_cost) : '—'},
-      {h: '익절가', f: r => '$' + cpx(r.sell_at)},
-      {h: '이탈', f: r => r.exit_at ? '$' + cpx(r.exit_at) : '—'},
+      {h: '하드 스톱', f: r => r.hard_stop ? '$' + cpx(r.hard_stop) : '—'},
+      {h: '트레일링', f: r => r.trailing_stop ? '$' + cpx(r.trailing_stop) : '—'},
+      {h: '다음 익절', f: r => r.next_profit ? '$' + cpx(r.next_profit) : '—'},
+      {h: '최고가', f: r => r.peak_price ? '$' + cpx(r.peak_price) : '—'},
     ]);
   }
 

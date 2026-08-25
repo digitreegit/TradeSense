@@ -144,8 +144,7 @@ def test_fetch_snapshot_adds_stocks_value_to_total():
     assert snap["cash_incomplete"] is True
 
 
-def test_fetch_snapshot_investing_total_implied_cash():
-    """RH Investing total minus live crypto/stocks yields full cash bucket."""
+def test_fetch_snapshot_does_not_pin_total_to_old_investing_total():
     mock_client = MagicMock()
     mock_client.get_account.return_value = {"buying_power": "2312.85"}
     mock_client.get_all_holdings.return_value = [
@@ -166,12 +165,12 @@ def test_fetch_snapshot_investing_total_implied_cash():
         snap = fetch_robinhood_snapshot()
     hv = 1003.857 * 1.52
     sv = round(16.47 * 44.66, 2)
-    implied_cash = round(8598.23 - hv - sv, 2)
     assert snap["buying_power"] == pytest.approx(2312.85)
-    assert snap["cash"] == pytest.approx(implied_cash)
-    assert snap["cash"] > snap["buying_power"]
-    assert snap["total"] == pytest.approx(8598.23)
-    assert snap["cash_incomplete"] is False
+    assert snap["cash"] == pytest.approx(2312.85)
+    assert snap["total"] == pytest.approx(round(hv + sv + 2312.85, 2))
+    assert snap["total_pinned"] is False
+    assert snap["cash_stale"] is True
+    assert snap["total_stale"] is True
 
 
 def test_fetch_snapshot_uses_brokerage_cash_and_stock_positions():
@@ -191,6 +190,7 @@ def test_fetch_snapshot_uses_brokerage_cash_and_stock_positions():
         mock_store.get.return_value = {
             "brokerage_cash": 3124.82,
             "stock_positions": [{"symbol": "IONQ", "qty": 16.47}],
+            "investing_snapshot_at": datetime.now(timezone.utc).isoformat(),
         }
         snap = fetch_robinhood_snapshot()
     assert snap["cash"] == pytest.approx(3124.82)

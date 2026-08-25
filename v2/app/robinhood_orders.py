@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from .robinhood_client import RobinhoodAPIError, RobinhoodCryptoClient
@@ -40,22 +41,23 @@ def _pair_to_rh_symbol(pair_or_sym: str) -> str:
     return f"{s}-USD"
 
 
-def _mid_price(client: RobinhoodCryptoClient, rh_symbol: str) -> float:
+def _mid_price(client: RobinhoodCryptoClient, rh_symbol: str) -> tuple[float, str]:
     quotes = client.get_best_bid_ask(rh_symbol)
     for row in quotes.get("results") or []:
         if str(row.get("symbol") or "").upper() != rh_symbol.upper():
             continue
         raw = row.get("price")
+        quote_at = row.get("timestamp") or row.get("updated_at") or datetime.now(timezone.utc).isoformat()
         if raw is not None:
             px = float(raw)
             if px > 0:
-                return px
+                return px, str(quote_at)
         bid = row.get("bid_inclusive_of_sell_spread")
         ask = row.get("ask_inclusive_of_buy_spread")
         if bid is not None and ask is not None:
             b, a = float(bid), float(ask)
             if b > 0 and a > 0:
-                return (b + a) / 2.0
+                return (b + a) / 2.0, str(quote_at)
     raise RobinhoodAPIError(f"{rh_symbol} 시세를 가져올 수 없습니다.")
 
 
@@ -92,6 +94,9 @@ def place_market_dollars(
     client_order_id: str | None = None,
     fallback_price: float | None = None,
     sell_all: bool = False,
+    require_live_quote: bool = False,
+    expected_price: float | None = None,
+    existing_order_id: str | None = None,
 ) -> dict[str, Any]:
     """Place a market order sized in USD notional (converted to asset qty).
 
@@ -113,6 +118,30 @@ def place_market_dollars(
     asset = rh_symbol.replace("-USD", "")
     cid = client_order_id or str(uuid.uuid4())
 
+    if existing_order_id:
+        try:
+            existing = client.get_order(str(existing_order_id))
+            state = str(existing.get("state") or "").lower()
+            notional = _order_notional(existing)
+            if state in _FILLED_STATES and notional > 0:
+                return {
+                    "ok": True, "order": existing, "dollars": round(notional, 2),
+                    "qty": float(existing.get("filled_asset_quantity") or 0),
+                    "price": float(existing.get("average_price") or 0),
+                    "client_order_id": cid, "rh_order_id": existing_order_id,
+                    "state": state,
+                }
+            return {
+                "ok": False,
+                "error": f"기존 Robinhood 주문이 아직 {state or 'unknown'} 상태입니다.",
+                "client_order_id": cid,
+            }
+        except Exception as exc:
+            return {
+                "ok": False, "error": f"기존 주문 상태 확인 실패: {exc}",
+                "client_order_id": cid,
+            }
+
     try:
         if not client.is_symbol_api_tradable(rh_symbol):
             return {
@@ -130,17 +159,61 @@ def place_market_dollars(
                 "error": "이 크립토 계좌는 API 주문이 꺼져 있습니다. Robinhood 지원에 문의하세요.",
                 "client_order_id": cid,
             }
-    except RobinhoodAPIError as exc:
-        log.warning("order preflight skipped: %s", exc)
+    except Exception as exc:
+        return {
+            "ok": False, "error": f"주문 사전 점검 실패: {exc}",
+            "client_order_id": cid,
+        }
+
+    bp = None
+    if side == "buy":
+        try:
+            bp = _buying_power(client)
+        except Exception as exc:
+            return {
+                "ok": False, "error": f"Buying power 조회 실패: {exc}",
+                "client_order_id": cid,
+            }
+        max_buy = round(bp * 0.98, 2)
+        if bp <= 0 or dollars > max_buy:
+            return {
+                "ok": False,
+                "error": (
+                    "크립토 매수 가능 금액(Buying power)이 없습니다."
+                    if bp <= 0 else
+                    f"매수 금액 ${dollars:,.0f}이(가) 크립토 Buying power "
+                    f"${bp:,.2f}보다 큽니다. ${max_buy:,.0f} 이하로 입력하세요. "
+                    "(Investing Cash와 Buying power는 다릅니다.)"
+                ),
+                "client_order_id": cid,
+                "buying_power": bp,
+            }
 
     try:
-        price = _mid_price(client, rh_symbol)
+        price, quote_at = _mid_price(client, rh_symbol)
     except Exception as exc:
-        if fallback_price and float(fallback_price) > 0:
+        if not require_live_quote and fallback_price and float(fallback_price) > 0:
             price = float(fallback_price)
             log.warning("live quote failed (%s), using fallback %.6f", exc, price)
         else:
             return {"ok": False, "error": f"시세 조회 실패: {exc}"}
+    else:
+        if require_live_quote:
+            from .crypto_risk import quote_is_fresh
+            if not quote_is_fresh(quote_at):
+                return {
+                    "ok": False,
+                    "error": "Robinhood 시세가 2분 이상 오래되어 자동 주문을 중단했습니다.",
+                    "client_order_id": cid,
+                }
+    if expected_price and float(expected_price) > 0:
+        drift = abs(price / float(expected_price) - 1)
+        if drift > 0.03:
+            return {
+                "ok": False,
+                "error": f"추천가 대비 시세 변동 {drift:.1%}로 주문을 중단했습니다.",
+                "client_order_id": cid,
+            }
 
     if side == "sell" and sell_all:
         qty = _available_qty(client, asset)
@@ -150,35 +223,18 @@ def place_market_dollars(
         qty = dollars / price
         if side == "sell":
             avail = _available_qty(client, asset)
-            if avail > 0 and qty > avail:
+            if avail <= 0:
+                return {
+                    "ok": False, "error": f"{asset} 매도 가능 수량이 없습니다.",
+                    "client_order_id": cid,
+                }
+            if qty > avail:
                 qty = avail
 
     try:
         qty_s = _qty_str(qty)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
-
-    if side == "buy":
-        bp = _buying_power(client)
-        if bp <= 0:
-            return {
-                "ok": False,
-                "error": "크립토 매수 가능 금액(Buying power)이 없습니다.",
-                "client_order_id": cid,
-            }
-        # Leave a little headroom for spread/fees.
-        max_buy = round(bp * 0.98, 2)
-        if dollars > max_buy:
-            return {
-                "ok": False,
-                "error": (
-                    f"매수 금액 ${dollars:,.0f}이(가) 크립토 Buying power "
-                    f"${bp:,.2f}보다 큽니다. ${max_buy:,.0f} 이하로 입력하세요. "
-                    "(Investing Cash와 Buying power는 다릅니다.)"
-                ),
-                "client_order_id": cid,
-                "buying_power": bp,
-            }
 
     body = {
         "client_order_id": cid,
@@ -204,7 +260,10 @@ def place_market_dollars(
                 f"({exc})"
             )
         elif "400" in msg and "buying power" in msg.lower():
-            bp = _buying_power(client)
+            try:
+                bp = _buying_power(client)
+            except Exception:
+                bp = 0.0
             msg = (
                 f"크립토 Buying power(${bp:,.2f})보다 큰 매수 주문입니다. "
                 f"금액을 ${round(bp * 0.98):,.0f} 이하로 줄이거나 Robinhood 앱에서 "
@@ -237,13 +296,13 @@ def place_market_dollars(
 
     filled_dollars = _order_notional(final)
     if filled_dollars <= 0:
-        # Market may still be open — use intended notional so book stays consistent;
-        # live sync will correct qty shortly.
-        filled_dollars = float(qty_s) * price
-        log.warning(
-            "RH order %s state=%s — using estimated $%.2f",
-            order_id, final.get("state"), filled_dollars,
-        )
+        return {
+            "ok": False,
+            "error": f"주문 체결을 확인하지 못했습니다 (상태: {final.get('state') or 'unknown'}).",
+            "order": final,
+            "client_order_id": cid,
+            "rh_order_id": order_id,
+        }
 
     return {
         "ok": True,

@@ -254,7 +254,10 @@ def analyze_and_advise(images: list[bytes]) -> dict:
         if principal_f and principal_f > 0:
             book["principal"] = principal_f
         from datetime import datetime, timezone
-        book["updated_at"] = datetime.now(timezone.utc).isoformat()
+        captured_at = datetime.now(timezone.utc).isoformat()
+        book["investing_snapshot_at"] = captured_at
+        book["investing_snapshot_source"] = "screenshot"
+        book["updated_at"] = captured_at
         store.set(BOOK_KEY, book)
         store.set(CACHE_KEY, None)
         data = advise_and_apply(force=True)

@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -132,6 +133,17 @@ def test_bear_market_reduces_entry_size():
     assert buys and all(o["dollars"] == expected for o in buys)
 
 
+def test_daily_loss_circuit_breaker_blocks_new_buys():
+    frames = {
+        "BTC/USD": make_frame(wavy_uptrend(), daily_range=0.03),
+        "SOL/USD": make_frame(wavy_uptrend(), daily_range=0.06),
+    }
+    book = _new_book()
+    book["risk_day"] = {"date": "2026-08-25", "buy_halted": True}
+    orders, _, _ = generate_orders(frames, book)
+    assert not any(order["side"] == "buy" for order in orders)
+
+
 def test_positions_capped_at_max():
     frames = {
         f"C{i}/USD": make_frame(wavy_uptrend(), daily_range=0.05)
@@ -206,6 +218,80 @@ def test_trim_apply_reduces_units_proportionally():
     assert abs(book["cash"] - 1500.0) < 1e-6
     assert abs(book["realized_pl"]) < 1e-6      # MTM basis: no phantom P/L
     assert pos["avg_cost"] == 1.80              # display basis preserved
+
+
+def test_live_hard_stop_beats_daily_strategy():
+    closes = wavy_uptrend()
+    frames = {"SOL/USD": make_frame(closes)}
+    book = _new_book()
+    book["cash"] = 100
+    book["positions"]["SOL/USD"] = {
+        "units": [{"dollars": 400, "price": 100, "qty": 4}],
+        "anchor": 100, "step": 0.05, "avg_cost": 100, "peak_price": 100,
+    }
+    orders, _, _ = generate_orders(
+        frames, book, live_prices={"SOL/USD": 91}, live_quote_fresh=True,
+    )
+    sells = [o for o in orders if o["symbol"] == "SOL" and o["side"] == "sell"]
+    assert len(sells) == 1
+    assert sells[0]["kind"] == "hard_stop"
+
+
+def test_profit_stage_apply_records_tier_and_sells_proportionally():
+    book = _new_book()
+    book["cash"] = 0
+    book["positions"]["SOL/USD"] = {
+        "units": [{"dollars": 400, "price": 100, "qty": 4}],
+        "anchor": 100, "step": 0.05, "avg_cost": 100,
+        "initial_risk_qty": 4, "profit_tiers_taken": [],
+    }
+    order = {
+        "side": "sell", "symbol": "SOL", "pair": "SOL/USD",
+        "price": 110, "kind": "profit_stage", "profit_tier": 0.10,
+    }
+    apply_order(book, order, 110)
+    pos = book["positions"]["SOL/USD"]
+    assert sum(u["qty"] for u in pos["units"]) == pytest.approx(3)
+    assert pos["profit_tiers_taken"] == [0.10]
+
+
+def test_auto_execution_orders_sells_first_and_limits_buys():
+    from unittest.mock import patch
+    from app.crypto_advisor import execute_pending_auto
+
+    pending = [
+        {"id": "b0", "side": "buy", "symbol": "SOL", "pair": "SOL/USD", "kind": "entry", "dollars": 100},
+        {"id": "b1", "side": "buy", "symbol": "ETH", "pair": "ETH/USD", "kind": "entry", "dollars": 100},
+        {"id": "s1", "side": "sell", "symbol": "SOL", "pair": "SOL/USD", "kind": "hard_stop", "dollars": 200},
+        {"id": "b2", "side": "buy", "symbol": "BTC", "pair": "BTC/USD", "kind": "entry", "dollars": 100},
+    ]
+    with patch("app.crypto_advisor.store") as mock_store, \
+         patch("app.robinhood_config.get_execution_mode", return_value="auto"), \
+         patch("app.crypto_advisor.confirm_order", return_value={"ok": True, "orders": [], "order_history": []}) as confirm:
+        mock_store.get.return_value = pending
+        out = execute_pending_auto()
+    assert [call.args[0] for call in confirm.call_args_list] == ["s1", "b1"]
+    assert len(out) == 2
+
+
+def test_auto_failure_locks_manual_and_stops():
+    from unittest.mock import patch
+    from app.crypto_advisor import execute_pending_auto
+
+    pending = [
+        {"id": "s1", "side": "sell", "symbol": "SOL", "pair": "SOL/USD", "kind": "hard_stop", "dollars": 200},
+        {"id": "b1", "side": "buy", "symbol": "ETH", "pair": "ETH/USD", "kind": "entry", "dollars": 100},
+    ]
+    with patch("app.crypto_advisor.store") as mock_store, \
+         patch("app.robinhood_config.get_execution_mode", return_value="auto"), \
+         patch("app.robinhood_config.set_execution_mode") as set_mode, \
+         patch("app.crypto_advisor.confirm_order", return_value={"ok": False, "error": "quote stale"}) as confirm, \
+         patch("app.crypto_advisor.send"), patch("app.crypto_advisor.log_activity"):
+        mock_store.get.return_value = pending
+        out = execute_pending_auto()
+    assert len(out) == 1
+    confirm.assert_called_once()
+    set_mode.assert_called_once_with("manual")
 
 
 def test_unit_size_scales_with_real_book():

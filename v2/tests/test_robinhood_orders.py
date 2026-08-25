@@ -1,4 +1,5 @@
 """Tests for Robinhood market order placement helpers."""
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -80,3 +81,58 @@ def test_place_market_dollars_buy_rejects_over_buying_power():
     assert out["ok"] is False
     assert "Buying power" in out["error"]
     mock.place_order.assert_not_called()
+
+
+def test_auto_order_refuses_daily_fallback_quote():
+    mock = MagicMock()
+    mock.get_trading_pairs.return_value = [{"symbol": "XRP-USD", "is_api_tradable": True}]
+    mock.get_primary_account_v2.return_value = {"is_api_tradable": True}
+    mock.get_account.return_value = {"buying_power": "500"}
+    mock.get_best_bid_ask.side_effect = RuntimeError("quote unavailable")
+    with patch("app.robinhood_orders.get_credentials", return_value=("k", "p")), \
+         patch("app.robinhood_orders.RobinhoodCryptoClient", return_value=mock):
+        out = place_market_dollars(
+            side="buy", pair="XRP/USD", dollars=100,
+            fallback_price=1.5, require_live_quote=True,
+        )
+    assert out["ok"] is False
+    assert "시세 조회 실패" in out["error"]
+    mock.place_order.assert_not_called()
+
+
+def test_auto_order_refuses_stale_robinhood_quote():
+    mock = MagicMock()
+    mock.get_trading_pairs.return_value = [{"symbol": "XRP-USD", "is_api_tradable": True}]
+    mock.get_primary_account_v2.return_value = {"is_api_tradable": True}
+    mock.get_account.return_value = {"buying_power": "500"}
+    mock.get_best_bid_ask.return_value = {"results": [{
+        "symbol": "XRP-USD", "price": "1.50",
+        "timestamp": (datetime.now(timezone.utc) - timedelta(minutes=3)).isoformat(),
+    }]}
+    with patch("app.robinhood_orders.get_credentials", return_value=("k", "p")), \
+         patch("app.robinhood_orders.RobinhoodCryptoClient", return_value=mock):
+        out = place_market_dollars(
+            side="buy", pair="XRP/USD", dollars=100, require_live_quote=True,
+        )
+    assert out["ok"] is False
+    assert "2분" in out["error"]
+    mock.place_order.assert_not_called()
+
+
+def test_unfilled_order_is_not_applied_as_success():
+    mock = MagicMock()
+    mock.get_trading_pairs.return_value = [{"symbol": "XRP-USD", "is_api_tradable": True}]
+    mock.get_primary_account_v2.return_value = {"is_api_tradable": True}
+    mock.get_account.return_value = {"buying_power": "500"}
+    mock.get_best_bid_ask.return_value = {
+        "results": [{"symbol": "XRP-USD", "price": "1.50"}],
+    }
+    mock.place_order.return_value = {"id": "ord-open", "state": "open"}
+    mock.get_order.return_value = {"id": "ord-open", "state": "open"}
+    with patch("app.robinhood_orders.get_credentials", return_value=("k", "p")), \
+         patch("app.robinhood_orders.RobinhoodCryptoClient", return_value=mock), \
+         patch("app.robinhood_orders.time.sleep"):
+        out = place_market_dollars(side="buy", pair="XRP/USD", dollars=100)
+    assert out["ok"] is False
+    assert out["rh_order_id"] == "ord-open"
+    assert "체결" in out["error"]

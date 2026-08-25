@@ -25,6 +25,13 @@ import pandas as pd
 
 from .briefing import log_activity
 from .config import settings
+from .crypto_risk import (
+    FULL_EXIT_KINDS,
+    evaluate_position,
+    quote_is_fresh,
+    risk_levels,
+    rolling_drop,
+)
 from .indicators import ema, rsi, sma
 from .notify import send
 from .state import store
@@ -46,6 +53,7 @@ PENDING_KEY = "crypto_pending"
 NOTIFY_FP_KEY = "crypto_notify_fp"
 CACHE_KEY = "crypto_advice"
 QTY_SEEN_KEY = "crypto_rh_qty_seen"  # last RH qty used for fill detection
+LAST_AUTO_KEY = "crypto_last_auto_run"
 CACHE_TTL = 900.0      # panel refresh window; scheduled runs bypass it
 LIVE_CACHE_TTL = 45.0  # when Robinhood API is linked, refresh more often
 CONFIRM_COOLDOWN_HOURS = 24.0  # don't re-queue same side+symbol after confirm
@@ -153,7 +161,11 @@ def _market_state(metrics: dict[str, dict]) -> tuple[str, str]:
 
 
 def generate_orders(
-    frames: dict[str, pd.DataFrame], book: dict
+    frames: dict[str, pd.DataFrame],
+    book: dict,
+    *,
+    live_prices: dict[str, float] | None = None,
+    live_quote_fresh: bool = False,
 ) -> tuple[list[dict], dict, dict]:
     """Propose orders against a *copy* of the book. The caller's book is
     left unchanged — fills land only via confirm_order()."""
@@ -162,6 +174,9 @@ def generate_orders(
         m = _coin_metrics(df)
         if m is not None:
             metrics[sym] = m
+    for sym, price in (live_prices or {}).items():
+        if sym in metrics and float(price or 0) > 0:
+            metrics[sym]["price"] = float(price)
 
     label, comment = _market_state(metrics)
     bear = label == "BEAR"
@@ -181,14 +196,9 @@ def generate_orders(
     if bear:
         unit = max(MIN_UNIT, round(unit * BEAR_SIZE, 0))
     floor = CASH_FLOOR * total_value
-    deployable = max(0.0, sim["cash"] - floor)
-    if deployable >= MIN_UNIT:
-        unit = min(unit, deployable)
-    else:
-        unit = 0.0
 
     def _order(side: str, sym: str, dollars: float, price: float,
-               reason: str, kind: str, step: float):
+               reason: str, kind: str, step: float, **extra):
         pos = sim["positions"].get(sym)
         baseline = sum(float(u.get("qty") or 0) for u in (pos or {}).get("units") or [])
         orders.append({
@@ -199,6 +209,7 @@ def generate_orders(
             "status": "pending", "actual_dollars": None,
             "baseline_qty": baseline,
             "created_at": datetime.now(timezone.utc).isoformat(),
+            **extra,
         })
 
     sold_this_run: set[str] = set()
@@ -211,6 +222,22 @@ def generate_orders(
         price, step = m["price"], pos["step"]
         value = sum(u["qty"] for u in pos["units"]) * price
         weight = value / total_value if total_value > 0 else 0.0
+
+        # Live risk rules always outrank the slower daily trend strategy.
+        if live_quote_fresh and sym in (live_prices or {}):
+            risk = evaluate_position(
+                sym, pos, price, recent_drop=rolling_drop(book, sym, price),
+            )
+            if risk:
+                _order(
+                    "sell", sym, risk["dollars"], price, risk["reason"],
+                    risk["kind"], step,
+                    sell_all=risk.get("sell_all", False),
+                    profit_tier=risk.get("profit_tier"),
+                )
+                apply_order(sim, orders[-1], risk["dollars"])
+                sold_this_run.add(sym)
+                continue
 
         # 0) dust that is not trending up: consolidate into cash
         if value < DUST_MIN and m["trend"] != "up":
@@ -246,6 +273,7 @@ def generate_orders(
             price <= pos["anchor"] * (1 - step)
             and len(pos["units"]) < MAX_UNITS
             and sim["cash"] - floor >= unit
+            and not (book.get("risk_day") or {}).get("buy_halted")
             and not _underwater(pos, price)
         ):
             _order("buy", sym, unit, price, f"−{step:.0%} 추가 매수", "add", step)
@@ -253,7 +281,7 @@ def generate_orders(
             bought_this_run.add(sym)
 
     def _can_deploy(new_slot: bool) -> bool:
-        if unit < MIN_UNIT:
+        if (book.get("risk_day") or {}).get("buy_halted"):
             return False
         if sim["cash"] - floor < unit:
             return False
@@ -332,9 +360,14 @@ def apply_order(book: dict, order: dict, dollars: float) -> None:
         if pair not in book["positions"]:
             book["positions"][pair] = {
                 "units": [], "anchor": price, "step": step,
+                "peak_price": price, "initial_risk_qty": 0.0,
+                "profit_tiers_taken": [],
             }
         pos = book["positions"][pair]
         pos["units"].append({"dollars": dollars, "price": price, "qty": qty})
+        pos["peak_price"] = max(float(pos.get("peak_price") or price), price)
+        if float(pos.get("initial_risk_qty") or 0) <= 0:
+            pos["initial_risk_qty"] = sum(float(u.get("qty") or 0) for u in pos["units"])
         if kind == "add":
             pos["anchor"] = pos["anchor"] * (1 - pos["step"])
         book["cash"] -= dollars
@@ -352,7 +385,7 @@ def apply_order(book: dict, order: dict, dollars: float) -> None:
         if not pos["units"]:
             del book["positions"][pair]
         return
-    if kind == "trim":
+    if kind in ("trim", "profit_stage"):
         # partial sell: reduce every unit proportionally, anchor unchanged
         total_qty = sum(u["qty"] for u in pos["units"])
         ratio = min(1.0, (dollars / price) / total_qty) if total_qty > 0 else 1.0
@@ -362,6 +395,11 @@ def apply_order(book: dict, order: dict, dollars: float) -> None:
             u["dollars"] *= (1 - ratio)
         book["cash"] += dollars
         book["realized_pl"] += dollars - removed_cost
+        if kind == "profit_stage" and order.get("profit_tier") is not None:
+            taken = pos.setdefault("profit_tiers_taken", [])
+            tier = float(order["profit_tier"])
+            if tier not in taken:
+                taken.append(tier)
         if ratio >= 0.999:
             del book["positions"][pair]
         return
@@ -382,6 +420,7 @@ def _summary(book: dict, metrics: dict[str, dict]) -> dict:
         value = qty * price
         total += value
         avg_cost = pos.get("avg_cost")
+        levels = risk_levels(pos)
         positions_view.append({
             "symbol": sym.split("/")[0],
             "price": price,
@@ -395,6 +434,7 @@ def _summary(book: dict, metrics: dict[str, dict]) -> dict:
             "sell_at": pos["anchor"] * (1 + pos["step"]),
             "add_at": pos["anchor"] * (1 - pos["step"]) if len(pos["units"]) < MAX_UNITS else None,
             "exit_at": m["ema50"] if m else None,
+            **levels,
         })
     principal = float(book.get("principal") or book.get("budget") or BUDGET)
     gap = max(0.0, principal - total)
@@ -412,14 +452,23 @@ def _summary(book: dict, metrics: dict[str, dict]) -> dict:
 
 
 def _fp(o: dict) -> tuple:
-    return (o["side"], o["pair"], o.get("kind", ""))
+    return (o["side"], o["pair"], o.get("kind", ""), o.get("profit_tier"))
 
 
 def _action_key(o: dict) -> tuple:
     return (o["side"], o["symbol"])
 
 
-_SELL_KIND_PRIORITY = {"exit": 0, "trim": 1, "take_profit": 2}
+def _cooldown_key(o: dict) -> tuple:
+    if o.get("kind") == "profit_stage":
+        return (*_action_key(o), "profit_stage", o.get("profit_tier"))
+    return _action_key(o)
+
+
+_SELL_KIND_PRIORITY = {
+    "hard_stop": 0, "trailing_stop": 1, "crash_exit": 2,
+    "exit": 3, "trim": 4, "profit_stage": 5, "take_profit": 6,
+}
 _BUY_KIND_PRIORITY = {"rotate": 0, "add": 1, "entry": 2}
 
 
@@ -471,7 +520,7 @@ def _recently_confirmed_actions(orders: list[dict]) -> set[tuple]:
         if o.get("status") != "confirmed":
             continue
         if _is_recent(o.get("confirmed_at")):
-            out.add(_action_key(o))
+            out.add(_cooldown_key(o))
     return out
 
 
@@ -488,8 +537,9 @@ def _merge_pending(old: list[dict], fresh: list[dict]) -> list[dict]:
     for o in fresh:
         fp = _fp(o)
         action = _action_key(o)
+        cooldown = _cooldown_key(o)
         # Don't put a just-filled recommendation back on the main list.
-        if action in recent_confirmed:
+        if cooldown in recent_confirmed:
             continue
         prev_fp = by_fp.get(fp)
         if prev_fp and prev_fp.get("status") == "denied":
@@ -851,6 +901,7 @@ def holdings_qty_changed(prev_qty: dict[str, float], snap: dict | None) -> bool:
 def advise_and_apply(force: bool = False) -> dict:
     """Propose orders. Confirmed book is not touched until confirm_order()."""
     rh_live = None
+    live_prices: dict[str, float] = {}
     prev_qty: dict[str, float] = {}
     auto_confirmed: list[dict] = []
     try:
@@ -861,7 +912,7 @@ def advise_and_apply(force: bool = False) -> dict:
         if is_configured():
             # Prefer durable last-seen qty over book (book may already include the fill).
             seen = store.get(QTY_SEEN_KEY)
-            rh_live, _live_prices, book_prev = refresh_from_robinhood_live()
+            rh_live, live_prices, book_prev = refresh_from_robinhood_live()
             prev_qty = seen if isinstance(seen, dict) else book_prev
             if rh_live:
                 filled: list[dict] = []
@@ -892,28 +943,51 @@ def advise_and_apply(force: bool = False) -> dict:
             from .robinhood_config import get_execution_mode, is_configured
             data["execution_mode"] = get_execution_mode()
             data["robinhood_configured"] = is_configured()
+            data["last_auto_run"] = store.get(LAST_AUTO_KEY)
             return data
     try:
         frames = fetch_bars()
         if not frames:
             raise RuntimeError("no crypto bars returned")
         book = store.get(BOOK_KEY) or _new_book()
-        orders, _, view = generate_orders(frames, book)
+        fresh = bool(rh_live and quote_is_fresh(rh_live.get("quote_at")))
+        orders, _, view = generate_orders(
+            frames, book, live_prices=live_prices, live_quote_fresh=fresh,
+        )
         # Drop tips that were just (auto)confirmed so they can't bounce back.
         recent = _recently_confirmed_actions(store.get(PENDING_KEY) or [])
         if recent:
             orders = [o for o in orders if _action_key(o) not in recent]
         orders = _merge_pending(store.get(PENDING_KEY) or [], orders)
         orders = _collapse_actionable(orders)
+        exiting = {
+            o.get("symbol") for o in orders
+            if o.get("status") not in _TERMINAL
+            and o.get("side") == "sell" and o.get("kind") in FULL_EXIT_KINDS
+        }
+        if exiting:
+            orders = [
+                o for o in orders
+                if o.get("status") in _TERMINAL
+                or not (o.get("side") == "buy" and o.get("symbol") in exiting)
+            ]
         if rh_live:
             bp = float(rh_live.get("buying_power") or 0)
-            max_buy = max(0.0, round(bp * 0.98, 0))
+            remaining_buy = max(0.0, round(bp * 0.98, 2))
             for o in orders:
                 if o.get("side") != "buy" or o.get("status") in _TERMINAL:
                     continue
-                if max_buy < MIN_UNIT:
+                if remaining_buy < MIN_UNIT:
+                    o["blocked_reason"] = "Buying power 부족"
+                    o["dollars"] = 0
                     continue
-                o["dollars"] = min(float(o.get("dollars") or 0), max_buy)
+                o["dollars"] = min(float(o.get("dollars") or 0), remaining_buy)
+                remaining_buy -= float(o["dollars"])
+            orders = [
+                o for o in orders
+                if o.get("status") in _TERMINAL or float(o.get("dollars") or 0) >= MIN_UNIT
+                or o.get("side") == "sell"
+            ]
         store.set(PENDING_KEY, orders)
     except Exception as exc:
         log.exception("crypto advice failed")
@@ -924,6 +998,7 @@ def advise_and_apply(force: bool = False) -> dict:
     data = _ensure_order_split(data)
     if rh_live:
         data["robinhood_live"] = rh_live
+    data["last_auto_run"] = store.get(LAST_AUTO_KEY)
     if auto_confirmed:
         data["auto_confirmed"] = [
             {"id": o.get("id"), "side": o.get("side"), "symbol": o.get("symbol"),
@@ -943,7 +1018,9 @@ def _execute_on_robinhood(order: dict, dollars: float) -> dict:
     from .robinhood_orders import place_market_dollars
 
     cid = order.get("rh_client_order_id")
-    sell_all = order.get("kind") in ("exit",) and order.get("side") == "sell"
+    from .robinhood_config import get_execution_mode
+
+    sell_all = order.get("kind") in FULL_EXIT_KINDS and order.get("side") == "sell"
     result = place_market_dollars(
         side=order["side"],
         pair=order.get("pair") or f"{order['symbol']}/USD",
@@ -951,12 +1028,16 @@ def _execute_on_robinhood(order: dict, dollars: float) -> dict:
         client_order_id=cid,
         fallback_price=float(order.get("price") or 0) or None,
         sell_all=sell_all,
+        require_live_quote=get_execution_mode() == "auto",
+        expected_price=float(order.get("price") or 0) or None,
+        existing_order_id=order.get("rh_order_id"),
     )
     if result.get("client_order_id"):
         order["rh_client_order_id"] = result["client_order_id"]
+    if result.get("rh_order_id"):
+        order["rh_order_id"] = result["rh_order_id"]
     if not result.get("ok"):
         return result
-    order["rh_order_id"] = result.get("rh_order_id")
     order["rh_state"] = result.get("state")
     order["api_executed"] = True
     if result.get("price"):
@@ -1020,9 +1101,9 @@ def confirm_order(order_id: str, actual_dollars: float | None = None) -> dict:
     return _ensure_order_split(data)
 
 
-def execute_pending_auto(*, limit: int = 4) -> list[dict]:
-    """Place up to `limit` pending tips when execution_mode == auto."""
-    from .robinhood_config import get_execution_mode
+def execute_pending_auto(*, limit: int = 3) -> list[dict]:
+    """Execute risk sells first, with at most two sells and one buy per tick."""
+    from .robinhood_config import get_execution_mode, set_execution_mode
 
     if get_execution_mode() != "auto":
         return []
@@ -1030,8 +1111,27 @@ def execute_pending_auto(*, limit: int = 4) -> list[dict]:
         o for o in (store.get(PENDING_KEY) or [])
         if o.get("status") not in _TERMINAL
     ]
+    pending.sort(key=lambda o: (0 if o.get("side") == "sell" else 1, _action_priority(o)))
+    selected: list[dict] = []
+    sells = buys = 0
+    selling_symbols = {
+        order.get("symbol") for order in pending if order.get("side") == "sell"
+    }
+    for order in pending:
+        if order.get("side") == "sell" and sells < 2:
+            selected.append(order)
+            sells += 1
+        elif (
+            order.get("side") == "buy" and buys < 1
+            and order.get("symbol") not in selling_symbols
+        ):
+            selected.append(order)
+            buys += 1
+        if len(selected) >= limit:
+            break
+
     done: list[dict] = []
-    for order in pending[:limit]:
+    for order in selected:
         result = confirm_order(order["id"], float(order.get("dollars") or 0))
         done.append({
             "id": order.get("id"),
@@ -1050,7 +1150,14 @@ def execute_pending_auto(*, limit: int = 4) -> list[dict]:
             else:
                 done[-1]["dollars"] = float(order.get("dollars") or 0)
         else:
-            break  # stop on first failure so we don't cascade
+            error = result.get("error") or "Robinhood 자동 주문 실패"
+            set_execution_mode("manual")
+            log_activity("crypto", f"자동 주문 실패 → 수동 잠금: {error}")
+            try:
+                send(f"🚨 TradeSense 자동거래가 수동으로 잠겼습니다.\n{error}")
+            except Exception:
+                log.exception("auto failure telegram failed")
+            break
     return done
 
 
@@ -1145,7 +1252,10 @@ def set_investing_total(investing_total: float) -> dict:
         )
     stocks = round(max(0.0, float(investing_total) - crypto_holdings - cash), 2)
     book["stocks_value"] = stocks
-    book["updated_at"] = datetime.now(timezone.utc).isoformat()
+    captured_at = datetime.now(timezone.utc).isoformat()
+    book["investing_snapshot_at"] = captured_at
+    book["investing_snapshot_source"] = "manual_total"
+    book["updated_at"] = captured_at
     store.set(BOOK_KEY, book)
     store.set(CACHE_KEY, None)
     log_activity(
@@ -1200,6 +1310,9 @@ def import_holdings(
             "anchor": price,
             "step": _step_for(m["range30"]),
             "avg_cost": avg_cost,
+            "peak_price": price,
+            "initial_risk_qty": qty,
+            "profit_tiers_taken": [],
         }
         inferred += qty * (avg_cost if avg_cost else price)
     book["budget"] = book["cash"] + sum(
@@ -1232,6 +1345,12 @@ def import_holdings(
         book["rh_investing_total"] = round(float(rh_investing_total), 2)
     elif prev.get("rh_investing_total"):
         book["rh_investing_total"] = prev["rh_investing_total"]
+    if brokerage_cash is not None or stock_positions is not None or rh_investing_total is not None:
+        book["investing_snapshot_at"] = datetime.now(timezone.utc).isoformat()
+        book["investing_snapshot_source"] = "import"
+    elif prev.get("investing_snapshot_at"):
+        book["investing_snapshot_at"] = prev["investing_snapshot_at"]
+        book["investing_snapshot_source"] = prev.get("investing_snapshot_source")
     book["updated_at"] = datetime.now(timezone.utc).isoformat()
     store.set(BOOK_KEY, book)
     store.set(PENDING_KEY, [])
@@ -1263,7 +1382,12 @@ def run_scheduled(slot: str = "check") -> bool:
     """Frequent awake-hours check. Telegram only when tips need approval."""
     data = advise_and_apply(force=True)
     if not data.get("ok"):
-        log_activity("crypto", f"크립토 어드바이저 실패: {data.get('error')}")
+        error = data.get("error")
+        store.set(LAST_AUTO_KEY, {
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "result": "failed", "error": error, "mode": "unknown",
+        })
+        log_activity("crypto", f"크립토 어드바이저 실패: {error}")
         return False
 
     auto_results = execute_pending_auto()
@@ -1286,5 +1410,17 @@ def run_scheduled(slot: str = "check") -> bool:
         f"현재 ${s.get('total', 0):,.0f} / 원금 ${principal:,.0f} "
         f"(남음 ${gap:,.0f})"
     )
+    failed = next((r for r in auto_results if not r.get("ok")), None)
+    store.set(LAST_AUTO_KEY, {
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "result": "failed_locked_manual" if failed else (
+            "orders_succeeded" if auto_results else "no_signal"
+        ),
+        "mode": data.get("execution_mode"),
+        "orders_attempted": len(auto_results),
+        "orders_succeeded": sum(1 for r in auto_results if r.get("ok")),
+        "error": failed.get("error") if failed else None,
+        "quote_at": (data.get("robinhood_live") or {}).get("quote_at"),
+    })
     log_activity("crypto", f"크립토 어드바이저({slot}) — 주문 {n}건, {status}")
     return True

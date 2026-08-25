@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from .crypto_advisor import BOOK_KEY, CANDIDATES, _step_for, fetch_bars, _coin_metrics
 from .robinhood_client import RobinhoodCryptoClient
@@ -12,6 +12,7 @@ from .state import store
 log = logging.getLogger(__name__)
 
 _SYM_TO_PAIR = {p.split("/")[0]: p for p in CANDIDATES}
+_SNAPSHOT_TTL = timedelta(hours=24)
 
 
 def _mid_from_quote(row: dict) -> float | None:
@@ -68,6 +69,7 @@ def fetch_robinhood_snapshot() -> dict | None:
             qty_by_sym[sym] = qty_by_sym.get(sym, 0.0) + qty
 
     prices: dict[str, float] = {}
+    quote_times: list[datetime] = []
     if qty_by_sym:
         rh_symbols = tuple(f"{sym}-USD" for sym in qty_by_sym)
         try:
@@ -78,6 +80,12 @@ def fetch_robinhood_snapshot() -> dict | None:
                 px = _mid_from_quote(row)
                 if px is not None:
                     prices[sym] = px
+                    raw_ts = row.get("timestamp") or row.get("updated_at")
+                    try:
+                        ts = datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00"))
+                        quote_times.append(ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc))
+                    except (TypeError, ValueError):
+                        quote_times.append(datetime.now(timezone.utc))
         except Exception as exc:
             log.warning("robinhood quotes failed: %s", exc)
 
@@ -94,6 +102,7 @@ def fetch_robinhood_snapshot() -> dict | None:
         pair = _SYM_TO_PAIR.get(sym)  # None if outside advice universe
         supported = pair is not None
         price = prices.get(sym, 0.0)
+        live_quoted = price > 0
         if price <= 0 and pair:
             df = frames.get(pair)
             if df is not None and len(df):
@@ -109,6 +118,7 @@ def fetch_robinhood_snapshot() -> dict | None:
                 "value": 0.0,
                 "supported": supported,
                 "priced": False,
+                "live_quoted": False,
             })
             continue
         value = qty * price
@@ -121,6 +131,7 @@ def fetch_robinhood_snapshot() -> dict | None:
             "value": round(value, 2),
             "supported": supported,
             "priced": True,
+            "live_quoted": live_quoted,
         }
         if pair:
             df = frames.get(pair)
@@ -138,7 +149,7 @@ def fetch_robinhood_snapshot() -> dict | None:
 
     book = store.get(BOOK_KEY) or {}
     buying_power = cash
-    display_cash, stocks_value, cash_label, stock_rows = _cash_and_stocks_from_book(
+    display_cash, stocks_value, cash_label, stock_rows, source_meta = _cash_and_stocks_from_book(
         book, buying_power, holdings_value,
     )
     # Investing total = crypto + full cash bucket + stocks. Buying power is only
@@ -158,11 +169,13 @@ def fetch_robinhood_snapshot() -> dict | None:
         "stock_positions": stock_rows,
         "total": round(account_total, 2),
         "cash_incomplete": display_cash <= buying_power + 0.01,
+        **source_meta,
         "day_change": day_change,
         "day_change_pct": day_change_pct,
         "positions": positions,
         "unpriced": unpriced,
         "updated_at": datetime.now(timezone.utc).isoformat(),
+        "quote_at": min(quote_times).isoformat() if quote_times else None,
     }
 
 
@@ -188,7 +201,7 @@ def _stock_last_price(symbol: str) -> float | None:
 
 def _cash_and_stocks_from_book(
     book: dict, buying_power: float, holdings_value: float = 0.0,
-) -> tuple[float, float, str, list[dict]]:
+) -> tuple[float, float, str, list[dict], dict]:
     """Resolve brokerage Cash + stocks for Investing-matching totals.
 
     Crypto API only exposes buying_power. Robinhood's Investing total also
@@ -212,8 +225,8 @@ def _cash_and_stocks_from_book(
             price = float(px) if px not in (None, "") else 0.0
         except (TypeError, ValueError):
             price = 0.0
-        if price <= 0:
-            price = _stock_last_price(sym) or 0.0
+        # Quantity comes from the screenshot; value should use the latest quote.
+        price = _stock_last_price(sym) or price
         value = qty * price if price > 0 else float(raw.get("value") or 0)
         stocks_value += value
         stock_rows.append({
@@ -228,26 +241,40 @@ def _cash_and_stocks_from_book(
         if legacy_stocks > 0:
             stocks_value = legacy_stocks
 
+    captured_at = book.get("investing_snapshot_at")
+    captured = None
+    try:
+        captured = datetime.fromisoformat(str(captured_at).replace("Z", "+00:00"))
+        if captured.tzinfo is None:
+            captured = captured.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        pass
+    snapshot_fresh = bool(
+        captured and datetime.now(timezone.utc) - captured <= _SNAPSHOT_TTL
+    )
+    cash_source = "api_buying_power"
+    display_cash = buying_power
     brokerage_cash = book.get("brokerage_cash")
-    if brokerage_cash is not None:
+    if brokerage_cash is not None and snapshot_fresh:
         try:
             bc = float(brokerage_cash)
             if bc > buying_power + 0.01:
-                return bc, stocks_value, "Cash", stock_rows
+                display_cash = bc
+                cash_source = "screenshot"
         except (TypeError, ValueError):
             pass
-
-    rh_total = book.get("rh_investing_total")
-    if rh_total is not None:
-        try:
-            t = float(rh_total)
-            implied_cash = t - holdings_value - stocks_value
-            if implied_cash > buying_power + 0.01:
-                return round(implied_cash, 2), stocks_value, "Cash", stock_rows
-        except (TypeError, ValueError):
-            pass
-
-    return buying_power, stocks_value, "Cash", stock_rows
+    return display_cash, stocks_value, "Cash", stock_rows, {
+        "cash_source": cash_source,
+        "investing_snapshot_at": captured_at,
+        "cash_stale": bool(
+            (brokerage_cash is not None or book.get("rh_investing_total") is not None)
+            and not snapshot_fresh
+        ),
+        "stocks_stale": bool((stock_positions or book.get("stocks_value")) and not snapshot_fresh),
+        "total_stale": bool(book.get("rh_investing_total") is not None and not snapshot_fresh),
+        "total_pinned": False,
+        "balance_basis": "live_crypto_plus_snapshot_components",
+    }
 
 
 def apply_robinhood_live(book: dict, snap: dict) -> None:
@@ -275,6 +302,7 @@ def apply_robinhood_live(book: dict, snap: dict) -> None:
         pair = _SYM_TO_PAIR[sym]
         qty = float(row["qty"] or 0)
         price = float(row.get("price") or 0)
+        live_quoted = bool(row.get("live_quoted"))
         if qty <= 0:
             continue
         seen.add(pair)
@@ -284,11 +312,16 @@ def apply_robinhood_live(book: dict, snap: dict) -> None:
         if pair in book.get("positions", {}):
             pos = book["positions"][pair]
             pos["units"] = [{"dollars": qty * mark, "price": mark, "qty": qty}]
+            if live_quoted:
+                pos["peak_price"] = max(float(pos.get("peak_price") or mark), mark)
         else:
             book.setdefault("positions", {})[pair] = {
                 "units": [{"dollars": qty * mark, "price": mark, "qty": qty}],
                 "anchor": mark,
                 "step": _step_for(m["range30"]) if m else 0.06,
+                "peak_price": mark,
+                "initial_risk_qty": qty,
+                "profit_tiers_taken": [],
             }
 
     for pair in list(book.get("positions", {})):
@@ -325,6 +358,7 @@ def refresh_from_robinhood_live() -> tuple[dict | None, dict[str, float], dict[s
     brokerage_cash = book.get("brokerage_cash")
     stock_positions = book.get("stock_positions")
     rh_investing_total = book.get("rh_investing_total")
+    investing_snapshot_at = book.get("investing_snapshot_at")
     avg_by_pair = {
         pair: pos.get("avg_cost")
         for pair, pos in (book.get("positions") or {}).items()
@@ -354,6 +388,8 @@ def refresh_from_robinhood_live() -> tuple[dict | None, dict[str, float], dict[s
             book["rh_investing_total"] = float(rh_investing_total)
         except (TypeError, ValueError):
             pass
+    if investing_snapshot_at:
+        book["investing_snapshot_at"] = investing_snapshot_at
     for pair, pos in book.get("positions", {}).items():
         if avg_by_pair.get(pair):
             pos["avg_cost"] = float(avg_by_pair[pair])
@@ -363,13 +399,16 @@ def refresh_from_robinhood_live() -> tuple[dict | None, dict[str, float], dict[s
                 pos["anchor"] = anc
             if step:
                 pos["step"] = step
-    store.set(BOOK_KEY, book)
     live_prices = {
         row["pair"]: float(row["price"])
         for row in (snap.get("positions") or [])
         if row.get("pair") and float(row.get("price") or 0) > 0
-        and row.get("symbol") in _SYM_TO_PAIR
+        and row.get("symbol") in _SYM_TO_PAIR and row.get("live_quoted")
     }
+    if live_prices and snap.get("quote_at"):
+        from .crypto_risk import update_tracking
+        update_tracking(book, live_prices, quote_at=snap["quote_at"])
+    store.set(BOOK_KEY, book)
     return snap, live_prices, prev_qty
 
 
@@ -388,6 +427,11 @@ def merge_live_into_summary(summary: dict, snap: dict) -> dict:
     summary["holdings_value"] = float(snap.get("holdings_value") or 0)
     summary["buying_power"] = float(snap.get("buying_power") or 0)
     summary["cash_label"] = snap.get("cash_label") or "Cash"
+    for key in (
+        "cash_source", "investing_snapshot_at", "cash_stale", "stocks_stale",
+        "total_stale", "total_pinned", "balance_basis",
+    ):
+        summary[key] = snap.get(key)
     if principal > 0:
         summary["gap"] = max(0.0, principal - total)
         summary["recovered_pct"] = total / principal
