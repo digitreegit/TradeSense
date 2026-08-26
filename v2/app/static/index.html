@@ -72,6 +72,7 @@
   #err {
     background: #3d1d1d; color: var(--red); padding: 10px 14px; border-radius: 8px;
     margin-bottom: 16px; display: none;
+    width: 100%; max-width: 960px; margin-left: auto; margin-right: auto;
   }
 
   /* overlays */
@@ -272,11 +273,12 @@
   #tab-settings .upload-preview { max-width: 480px; }
   #tab-settings .rh-keys { max-width: 480px; }
 
-  /* Shared dashboard width: stocks and crypto align to the same centered rail. */
+  /* Shared dashboard width: stocks, crypto, and settings use the same centered rail. */
   .crypto-toolbar,
   #crypto-body,
   .rh-wrap,
-  .stocks-wrap {
+  .stocks-wrap,
+  .settings-wrap {
     width: 100%;
     max-width: 960px;
     margin-left: auto;
@@ -469,6 +471,7 @@
 </section>
 
 <section id="tab-settings" class="tab-panel" role="tabpanel" aria-labelledby="settings-title">
+  <div class="settings-wrap">
   <h2 class="settings-page-title" id="settings-title">설정</h2>
   <p class="field-hint" style="margin-bottom:18px">
     주식(Alpaca)과 크립토(Robinhood) 연동, 알림, 상태 관리.
@@ -577,6 +580,7 @@
     <p class="field-hint">계좌를 바꾼 뒤 이전 드로다운 기준점 때문에 거래가 중단되면 여기서 초기화하세요.
       드로다운·레짐·포지션 메타·예약 주문·에쿼티 곡선·거래 기록이 지워지고, Alpaca 키는 유지됩니다.</p>
     <button type="button" class="btn btn-ghost" id="btn-reset-state">드로다운·상태 리셋</button>
+  </div>
   </div>
 </section>
 
