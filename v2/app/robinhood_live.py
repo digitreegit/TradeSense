@@ -149,26 +149,26 @@ def fetch_robinhood_snapshot() -> dict | None:
 
     book = store.get(BOOK_KEY) or {}
     buying_power = cash
-    display_cash, stocks_value, cash_label, stock_rows, source_meta = _cash_and_stocks_from_book(
+    _, stocks_value, _, stock_rows, source_meta = _cash_and_stocks_from_book(
         book, buying_power, holdings_value,
     )
-    # Investing total = crypto + full cash bucket + stocks. Buying power is only
-    # the tradeable subset of cash — do not use it alone for the hero total.
-    account_total = holdings_value + display_cash + stocks_value
+    # Crypto Trading API only returns holdings + buying_power. Hero total is
+    # that live sum — never mix screenshot cash/stocks into it.
     crypto_total = holdings_value + buying_power
+    account_total = crypto_total
     base = max(holdings_value, 1e-9)
     day_change_pct = (day_change / base) if base > 0 else 0.0
 
     return {
         "buying_power": round(buying_power, 2),
-        "cash": round(display_cash, 2),
-        "cash_label": cash_label,
+        "cash": round(buying_power, 2),
+        "cash_label": "Buying power",
         "holdings_value": round(holdings_value, 2),
         "crypto_total": round(crypto_total, 2),
         "stocks_value": round(stocks_value, 2),
         "stock_positions": stock_rows,
         "total": round(account_total, 2),
-        "cash_incomplete": display_cash <= buying_power + 0.01,
+        "cash_incomplete": False,
         **source_meta,
         "day_change": day_change,
         "day_change_pct": day_change_pct,
@@ -273,7 +273,7 @@ def _cash_and_stocks_from_book(
         "stocks_stale": bool((stock_positions or book.get("stocks_value")) and not snapshot_fresh),
         "total_stale": bool(book.get("rh_investing_total") is not None and not snapshot_fresh),
         "total_pinned": False,
-        "balance_basis": "live_crypto_plus_snapshot_components",
+        "balance_basis": "live_crypto_api",
     }
 
 
@@ -418,15 +418,15 @@ def merge_live_into_summary(summary: dict, snap: dict) -> dict:
         return summary
     by_sym = {p["symbol"]: p for p in snap.get("positions") or []}
     principal = float(summary.get("principal") or summary.get("budget") or 0)
-    total = float(snap.get("total") or 0)
+    total = float(snap.get("crypto_total") or snap.get("total") or 0)
     summary = {**summary}
-    summary["cash"] = float(snap.get("cash") or snap.get("buying_power") or 0)
+    summary["cash"] = float(snap.get("buying_power") or snap.get("cash") or 0)
     summary["total"] = total
-    summary["crypto_total"] = float(snap.get("crypto_total") or total)
+    summary["crypto_total"] = total
     summary["stocks_value"] = float(snap.get("stocks_value") or 0)
     summary["holdings_value"] = float(snap.get("holdings_value") or 0)
     summary["buying_power"] = float(snap.get("buying_power") or 0)
-    summary["cash_label"] = snap.get("cash_label") or "Cash"
+    summary["cash_label"] = snap.get("cash_label") or "Buying power"
     for key in (
         "cash_source", "investing_snapshot_at", "cash_stale", "stocks_stale",
         "total_stale", "total_pinned", "balance_basis",

@@ -138,10 +138,11 @@ def test_fetch_snapshot_adds_stocks_value_to_total():
         snap = fetch_robinhood_snapshot()
     assert snap["buying_power"] == pytest.approx(724.82)
     assert snap["holdings_value"] == pytest.approx(150.0)
-    assert snap["cash"] == pytest.approx(724.82)  # API BP until brokerage_cash set
+    assert snap["cash"] == pytest.approx(724.82)
     assert snap["stocks_value"] == pytest.approx(733.70)
-    assert snap["total"] == pytest.approx(150.0 + 724.82 + 733.70)
-    assert snap["cash_incomplete"] is True
+    assert snap["total"] == pytest.approx(150.0 + 724.82)
+    assert snap["crypto_total"] == pytest.approx(150.0 + 724.82)
+    assert snap["cash_incomplete"] is False
 
 
 def test_fetch_snapshot_does_not_pin_total_to_old_investing_total():
@@ -167,7 +168,8 @@ def test_fetch_snapshot_does_not_pin_total_to_old_investing_total():
     sv = round(16.47 * 44.66, 2)
     assert snap["buying_power"] == pytest.approx(2312.85)
     assert snap["cash"] == pytest.approx(2312.85)
-    assert snap["total"] == pytest.approx(round(hv + sv + 2312.85, 2))
+    assert snap["total"] == pytest.approx(round(hv + 2312.85, 2))
+    assert snap["stocks_value"] == pytest.approx(sv)
     assert snap["total_pinned"] is False
     assert snap["cash_stale"] is True
     assert snap["total_stale"] is True
@@ -193,10 +195,10 @@ def test_fetch_snapshot_uses_brokerage_cash_and_stock_positions():
             "investing_snapshot_at": datetime.now(timezone.utc).isoformat(),
         }
         snap = fetch_robinhood_snapshot()
-    assert snap["cash"] == pytest.approx(3124.82)
+    assert snap["cash"] == pytest.approx(724.82)
     assert snap["buying_power"] == pytest.approx(724.82)
     assert snap["stocks_value"] == pytest.approx(round(16.47 * 44.66, 2))
-    assert snap["total"] == pytest.approx(150.0 + 3124.82 + round(16.47 * 44.66, 2))
+    assert snap["total"] == pytest.approx(150.0 + 724.82)
     assert snap["cash_incomplete"] is False
 
 def test_auto_confirm_buy_when_bought_more_than_recommended():

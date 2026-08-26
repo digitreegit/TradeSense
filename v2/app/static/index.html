@@ -542,9 +542,9 @@
   </div>
 
   <div class="panel settings-section">
-    <h3>또는 스크린샷</h3>
+    <h3>평단 확인용 스크린샷 (선택)</h3>
     <p class="field-hint" style="margin-bottom:12px">
-      API 없이 계좌·보유 캡처 업로드. 평단 확인용으로 유용합니다.
+      잔액은 API가 보여 줍니다. 평단가가 필요할 때만 보유 화면을 올리세요.
     </p>
     <div class="upload-zone" id="upload-zone">
       <input type="file" id="screenshot-input" accept="image/*" multiple hidden>
@@ -1236,47 +1236,32 @@ function renderCrypto(d, {quiet = false} = {}) {
   const rh = d.robinhood_live;
   const usd2 = v => '$' + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
   const holdings = rh?.positions?.length ? rh.positions : (s.positions || []);
-  const total = rh?.total ?? s.total;
-  const cash = rh?.buying_power ?? s.cash;
+  const total = rh?.crypto_total ?? rh?.total ?? s.crypto_total ?? s.total;
+  const cash = rh?.buying_power ?? s.buying_power ?? s.cash;
 
   let html = '<div class="rh-wrap">';
 
   if (rh) {
     const updated = rh.updated_at ? new Date(rh.updated_at).toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'}) : '';
-    const captured = rh.investing_snapshot_at ? new Date(rh.investing_snapshot_at).toLocaleString() : '';
-    const cashVal = Number(rh.cash ?? cash ?? 0);
     const bpVal = Number(rh.buying_power ?? cash ?? 0);
-    const stocksVal = Number(rh.stocks_value || 0);
-    const cashLabel = rh.cash_label || 'Cash';
-    const cashGap = rh.cash_incomplete !== false && cashVal <= bpVal + 1;
     html += `<div class="rh-portfolio">
       <div class="rh-total">${rhMoney(total)}</div>
       ${renderRhDayChange(rh.day_change, rh.day_change_pct)}
-      <div class="rh-live"><span class="rh-live-dot"></span> Crypto · LIVE API${updated ? ` · ${updated}` : ''}</div>
-      <div class="rh-scope">전체는 실시간 크립토 + ${rh.cash_source === 'screenshot' ? '스크린샷 Cash' : 'API Buying power'} + 주식 혼합 추정치${captured ? ` · 캡처 ${escapeHtml(captured)}` : ''}</div>
+      <div class="rh-live"><span class="rh-live-dot"></span> LIVE · Crypto API${updated ? ` · ${updated}` : ''}</div>
+      <div class="rh-scope">크립토 보유 + Buying power. 주식·Investing Cash는 Robinhood Crypto API에 없습니다.</div>
     </div>
     <div class="rh-row">
       <span>Crypto</span>
       <span class="rh-row-val">${rhMoney(rh.holdings_value || 0)}</span>
     </div>
     <div class="rh-row">
-      <span>${escapeHtml(cashLabel)}</span>
-      <span class="rh-row-val">${rhMoney(cashVal)}</span>
-    </div>
-    ${cashVal > bpVal + 1 ? `<div class="rh-row">
       <span>Buying power <span class="rh-hint">(매수 가능)</span></span>
       <span class="rh-row-val">${rhMoney(bpVal)}</span>
-    </div>` : ''}
-    ${stocksVal > 0 || (rh.stock_positions || []).length ? `<div class="rh-row">
-      <span>Stocks · ETF</span>
-      <span class="rh-row-val">${rhMoney(stocksVal)}</span>
-    </div>` : ''}
-    ${cashGap ? `<div class="rh-warn">앱 총액과 맞추려면 설정 → Investing 화면 스크린샷(상단 총액 보이게) 1장 업로드. Buying power(${rhMoney(bpVal)})만으로는 로빈후드 총액이 안 나옵니다.</div>` : ''}
-    ${rh.cash_stale || rh.stocks_stale ? `<div class="rh-warn">스크린샷 잔액이 24시간 이상 지나 오래되었습니다. Cash는 API Buying power로 대체되며 주식 수량은 새 캡처가 필요합니다.</div>` : ''}
+    </div>
     ${rh.unpriced?.length ? `<div class="rh-warn">시세 미반영 ${rh.unpriced.map(u => escapeHtml(u.symbol)).join(', ')}</div>` : ''}
     <div class="rh-section">
       <div class="rh-section-head"><h3>Crypto</h3></div>
-      <div class="rh-section-sub">Robinhood Crypto 전 보유 · 매매는 앱에서 · 체결되면 권고 자동 해제</div>
+      <div class="rh-section-sub">Robinhood Crypto API 실시간 보유</div>
       ${renderRhHoldings(holdings)}
     </div>`;
   } else {
