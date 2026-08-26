@@ -1043,13 +1043,14 @@ function renderCryptoOrder(o, {history = false, mode = 'manual', buyingPower = n
   const bpHint = (bpMax != null && Number(o.dollars) > bpMax)
     ? ` · BP 최대 $${bpMax.toLocaleString()}`
     : '';
+  const appOnly = o.api_tradable === false;
   let fill;
   if (history || o.status === 'confirmed') {
     const via = o.api_executed ? ' · API' : (o.auto_confirmed ? ' · RH 감지' : '');
     fill = `<div class="fill"><span class="done">확인됨${via} · 실제 ${usd2(o.actual_dollars ?? o.dollars)}${when ? ` · ${when}` : ''}</span></div>`;
   } else if (o.status === 'denied') {
     fill = `<div class="fill"><span class="done denied">거부됨 (DENY)${when ? ` · ${when}` : ''}</span></div>`;
-  } else if (mode === 'semi' || mode === 'auto') {
+  } else if ((mode === 'semi' || mode === 'auto') && !appOnly) {
     fill = `<div class="fill">
         <label>금액 $</label>
         <input type="number" min="1" step="1" value="${Math.min(Number(o.dollars), bpMax ?? Number(o.dollars))}"${maxAttr} data-oid="${escapeHtml(o.id)}" aria-label="${o.symbol} 금액">
@@ -1057,17 +1058,19 @@ function renderCryptoOrder(o, {history = false, mode = 'manual', buyingPower = n
         <button type="button" class="btn btn-primary btn-confirm-order" data-oid="${escapeHtml(o.id)}">${mode === 'auto' ? '지금 실행' : 'API 주문'}</button>
       </div>`;
   } else {
+    const appHint = appOnly ? `<span class="rh-tag">앱만 · 실행 후 확인</span>` : '';
     fill = `<div class="fill">
         <label>실제 금액 $</label>
         <input type="number" min="1" step="1" value="${Number(o.dollars)}" data-oid="${escapeHtml(o.id)}" aria-label="${o.symbol} 실제 금액">
         <button type="button" class="btn btn-ghost btn-deny-order" data-oid="${escapeHtml(o.id)}">거부</button>
         <button type="button" class="btn btn-primary btn-confirm-order" data-oid="${escapeHtml(o.id)}">확인</button>
+        ${appHint}
       </div>`;
   }
   return `
   <div class="crypto-order">
     <span class="side ${o.side}">${o.side === 'buy' ? '매수' : '매도'}</span>
-    <b>${o.symbol}</b>
+    <b>${o.symbol}</b>${appOnly ? ' <span class="rh-tag">앱만</span>' : ''}
     <span class="amt">추천 ${usd2(o.dollars)}${bpHint}</span>
     <span style="color:var(--dim);font-size:12px">@$${cpx(o.price)}</span>
     <span class="why">${escapeHtml(o.reason)}</span>
@@ -1146,6 +1149,17 @@ function renderRhDayChange(change, pct) {
   return `<div class="rh-day ${cls}">${sign} ${rhMoney(Math.abs(change))} (${absPct.toFixed(2)}%) Today</div>`;
 }
 
+function apiRailNote(rh) {
+  const yes = rh?.api_tradable_symbols || [];
+  const no = rh?.app_only_symbols || [];
+  let line = 'Robinhood Crypto API 실시간 보유';
+  if (yes.length || no.length) {
+    line += `. API 주문 ${yes.length ? yes.join(', ') : '가능한 보유 없음'}`;
+    if (no.length) line += ` · 앱만 ${no.join(', ')}`;
+  }
+  return line;
+}
+
 function renderRhHoldings(positions) {
   if (!positions?.length) return '<div class="empty">보유 없음</div>';
   return positions.map(p => {
@@ -1155,9 +1169,12 @@ function renderRhHoldings(positions) {
       ? `<div class="rh-price-pill ${up ? 'up' : 'down'}">${rhMoney(p.price)}</div>`
       : `<div class="rh-price-pill down">시세 없음</div>`;
     const note = p.supported === false ? ' · 조언 외' : '';
+    const apiTag = p.api_tradable === false
+      ? ' <span class="rh-tag">앱만</span>'
+      : (p.api_tradable === true ? ' <span class="rh-tag">API</span>' : '');
     return `<div class="rh-holding">
       <div>
-        <div class="rh-sym">${escapeHtml(p.symbol)}${note ? `<span class="rh-tag">${note}</span>` : ''}</div>
+        <div class="rh-sym">${escapeHtml(p.symbol)}${apiTag}${note ? `<span class="rh-tag">${note}</span>` : ''}</div>
         <div class="rh-qty">${rhQty(p.qty)}${priced && p.value != null ? ` · ${rhMoney(p.value)}` : ''}</div>
       </div>
       ${sparklineSvg(p.sparkline)}
@@ -1265,7 +1282,7 @@ function renderCrypto(d, {quiet = false} = {}) {
     ${rh.unpriced?.length ? `<div class="rh-warn">시세 미반영 ${rh.unpriced.map(u => escapeHtml(u.symbol)).join(', ')}</div>` : ''}
     <div class="rh-section">
       <div class="rh-section-head"><h3>Crypto</h3></div>
-      <div class="rh-section-sub">Robinhood Crypto API 실시간 보유</div>
+      <div class="rh-section-sub">${escapeHtml(apiRailNote(rh))}</div>
       ${renderRhHoldings(holdings)}
     </div>`;
   } else {

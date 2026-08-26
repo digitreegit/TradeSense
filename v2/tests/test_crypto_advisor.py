@@ -348,6 +348,31 @@ def test_auto_failure_locks_manual_and_stops():
     set_mode.assert_called_once_with("manual")
 
 
+def test_auto_skips_app_only_symbol_without_locking():
+    from unittest.mock import patch
+    from app.crypto_advisor import execute_pending_auto
+
+    pending = [
+        {"id": "x1", "side": "sell", "symbol": "XRP", "pair": "XRP/USD",
+         "kind": "trim", "dollars": 100, "api_tradable": False},
+        {"id": "s1", "side": "sell", "symbol": "LTC", "pair": "LTC/USD",
+         "kind": "trim", "dollars": 80},
+    ]
+    with patch("app.crypto_advisor.store") as mock_store, \
+         patch("app.robinhood_config.get_execution_mode", return_value="auto"), \
+         patch("app.robinhood_config.set_execution_mode") as set_mode, \
+         patch("app.crypto_advisor.confirm_order", return_value={"ok": True, "orders": [], "order_history": []}) as confirm, \
+         patch("app.crypto_advisor.send"), patch("app.crypto_advisor.log_activity"):
+        mock_store.get.return_value = pending
+        out = execute_pending_auto()
+    assert confirm.call_args_list[0].args[0] == "s1"
+    assert confirm.call_count == 1
+    set_mode.assert_not_called()
+    skipped = next(r for r in out if r["id"] == "x1")
+    assert skipped["skipped"] is True
+    assert skipped["ok"] is False
+
+
 def test_unit_size_scales_with_real_book():
     """A $6,000 real book should size units off $6,000, not the $1,000 toy."""
     closes = wavy_uptrend()

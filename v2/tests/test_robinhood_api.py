@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.robinhood_client import RobinhoodAPIError, RobinhoodCryptoClient
+from app.robinhood_client import RobinhoodAPIError, RobinhoodCryptoClient, pair_allows_api_orders
 
 
 # Example from https://docs.robinhood.com/
@@ -81,3 +81,36 @@ def test_place_order_retries_v2_on_v1_403():
     assert out["id"] == "ord-v2"
     assert req.call_count == 2
     assert req.call_args_list[1][0][1] == v2_path
+
+
+def test_pair_allows_api_orders_prefers_v2_flag():
+    assert pair_allows_api_orders(
+        {"symbol": "XRP-USD", "status": "tradable", "is_api_tradable": False},
+    ) is False
+    assert pair_allows_api_orders(
+        {"symbol": "LTC-USD", "status": "tradable", "is_api_tradable": True},
+    ) is True
+    assert pair_allows_api_orders({"symbol": "LTC-USD", "status": "tradable"}) is True
+    assert pair_allows_api_orders(
+        {"symbol": "XRP-USD", "status": "sellonly", "is_api_tradable": True},
+        side="buy",
+    ) is False
+
+
+def test_is_symbol_api_tradable_uses_v2_then_v1_status():
+    client = RobinhoodCryptoClient(_DOC_API_KEY, _DOC_PRIVATE)
+    with patch.object(client, "get_trading_pairs_v2", return_value=[{
+        "symbol": "XRP-USD", "status": "tradable", "is_api_tradable": False,
+    }]):
+        assert client.is_symbol_api_tradable("XRP-USD") is False
+    with patch.object(client, "get_trading_pairs_v2", return_value=[]), \
+         patch.object(client, "get_trading_pairs", return_value=[{
+             "symbol": "LTC-USD", "status": "tradable",
+         }]):
+        assert client.is_symbol_api_tradable("LTC-USD") is True
+    assert client.api_tradable_map() == {}
+    with patch.object(client, "get_trading_pairs_v2", return_value=[
+        {"symbol": "XRP-USD", "is_api_tradable": False, "status": "tradable"},
+        {"symbol": "LTC-USD", "is_api_tradable": True, "status": "tradable"},
+    ]):
+        assert client.api_tradable_map("XRP", "LTC") == {"XRP": False, "LTC": True}

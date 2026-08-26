@@ -58,6 +58,32 @@ def test_fetch_robinhood_snapshot_totals_and_sparkline():
     assert snap["quote_at"] == "2026-08-26T12:00:01+00:00"
 
 
+def test_fetch_snapshot_tags_api_tradable_pairs():
+    mock_client = MagicMock()
+    mock_client.get_account.return_value = {"buying_power": "100.00"}
+    mock_client.get_all_holdings.return_value = [
+        {"asset_code": "XRP", "total_quantity": "10"},
+        {"asset_code": "LTC", "total_quantity": "2"},
+    ]
+    mock_client.get_best_bid_ask.return_value = {
+        "results": [
+            {"symbol": "XRP-USD", "price": "1.50", "timestamp": "2026-08-26T12:00:00+00:00"},
+            {"symbol": "LTC-USD", "price": "50.00", "timestamp": "2026-08-26T12:00:00+00:00"},
+        ]
+    }
+    mock_client.api_tradable_map.return_value = {"XRP": False, "LTC": True}
+    with patch("app.robinhood_live.get_credentials", return_value=("key", "priv")), \
+         patch("app.robinhood_live.RobinhoodCryptoClient", return_value=mock_client), \
+         patch("app.robinhood_live.fetch_bars", return_value={}):
+        snap = fetch_robinhood_snapshot()
+    assert snap["api_tradable_symbols"] == ["LTC"]
+    assert snap["app_only_symbols"] == ["XRP"]
+    xrp = next(p for p in snap["positions"] if p["symbol"] == "XRP")
+    ltc = next(p for p in snap["positions"] if p["symbol"] == "LTC")
+    assert xrp["api_tradable"] is False
+    assert ltc["api_tradable"] is True
+
+
 def test_fetch_snapshot_quote_at_is_newest_not_stale_min():
     mock_client = MagicMock()
     mock_client.get_account.return_value = {"buying_power": "100.00"}

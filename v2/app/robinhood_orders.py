@@ -143,7 +143,7 @@ def place_market_dollars(
             }
 
     try:
-        if not client.is_symbol_api_tradable(rh_symbol):
+        if not client.is_symbol_api_tradable(rh_symbol, side=side):
             return {
                 "ok": False,
                 "error": (

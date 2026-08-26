@@ -1084,8 +1084,20 @@ def advise_and_apply(force: bool = False) -> dict:
         if rh_live:
             bp = float(rh_live.get("buying_power") or 0)
             remaining_buy = max(0.0, round(bp * 0.98, 2))
+            tradable = {
+                str(p.get("symbol")): p.get("api_tradable")
+                for p in (rh_live.get("positions") or [])
+                if p.get("symbol")
+            }
             for o in orders:
-                if o.get("side") != "buy" or o.get("status") in _TERMINAL:
+                if o.get("status") in _TERMINAL:
+                    continue
+                flag = tradable.get(o.get("symbol"))
+                if flag is False:
+                    o["api_tradable"] = False
+                elif flag is True:
+                    o["api_tradable"] = True
+                if o.get("side") != "buy":
                     continue
                 if remaining_buy < MIN_UNIT:
                     o["blocked_reason"] = "Buying power 부족"
@@ -1233,12 +1245,26 @@ def execute_pending_auto(*, limit: int = 3) -> list[dict]:
         if o.get("status") not in _TERMINAL
     ]
     pending.sort(key=lambda o: (0 if o.get("side") == "sell" else 1, _action_priority(o)))
+    done: list[dict] = []
+    runnable: list[dict] = []
+    for order in pending:
+        if order.get("api_tradable") is False:
+            done.append({
+                "id": order.get("id"),
+                "symbol": order.get("symbol"),
+                "side": order.get("side"),
+                "ok": False,
+                "skipped": True,
+                "error": f"{order.get('symbol')}는 Robinhood API로 주문할 수 없습니다. 앱에서 수동으로 실행하세요.",
+            })
+            continue
+        runnable.append(order)
     selected: list[dict] = []
     sells = buys = 0
     selling_symbols = {
-        order.get("symbol") for order in pending if order.get("side") == "sell"
+        order.get("symbol") for order in runnable if order.get("side") == "sell"
     }
-    for order in pending:
+    for order in runnable:
         if order.get("side") == "sell" and sells < 2:
             selected.append(order)
             sells += 1
@@ -1251,15 +1277,17 @@ def execute_pending_auto(*, limit: int = 3) -> list[dict]:
         if len(selected) >= limit:
             break
 
-    done: list[dict] = []
     for order in selected:
         result = confirm_order(order["id"], float(order.get("dollars") or 0))
+        error = result.get("error")
+        skipped = (not result.get("ok")) and bool(error) and "API로 주문할 수 없습니다" in str(error)
         done.append({
             "id": order.get("id"),
             "symbol": order.get("symbol"),
             "side": order.get("side"),
             "ok": bool(result.get("ok")),
-            "error": result.get("error"),
+            "skipped": skipped,
+            "error": error,
             "dollars": result.get("summary") and None,
         })
         if result.get("ok"):
@@ -1270,6 +1298,8 @@ def execute_pending_auto(*, limit: int = 3) -> list[dict]:
                 done[-1]["dollars"] = match["actual_dollars"]
             else:
                 done[-1]["dollars"] = float(order.get("dollars") or 0)
+        elif skipped:
+            continue
         else:
             error = result.get("error") or "Robinhood 자동 주문 실패"
             set_execution_mode("manual")
@@ -1531,15 +1561,16 @@ def run_scheduled(slot: str = "check") -> bool:
         f"현재 ${s.get('total', 0):,.0f} / 원금 ${principal:,.0f} "
         f"(남음 ${gap:,.0f})"
     )
-    failed = next((r for r in auto_results if not r.get("ok")), None)
+    failed = next((r for r in auto_results if not r.get("ok") and not r.get("skipped")), None)
+    attempted = [r for r in auto_results if not r.get("skipped")]
     store.set(LAST_AUTO_KEY, {
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "result": "failed_locked_manual" if failed else (
-            "orders_succeeded" if auto_results else "no_signal"
+            "orders_succeeded" if any(r.get("ok") for r in attempted) else "no_signal"
         ),
         "mode": data.get("execution_mode"),
-        "orders_attempted": len(auto_results),
-        "orders_succeeded": sum(1 for r in auto_results if r.get("ok")),
+        "orders_attempted": len(attempted),
+        "orders_succeeded": sum(1 for r in attempted if r.get("ok")),
         "error": failed.get("error") if failed else None,
         "quote_at": (data.get("robinhood_live") or {}).get("quote_at"),
         "idle_reasons": data.get("idle_reasons") or [],

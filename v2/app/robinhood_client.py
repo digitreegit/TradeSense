@@ -19,6 +19,23 @@ class RobinhoodAPIError(RuntimeError):
     pass
 
 
+def pair_allows_api_orders(row: dict, *, side: str | None = None) -> bool:
+    """Robinhood v2 sets is_api_tradable; v1 only has status (tradable/sellonly)."""
+    status = str(row.get("status") or "").lower()
+    flag = row.get("is_api_tradable")
+    if flag is False:
+        return False
+    if side and str(side).lower() == "buy" and status == "sellonly":
+        return False
+    if flag is True:
+        return True
+    if status == "tradable":
+        return True
+    if status == "sellonly" and (side is None or str(side).lower() != "buy"):
+        return True
+    return False
+
+
 class RobinhoodCryptoClient:
     """Signed requests per https://docs.robinhood.com/crypto/trading/."""
 
@@ -132,12 +149,65 @@ class RobinhoodCryptoClient:
             return list(data.get("results") or [])
         return []
 
-    def is_symbol_api_tradable(self, rh_symbol: str) -> bool:
+    def get_trading_pairs_v2(self, *symbols: str) -> list[dict]:
+        """v2 pairs include is_api_tradable; v1 does not."""
+        query = self._query_params("symbol", *symbols) if symbols else ""
+        path = f"/api/v2/crypto/trading/trading_pairs/{query}"
+        data = self.request("GET", path)
+        if isinstance(data, dict):
+            return list(data.get("results") or [])
+        return []
+
+    def _trading_pair(self, rh_symbol: str) -> dict | None:
         sym = rh_symbol.upper()
-        for row in self.get_trading_pairs(sym):
-            if str(row.get("symbol") or "").upper() == sym:
-                return bool(row.get("is_api_tradable"))
-        return False
+        for getter in (self.get_trading_pairs_v2, self.get_trading_pairs):
+            try:
+                rows = getter(sym)
+            except Exception:
+                continue
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if isinstance(row, dict) and str(row.get("symbol") or "").upper() == sym:
+                    return row
+        return None
+
+    def is_symbol_api_tradable(self, rh_symbol: str, *, side: str | None = None) -> bool:
+        row = self._trading_pair(rh_symbol)
+        if not row:
+            return False
+        return pair_allows_api_orders(row, side=side)
+
+    def api_tradable_map(self, *asset_codes: str) -> dict[str, bool]:
+        """asset_code (XRP) → whether Crypto API can place orders."""
+        rh_syms = tuple(
+            f"{str(code).upper().replace('-USD', '')}-USD"
+            for code in asset_codes if code
+        )
+        if not rh_syms:
+            return {}
+        rows: list = []
+        try:
+            raw = self.get_trading_pairs_v2(*rh_syms)
+            if isinstance(raw, list):
+                rows = raw
+        except Exception:
+            rows = []
+        if not rows:
+            try:
+                raw = self.get_trading_pairs(*rh_syms)
+                if isinstance(raw, list):
+                    rows = raw
+            except Exception:
+                rows = []
+        out: dict[str, bool] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            sym = str(row.get("symbol") or "").replace("-USD", "").upper()
+            if sym:
+                out[sym] = pair_allows_api_orders(row)
+        return out
 
     def get_accounts_v2(self) -> list[dict]:
         data = self.request("GET", "/api/v2/crypto/trading/accounts/")

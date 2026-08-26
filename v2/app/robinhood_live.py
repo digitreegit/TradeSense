@@ -89,6 +89,15 @@ def fetch_robinhood_snapshot() -> dict | None:
         except Exception as exc:
             log.warning("robinhood quotes failed: %s", exc)
 
+    tradable_by_sym: dict[str, bool] = {}
+    if qty_by_sym:
+        try:
+            raw_map = client.api_tradable_map(*qty_by_sym.keys())
+            if isinstance(raw_map, dict):
+                tradable_by_sym = raw_map
+        except Exception as exc:
+            log.warning("robinhood trading pairs failed: %s", exc)
+
     positions: list[dict] = []
     unpriced: list[dict] = []
     holdings_value = 0.0
@@ -119,6 +128,7 @@ def fetch_robinhood_snapshot() -> dict | None:
                 "supported": supported,
                 "priced": False,
                 "live_quoted": False,
+                "api_tradable": tradable_by_sym.get(sym),
             })
             continue
         value = qty * price
@@ -133,6 +143,7 @@ def fetch_robinhood_snapshot() -> dict | None:
             "priced": True,
             "live_quoted": live_quoted,
             "quote_at": quote_at_by_sym[sym].isoformat() if live_quoted and sym in quote_at_by_sym else None,
+            "api_tradable": tradable_by_sym.get(sym),
         }
         if pair:
             df = frames.get(pair)
@@ -182,6 +193,8 @@ def fetch_robinhood_snapshot() -> dict | None:
             for row in positions
             if row.get("live_quoted") and row.get("pair") and row.get("quote_at")
         },
+        "api_tradable_symbols": sorted(sym for sym, ok in tradable_by_sym.items() if ok),
+        "app_only_symbols": sorted(sym for sym, ok in tradable_by_sym.items() if ok is False),
     }
 
 
