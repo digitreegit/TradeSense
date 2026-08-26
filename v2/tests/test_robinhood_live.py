@@ -26,8 +26,8 @@ def test_fetch_robinhood_snapshot_totals_and_sparkline():
     ]
     mock_client.get_best_bid_ask.return_value = {
         "results": [
-            {"symbol": "XRP-USD", "price": "1.07"},
-            {"symbol": "SOL-USD", "price": "82.32"},
+            {"symbol": "XRP-USD", "price": "1.07", "timestamp": "2026-08-26T12:00:00+00:00"},
+            {"symbol": "SOL-USD", "price": "82.32", "timestamp": "2026-08-26T12:00:01+00:00"},
         ]
     }
     frames = {
@@ -53,6 +53,31 @@ def test_fetch_robinhood_snapshot_totals_and_sparkline():
     mock_client.get_best_bid_ask.assert_called_once()
     called_syms = set(mock_client.get_best_bid_ask.call_args[0])
     assert called_syms == {"XRP-USD", "SOL-USD"}
+    assert snap["quote_at_by_pair"]["XRP/USD"] == "2026-08-26T12:00:00+00:00"
+    assert snap["quote_at_by_pair"]["SOL/USD"] == "2026-08-26T12:00:01+00:00"
+    assert snap["quote_at"] == "2026-08-26T12:00:01+00:00"
+
+
+def test_fetch_snapshot_quote_at_is_newest_not_stale_min():
+    mock_client = MagicMock()
+    mock_client.get_account.return_value = {"buying_power": "100.00"}
+    mock_client.get_all_holdings.return_value = [
+        {"asset_code": "XRP", "total_quantity": "10"},
+        {"asset_code": "SHIB", "total_quantity": "1000"},
+    ]
+    mock_client.get_best_bid_ask.return_value = {
+        "results": [
+            {"symbol": "XRP-USD", "price": "1.50", "timestamp": "2026-08-26T12:00:00+00:00"},
+            {"symbol": "SHIB-USD", "price": "0.00001", "timestamp": "2026-08-26T11:00:00+00:00"},
+        ]
+    }
+    with patch("app.robinhood_live.get_credentials", return_value=("key", "priv")), \
+         patch("app.robinhood_live.RobinhoodCryptoClient", return_value=mock_client), \
+         patch("app.robinhood_live.fetch_bars", return_value={}):
+        snap = fetch_robinhood_snapshot()
+    assert snap["quote_at"] == "2026-08-26T12:00:00+00:00"
+    assert snap["quote_at_by_pair"]["SHIB/USD"] == "2026-08-26T11:00:00+00:00"
+    assert snap["quote_at_by_pair"]["XRP/USD"] == "2026-08-26T12:00:00+00:00"
 
 
 def test_fetch_robinhood_snapshot_includes_non_candidate_holdings():

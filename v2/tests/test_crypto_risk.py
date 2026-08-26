@@ -5,6 +5,7 @@ import pytest
 from app.crypto_risk import (
     CRASH_30M_PCT,
     evaluate_position,
+    fresh_pairs,
     quote_is_fresh,
     risk_levels,
     rolling_drop,
@@ -58,6 +59,48 @@ def test_quote_freshness_fails_closed():
     assert quote_is_fresh(now.isoformat(), now)
     assert not quote_is_fresh((now - timedelta(minutes=3)).isoformat(), now)
     assert not quote_is_fresh(None, now)
+
+
+def test_fresh_pairs_keeps_only_the_fresh_symbol():
+    now = datetime.now(timezone.utc)
+    live = {"SOL/USD": 100.0, "SHIB/USD": 0.00001}
+    fresh = fresh_pairs(
+        live,
+        quote_at_by_pair={
+            "SOL/USD": now.isoformat(),
+            "SHIB/USD": (now - timedelta(minutes=10)).isoformat(),
+        },
+        now=now,
+    )
+    assert fresh == {"SOL/USD"}
+
+
+def test_fresh_pairs_without_timestamps_honors_global_flag():
+    live = {"SOL/USD": 100.0, "SHIB/USD": 0.00001}
+    assert fresh_pairs(live, live_quote_fresh=True) == {"SOL/USD", "SHIB/USD"}
+    assert fresh_pairs(live, live_quote_fresh=False) == set()
+
+
+def test_update_tracking_skips_stale_pair_only():
+    now = datetime.now(timezone.utc)
+    book = {
+        "cash": 0,
+        "positions": {
+            "SOL/USD": _pos(avg=100, qty=4, peak=100),
+            "SHIB/USD": _pos(avg=1, qty=1000, peak=1),
+        },
+    }
+    update_tracking(
+        book,
+        {"SOL/USD": 110, "SHIB/USD": 2},
+        quote_at_by_pair={
+            "SOL/USD": now.isoformat(),
+            "SHIB/USD": (now - timedelta(minutes=10)).isoformat(),
+        },
+        now=now,
+    )
+    assert book["positions"]["SOL/USD"]["peak_price"] == pytest.approx(110)
+    assert book["positions"]["SHIB/USD"]["peak_price"] == pytest.approx(1)
 
 
 def test_risk_levels_show_next_untaken_tier():

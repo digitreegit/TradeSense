@@ -69,7 +69,7 @@ def fetch_robinhood_snapshot() -> dict | None:
             qty_by_sym[sym] = qty_by_sym.get(sym, 0.0) + qty
 
     prices: dict[str, float] = {}
-    quote_times: list[datetime] = []
+    quote_at_by_sym: dict[str, datetime] = {}
     if qty_by_sym:
         rh_symbols = tuple(f"{sym}-USD" for sym in qty_by_sym)
         try:
@@ -83,9 +83,9 @@ def fetch_robinhood_snapshot() -> dict | None:
                     raw_ts = row.get("timestamp") or row.get("updated_at")
                     try:
                         ts = datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00"))
-                        quote_times.append(ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc))
+                        quote_at_by_sym[sym] = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
                     except (TypeError, ValueError):
-                        quote_times.append(datetime.now(timezone.utc))
+                        quote_at_by_sym[sym] = datetime.now(timezone.utc)
         except Exception as exc:
             log.warning("robinhood quotes failed: %s", exc)
 
@@ -132,6 +132,7 @@ def fetch_robinhood_snapshot() -> dict | None:
             "supported": supported,
             "priced": True,
             "live_quoted": live_quoted,
+            "quote_at": quote_at_by_sym[sym].isoformat() if live_quoted and sym in quote_at_by_sym else None,
         }
         if pair:
             df = frames.get(pair)
@@ -175,7 +176,12 @@ def fetch_robinhood_snapshot() -> dict | None:
         "positions": positions,
         "unpriced": unpriced,
         "updated_at": datetime.now(timezone.utc).isoformat(),
-        "quote_at": min(quote_times).isoformat() if quote_times else None,
+        "quote_at": max(quote_at_by_sym.values()).isoformat() if quote_at_by_sym else None,
+        "quote_at_by_pair": {
+            row["pair"]: row["quote_at"]
+            for row in positions
+            if row.get("live_quoted") and row.get("pair") and row.get("quote_at")
+        },
     }
 
 
@@ -405,9 +411,13 @@ def refresh_from_robinhood_live() -> tuple[dict | None, dict[str, float], dict[s
         if row.get("pair") and float(row.get("price") or 0) > 0
         and row.get("symbol") in _SYM_TO_PAIR and row.get("live_quoted")
     }
-    if live_prices and snap.get("quote_at"):
+    if live_prices:
         from .crypto_risk import update_tracking
-        update_tracking(book, live_prices, quote_at=snap["quote_at"])
+        update_tracking(
+            book, live_prices,
+            quote_at=snap.get("quote_at"),
+            quote_at_by_pair=snap.get("quote_at_by_pair") or {},
+        )
     store.set(BOOK_KEY, book)
     return snap, live_prices, prev_qty
 

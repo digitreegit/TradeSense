@@ -1298,7 +1298,12 @@ function renderCrypto(d, {quiet = false} = {}) {
     const bp = rh?.buying_power ?? s.buying_power ?? null;
     html += active.map(o => renderCryptoOrder(o, {mode: execMode, buyingPower: bp})).join('');
   } else {
+    const idle = (d.idle_reasons && d.idle_reasons.length)
+      ? d.idle_reasons
+      : ((d.last_auto_run && d.last_auto_run.idle_reasons) || []);
+    const why = idle.map(r => `<li>${escapeHtml(r)}</li>`).join('');
     html += `<div class="empty">할 일 없음 — 보유 유지</div>`;
+    if (why) html += `<ul class="rh-section-sub" style="margin:8px 0 0 18px;line-height:1.55">${why}</ul>`;
   }
 
   html += `<div class="briefing-section" style="margin-top:16px"><h3>원금 회복</h3></div>

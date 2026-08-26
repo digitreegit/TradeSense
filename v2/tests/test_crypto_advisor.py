@@ -1,4 +1,5 @@
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
@@ -235,6 +236,59 @@ def test_live_hard_stop_beats_daily_strategy():
     sells = [o for o in orders if o["symbol"] == "SOL" and o["side"] == "sell"]
     assert len(sells) == 1
     assert sells[0]["kind"] == "hard_stop"
+
+
+def test_stale_quote_on_one_pair_does_not_block_other_risk():
+    closes = wavy_uptrend()
+    frames = {
+        "SOL/USD": make_frame(closes),
+        "SHIB/USD": make_frame(closes),
+    }
+    book = _new_book()
+    book["cash"] = 100
+    book["positions"]["SOL/USD"] = {
+        "units": [{"dollars": 400, "price": 100, "qty": 4}],
+        "anchor": 100, "step": 0.05, "avg_cost": 100, "peak_price": 100,
+    }
+    shib_px = float(closes[-1])
+    book["positions"]["SHIB/USD"] = {
+        "units": [{"dollars": 400, "price": shib_px, "qty": 400 / shib_px}],
+        "anchor": shib_px, "step": 0.05, "avg_cost": shib_px, "peak_price": shib_px,
+    }
+    now = datetime.now(timezone.utc)
+    orders, _, view = generate_orders(
+        frames, book,
+        live_prices={"SOL/USD": 91, "SHIB/USD": shib_px},
+        quote_at_by_pair={
+            "SOL/USD": now.isoformat(),
+            "SHIB/USD": (now - timedelta(minutes=10)).isoformat(),
+        },
+    )
+    sells = [o for o in orders if o["symbol"] == "SOL" and o["side"] == "sell"]
+    assert len(sells) == 1
+    assert sells[0]["kind"] == "hard_stop"
+    assert any("SHIB" in r and "시세" in r for r in view["idle_reasons"])
+
+
+def test_idle_reasons_cash_floor_and_full_slots():
+    closes = wavy_uptrend()
+    price = float(closes[-1])
+    frames = {pair: make_frame(closes) for pair in (
+        "SHIB/USD", "LTC/USD", "XRP/USD", "AVAX/USD",
+    )}
+    book = _new_book()
+    book["cash"] = 800
+    for pair in frames:
+        book["positions"][pair] = {
+            "units": [{"dollars": 1500, "price": price, "qty": 1500 / price}],
+            "anchor": price, "step": 0.05, "avg_cost": price, "peak_price": price,
+        }
+    orders, _, view = generate_orders(frames, book)
+    assert orders == []
+    joined = " ".join(view["idle_reasons"])
+    assert "바닥" in joined
+    assert "4/4슬롯" in joined
+    assert "35%" in joined
 
 
 def test_profit_stage_apply_records_tier_and_sells_proportionally():
@@ -614,6 +668,21 @@ def test_set_principal_updates_book():
 def test_merge_pending_skips_denied_fingerprint():
     from app.crypto_advisor import _merge_pending
 
+    now = datetime.now(timezone.utc).isoformat()
+    old = [{"id": "a", "side": "sell", "symbol": "XRP", "pair": "XRP/USD",
+            "kind": "trim", "dollars": 100, "status": "denied",
+            "denied_at": now}]
+    fresh = [{"id": "b", "side": "sell", "symbol": "XRP", "pair": "XRP/USD",
+              "kind": "trim", "dollars": 120}]
+    merged = _merge_pending(old, fresh)
+    active = [o for o in merged if o.get("status") not in ("confirmed", "denied")]
+    assert active == []
+    assert len([o for o in merged if o.get("status") == "denied"]) == 1
+
+
+def test_merge_pending_requeues_denied_after_24h():
+    from app.crypto_advisor import _merge_pending
+
     old = [{"id": "a", "side": "sell", "symbol": "XRP", "pair": "XRP/USD",
             "kind": "trim", "dollars": 100, "status": "denied",
             "denied_at": "2026-08-19T12:00:00+00:00"}]
@@ -621,8 +690,9 @@ def test_merge_pending_skips_denied_fingerprint():
               "kind": "trim", "dollars": 120}]
     merged = _merge_pending(old, fresh)
     active = [o for o in merged if o.get("status") not in ("confirmed", "denied")]
-    assert active == []
-    assert len([o for o in merged if o.get("status") == "denied"]) == 1
+    assert len(active) == 1
+    assert active[0]["id"] != "a"
+    assert any(o.get("status") == "denied" and o["id"] == "a" for o in merged)
 
 
 def test_generate_orders_no_add_and_rotate_same_symbol():

@@ -28,6 +28,7 @@ from .config import settings
 from .crypto_risk import (
     FULL_EXIT_KINDS,
     evaluate_position,
+    fresh_pairs as _fresh_pairs,
     quote_is_fresh,
     risk_levels,
     rolling_drop,
@@ -160,22 +161,111 @@ def _market_state(metrics: dict[str, dict]) -> tuple[str, str]:
     return "CHOP", "혼조 — 상승 추세 코인만 제한적으로"
 
 
+def _idle_reasons(
+    book: dict,
+    metrics: dict[str, dict],
+    *,
+    fresh_pairs: set[str] | None = None,
+    live_prices: dict[str, float] | None = None,
+    recently_confirmed: set[tuple] | None = None,
+    pending: list[dict] | None = None,
+    buying_power: float | None = None,
+) -> list[str]:
+    """Human-readable why this check produced no new orders."""
+    fresh_pairs = fresh_pairs or set()
+    live_prices = live_prices or {}
+    reasons: list[str] = []
+    positions = book.get("positions") or {}
+    cash = float(book.get("cash") or 0)
+    total_value = cash + sum(
+        sum(float(u.get("qty") or 0) for u in pos.get("units") or [])
+        * float((metrics.get(pair) or {}).get("price") or (pos.get("units") or [{}])[-1].get("price") or 0)
+        for pair, pos in positions.items()
+    )
+    floor = CASH_FLOOR * total_value if total_value > 0 else 0.0
+    daily = book.get("risk_day") or {}
+    if daily.get("buy_halted"):
+        reasons.append(
+            f"일중 손실 {float(daily.get('change_pct') or 0):.1%}로 신규 매수만 차단"
+        )
+    if cash + 1e-9 < floor:
+        reasons.append(
+            f"현금 ${cash:,.0f}이 바닥 ${floor:,.0f} (총액의 15%) 아래라 신규 매수 없음"
+        )
+    if len(positions) >= MAX_POSITIONS:
+        reasons.append(f"보유 {len(positions)}/{MAX_POSITIONS}슬롯 — 신규 종목 진입 없음")
+    if buying_power is not None and buying_power < MIN_UNIT:
+        reasons.append(f"Buying power ${buying_power:,.0f}로 매수 최소 ${MIN_UNIT:.0f} 미달")
+
+    above: list[str] = []
+    stale: list[str] = []
+    overweight = False
+    for pair, pos in positions.items():
+        coin = pair.split("/")[0]
+        if pair in live_prices and pair not in fresh_pairs:
+            stale.append(coin)
+        m = metrics.get(pair)
+        if not m:
+            continue
+        price = float(m["price"])
+        qty = sum(float(u.get("qty") or 0) for u in pos.get("units") or [])
+        value = qty * price
+        if total_value > 0 and value / total_value > MAX_WEIGHT:
+            overweight = True
+        if m["trend"] != "down" and price >= float(m.get("ema50") or 0):
+            above.append(coin)
+    if above:
+        reasons.append(f"{', '.join(above)}는 일봉 50EMA 위 — 추세 이탈 매도 없음")
+    if not overweight and positions:
+        reasons.append("한 종목 비중 35% 초과 없음 — 축소 매도 없음")
+    if stale:
+        reasons.append(f"{', '.join(stale)} 시세가 2분 이상 오래되어 실시간 손절/익절 생략")
+
+    cooled = []
+    for key in recently_confirmed or set():
+        if len(key) >= 2:
+            cooled.append(str(key[1]))
+    if cooled:
+        reasons.append(
+            "최근 24시간 내 실행한 종목은 재추천 안 함: " + ", ".join(dict.fromkeys(cooled))
+        )
+    denied = [
+        str(o.get("symbol"))
+        for o in (pending or [])
+        if o.get("status") == "denied" and _is_recent(o.get("denied_at"))
+    ]
+    if denied:
+        reasons.append("거부한 추천은 24시간 동안 다시 안 냄: " + ", ".join(dict.fromkeys(denied)))
+    if not reasons:
+        reasons.append("그리드 익절·추가 매수 조건에 도달한 종목 없음")
+    return reasons[:6]
+
+
 def generate_orders(
     frames: dict[str, pd.DataFrame],
     book: dict,
     *,
     live_prices: dict[str, float] | None = None,
     live_quote_fresh: bool = False,
+    quote_at_by_pair: dict[str, str] | None = None,
+    buying_power: float | None = None,
+    pending: list[dict] | None = None,
+    recently_confirmed: set[tuple] | None = None,
 ) -> tuple[list[dict], dict, dict]:
     """Propose orders against a *copy* of the book. The caller's book is
     left unchanged — fills land only via confirm_order()."""
+    live_prices = live_prices or {}
+    fresh_pairs = _fresh_pairs(
+        live_prices, live_quote_fresh=live_quote_fresh,
+        quote_at_by_pair=quote_at_by_pair,
+    )
     metrics = {}
     for sym, df in frames.items():
         m = _coin_metrics(df)
         if m is not None:
             metrics[sym] = m
-    for sym, price in (live_prices or {}).items():
-        if sym in metrics and float(price or 0) > 0:
+    for sym, price in live_prices.items():
+        if sym in fresh_pairs and sym in metrics and float(price or 0) > 0:
             metrics[sym]["price"] = float(price)
 
     label, comment = _market_state(metrics)
@@ -224,7 +314,7 @@ def generate_orders(
         weight = value / total_value if total_value > 0 else 0.0
 
         # Live risk rules always outrank the slower daily trend strategy.
-        if live_quote_fresh and sym in (live_prices or {}):
+        if sym in fresh_pairs:
             risk = evaluate_position(
                 sym, pos, price, recent_drop=rolling_drop(book, sym, price),
             )
@@ -341,7 +431,15 @@ def generate_orders(
         "btc_ret30": metrics.get("BTC/USD", {}).get("ret30"),
     }
     # Panel P/L is the *confirmed* book, not the simulated fills.
-    view = {"market": market, "summary": _summary(book, metrics)}
+    view = {
+        "market": market,
+        "summary": _summary(book, metrics),
+        "idle_reasons": _idle_reasons(
+            book, metrics, fresh_pairs=fresh_pairs, live_prices=live_prices,
+            recently_confirmed=recently_confirmed, pending=pending,
+            buying_power=buying_power,
+        ),
+    }
     return orders, sim, view
 
 
@@ -533,7 +631,6 @@ def _merge_pending(old: list[dict], fresh: list[dict]) -> list[dict]:
             by_action[_action_key(o)] = o
     recent_confirmed = _recently_confirmed_actions(old)
     out: list[dict] = []
-    seen_fp: set[tuple] = set()
     for o in fresh:
         fp = _fp(o)
         action = _action_key(o)
@@ -543,14 +640,14 @@ def _merge_pending(old: list[dict], fresh: list[dict]) -> list[dict]:
             continue
         prev_fp = by_fp.get(fp)
         if prev_fp and prev_fp.get("status") == "denied":
-            seen_fp.add(fp)
-            if not any(x.get("id") == prev_fp.get("id") for x in out):
-                out.append(prev_fp)
-            continue
+            if _is_recent(prev_fp.get("denied_at")):
+                if not any(x.get("id") == prev_fp.get("id") for x in out):
+                    out.append(prev_fp)
+                continue
+            o = {**o, "id": str(uuid.uuid4())}
         if prev_fp and prev_fp.get("status") == "confirmed":
             if _is_recent(prev_fp.get("confirmed_at")):
                 # Same tip already executed recently — keep history only.
-                seen_fp.add(fp)
                 if not any(x.get("id") == prev_fp.get("id") for x in out):
                     out.append(prev_fp)
                 continue
@@ -562,10 +659,9 @@ def _merge_pending(old: list[dict], fresh: list[dict]) -> list[dict]:
                 o = {**o, "id": prev_action["id"]}
                 if prev_action.get("baseline_qty") is not None:
                     o["baseline_qty"] = prev_action["baseline_qty"]
-        seen_fp.add(fp)
         out.append(o)
     for o in old:
-        if o.get("status") in _TERMINAL and _fp(o) not in seen_fp:
+        if o.get("status") in _TERMINAL and not any(x.get("id") == o.get("id") for x in out):
             out.append(o)
     return out
 
@@ -950,12 +1046,26 @@ def advise_and_apply(force: bool = False) -> dict:
         if not frames:
             raise RuntimeError("no crypto bars returned")
         book = store.get(BOOK_KEY) or _new_book()
-        fresh = bool(rh_live and quote_is_fresh(rh_live.get("quote_at")))
+        pending_old = store.get(PENDING_KEY) or []
+        recent = _recently_confirmed_actions(pending_old)
+        quote_at_by_pair = dict((rh_live or {}).get("quote_at_by_pair") or {})
+        fresh = _fresh_pairs(
+            live_prices,
+            live_quote_fresh=bool(rh_live and quote_is_fresh(rh_live.get("quote_at"))),
+            quote_at_by_pair=quote_at_by_pair or None,
+        )
+        bp = None
+        if rh_live is not None and rh_live.get("buying_power") is not None:
+            try:
+                bp = float(rh_live["buying_power"])
+            except (TypeError, ValueError):
+                bp = None
         orders, _, view = generate_orders(
-            frames, book, live_prices=live_prices, live_quote_fresh=fresh,
+            frames, book, live_prices=live_prices, live_quote_fresh=bool(fresh),
+            quote_at_by_pair=quote_at_by_pair or None,
+            buying_power=bp, pending=pending_old, recently_confirmed=recent,
         )
         # Drop tips that were just (auto)confirmed so they can't bounce back.
-        recent = _recently_confirmed_actions(store.get(PENDING_KEY) or [])
         if recent:
             orders = [o for o in orders if _action_key(o) not in recent]
         orders = _merge_pending(store.get(PENDING_KEY) or [], orders)
@@ -988,6 +1098,17 @@ def advise_and_apply(force: bool = False) -> dict:
                 if o.get("status") in _TERMINAL or float(o.get("dollars") or 0) >= MIN_UNIT
                 or o.get("side") == "sell"
             ]
+        active = [o for o in orders if o.get("status") not in _TERMINAL]
+        if active:
+            view["idle_reasons"] = []
+        else:
+            notes = list(view.get("idle_reasons") or [])
+            if recent:
+                coins = [str(k[1]) for k in recent if len(k) >= 2]
+                msg = "최근 24시간 내 실행한 종목은 재추천 안 함: " + ", ".join(dict.fromkeys(coins))
+                if coins and msg not in notes:
+                    notes.append(msg)
+            view["idle_reasons"] = notes[:6]
         store.set(PENDING_KEY, orders)
     except Exception as exc:
         log.exception("crypto advice failed")
@@ -1421,6 +1542,7 @@ def run_scheduled(slot: str = "check") -> bool:
         "orders_succeeded": sum(1 for r in auto_results if r.get("ok")),
         "error": failed.get("error") if failed else None,
         "quote_at": (data.get("robinhood_live") or {}).get("quote_at"),
+        "idle_reasons": data.get("idle_reasons") or [],
     })
     log_activity("crypto", f"크립토 어드바이저({slot}) — 주문 {n}건, {status}")
     return True

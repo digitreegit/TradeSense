@@ -34,6 +34,23 @@ def quote_is_fresh(quote_at: str | None, now: datetime | None = None) -> bool:
     return 0 <= age <= QUOTE_MAX_AGE_SECONDS
 
 
+def fresh_pairs(
+    live_prices: dict[str, float],
+    *,
+    live_quote_fresh: bool = False,
+    quote_at_by_pair: dict[str, str] | None = None,
+    now: datetime | None = None,
+) -> set[str]:
+    """Per-symbol freshness. One stale coin must not disable the rest."""
+    priced = {pair for pair, px in (live_prices or {}).items() if float(px or 0) > 0}
+    if quote_at_by_pair:
+        return {
+            pair for pair in priced
+            if quote_is_fresh((quote_at_by_pair or {}).get(pair), now)
+        }
+    return priced if live_quote_fresh else set()
+
+
 def position_qty(pos: dict) -> float:
     return sum(float(unit.get("qty") or 0) for unit in pos.get("units") or [])
 
@@ -42,7 +59,8 @@ def update_tracking(
     book: dict,
     live_prices: dict[str, float],
     *,
-    quote_at: str,
+    quote_at: str | None = None,
+    quote_at_by_pair: dict[str, str] | None = None,
     now: datetime | None = None,
 ) -> None:
     """Ratchet peaks, retain 30-minute marks, and update the daily buy brake."""
@@ -50,10 +68,14 @@ def update_tracking(
     cutoff = now - timedelta(minutes=30)
     history = book.setdefault("risk_quotes", {})
     positions = book.get("positions") or {}
+    quote_at_by_pair = quote_at_by_pair or {}
 
     for pair, pos in positions.items():
         price = float(live_prices.get(pair) or 0)
         if price <= 0:
+            continue
+        ts = quote_at_by_pair.get(pair) or quote_at
+        if not quote_is_fresh(ts, now):
             continue
         qty = position_qty(pos)
         pos["peak_price"] = max(float(pos.get("peak_price") or price), price)
@@ -61,7 +83,7 @@ def update_tracking(
         pos.setdefault("profit_tiers_taken", [])
         pos.setdefault("risk_started_at", now.isoformat())
         rows = history.setdefault(pair, [])
-        rows.append({"ts": quote_at, "price": price})
+        rows.append({"ts": ts, "price": price})
         history[pair] = [
             row for row in rows
             if (parse_ts(row.get("ts")) or datetime.min.replace(tzinfo=timezone.utc)) >= cutoff
