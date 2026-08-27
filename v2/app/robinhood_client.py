@@ -193,6 +193,10 @@ class RobinhoodCryptoClient:
                     return row
         return None
 
+    def get_trading_pair(self, rh_symbol: str) -> dict | None:
+        """Return pair metadata such as quote/asset increments."""
+        return self._trading_pair(rh_symbol)
+
     def is_symbol_api_tradable(self, rh_symbol: str, *, side: str | None = None) -> bool:
         row = self._trading_pair(rh_symbol)
         if not row:
@@ -258,10 +262,22 @@ class RobinhoodCryptoClient:
 
     def place_order(self, body: dict) -> dict:
         """Place order via v1; on 403 retry v2 (fee-tier keys)."""
-        payload = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
+        # v1's limit schema does not expose time_in_force (limits are GTC),
+        # while v2 accepts/requires the explicit field.
+        body_v1 = dict(body)
+        if body_v1.get("type") == "limit" and isinstance(
+            body_v1.get("limit_order_config"), dict
+        ):
+            body_v1["limit_order_config"] = dict(body_v1["limit_order_config"])
+            body_v1["limit_order_config"].pop("time_in_force", None)
+        payload_v1 = json.dumps(
+            body_v1, separators=(",", ":"), ensure_ascii=False
+        )
         v1_err: RobinhoodAPIError | None = None
         try:
-            data = self.request("POST", "/api/v1/crypto/trading/orders/", body=payload)
+            data = self.request(
+                "POST", "/api/v1/crypto/trading/orders/", body=payload_v1
+            )
             if isinstance(data, dict):
                 return {**data, "_api_version": "v1"}
             raise RobinhoodAPIError("주문 응답을 읽을 수 없습니다.")
@@ -271,8 +287,9 @@ class RobinhoodCryptoClient:
             v1_err = exc
         account_number = self.get_account_number()
         path = f"/api/v2/crypto/trading/orders/?account_number={account_number}"
+        payload_v2 = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
         try:
-            data = self.request("POST", path, body=payload)
+            data = self.request("POST", path, body=payload_v2)
         except RobinhoodAPIError:
             if v1_err:
                 raise v1_err
@@ -282,6 +299,17 @@ class RobinhoodCryptoClient:
                 raise v1_err
             raise RobinhoodAPIError("주문 응답을 읽을 수 없습니다.")
         return {**data, "_api_version": "v2"}
+
+    def cancel_order(self, order_id: str, *, api_version: str = "v1") -> dict:
+        """Cancel an open order using the API version that accepted it."""
+        version = str(api_version or "v1").lower()
+        if version not in ("v1", "v2"):
+            raise ValueError(f"unsupported Robinhood API version: {api_version}")
+        path = f"/api/{version}/crypto/trading/orders/{order_id}/cancel/"
+        data = self.request("POST", path)
+        if isinstance(data, dict):
+            return {**data, "_api_version": version}
+        return {"_api_version": version}
 
     def get_recent_filled_orders(self, *, limit: int = 50) -> list[dict]:
         """Filled crypto orders, newest first when API provides timestamps."""

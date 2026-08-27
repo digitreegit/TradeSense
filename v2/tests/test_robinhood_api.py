@@ -84,6 +84,31 @@ def test_place_order_retries_v2_on_v1_403():
     assert req.call_args_list[1][0][1] == v2_path
 
 
+def test_limit_order_uses_version_specific_time_in_force_schema():
+    client = RobinhoodCryptoClient(_DOC_API_KEY, _DOC_PRIVATE)
+    body = {
+        "client_order_id": "cid-limit",
+        "side": "buy",
+        "type": "limit",
+        "symbol": "XRP-USD",
+        "limit_order_config": {
+            "asset_quantity": "10",
+            "limit_price": "1.01",
+            "time_in_force": "gtc",
+        },
+    }
+    with patch.object(client, "request") as req, \
+         patch.object(client, "get_account_number", return_value="acct-9"):
+        req.side_effect = [RobinhoodAPIError("Robinhood API 403"), {"id": "v2"}]
+        client.place_order(body)
+
+    import json
+    v1_payload = json.loads(req.call_args_list[0].kwargs["body"])
+    v2_payload = json.loads(req.call_args_list[1].kwargs["body"])
+    assert "time_in_force" not in v1_payload["limit_order_config"]
+    assert v2_payload["limit_order_config"]["time_in_force"] == "gtc"
+
+
 def test_get_v2_order_uses_v2_endpoint_and_account_number():
     client = RobinhoodCryptoClient(_DOC_API_KEY, _DOC_PRIVATE)
     with patch.object(client, "request", return_value={

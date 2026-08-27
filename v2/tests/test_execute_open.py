@@ -6,6 +6,7 @@ Covers the two live-money bugs found in QA:
 """
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pandas as pd
 
@@ -14,6 +15,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app import engine as engine_mod
 from app.engine import Engine, _carry_unexecuted_sells
 from app.decisions import PendingOrder
+
+
+def test_resting_limit_is_canceled_and_terminal_state_returned():
+    eng = Engine()
+    broker = MagicMock()
+    broker.wait_for_order.side_effect = [
+        {"id": "alpaca-open", "status": "new", "filled_qty": 0},
+        {"id": "alpaca-open", "status": "canceled", "filled_qty": 0},
+    ]
+    broker.cancel_order.return_value = True
+    eng._broker = broker
+
+    final = eng._latest_order({"id": "alpaca-open", "status": "accepted"})
+
+    assert final["status"] == "canceled"
+    broker.cancel_order.assert_called_once_with("alpaca-open")
+    assert broker.wait_for_order.call_args_list[0].kwargs["timeout"] == 12
+    assert broker.wait_for_order.call_args_list[1].kwargs["timeout"] == 5
 
 
 class FakeStore:

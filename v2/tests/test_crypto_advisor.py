@@ -368,6 +368,27 @@ def test_auto_accepted_order_waits_without_locking_manual():
     set_mode.assert_not_called()
 
 
+def test_auto_canceled_limit_retries_without_locking_manual():
+    from unittest.mock import patch
+    from app.crypto_advisor import execute_pending_auto
+
+    pending = [{
+        "id": "s1", "side": "sell", "symbol": "SOL", "pair": "SOL/USD",
+        "kind": "hard_stop", "dollars": 200,
+    }]
+    with patch("app.crypto_advisor.store") as mock_store, \
+         patch("app.robinhood_config.get_execution_mode", return_value="auto"), \
+         patch("app.robinhood_config.set_execution_mode") as set_mode, \
+         patch("app.crypto_advisor.confirm_order", return_value={
+             "ok": False, "retryable": True, "state": "canceled",
+             "error": "reprice",
+         }), patch("app.crypto_advisor.log_activity"):
+        mock_store.get.return_value = pending
+        out = execute_pending_auto()
+    assert out[0]["retryable"] is True
+    set_mode.assert_not_called()
+
+
 def test_auto_skips_app_only_symbol_without_locking():
     from unittest.mock import patch
     from app.crypto_advisor import execute_pending_auto

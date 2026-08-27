@@ -1156,7 +1156,7 @@ def advise_and_apply(force: bool = False) -> dict:
 
 
 def _execute_on_robinhood(order: dict, dollars: float) -> dict:
-    """Place market order via Crypto API. Mutates order with fill metadata."""
+    """Place a marketable-limit order. Mutates order with fill metadata."""
     from .robinhood_orders import place_market_dollars
 
     cid = order.get("rh_client_order_id")
@@ -1183,6 +1183,13 @@ def _execute_on_robinhood(order: dict, dollars: float) -> dict:
     if result.get("rh_api_version"):
         order["rh_api_version"] = result["rh_api_version"]
     if not result.get("ok"):
+        if result.get("retryable"):
+            # The prior limit is terminal/canceled. A fresh UUID is required
+            # for the next quote-priced submission.
+            order.pop("rh_client_order_id", None)
+            order.pop("rh_order_id", None)
+            order.pop("rh_api_version", None)
+            order.pop("rh_state", None)
         return result
     order["rh_state"] = result.get("state")
     order["api_executed"] = True
@@ -1218,6 +1225,7 @@ def confirm_order(order_id: str, actual_dollars: float | None = None) -> dict:
                 "error": placed.get("error") or "Robinhood 주문 실패",
                 "execution_mode": mode,
                 "pending": bool(placed.get("pending")),
+                "retryable": bool(placed.get("retryable")),
                 "state": placed.get("state"),
             }
         dollars = float(placed.get("dollars") or dollars)
@@ -1304,6 +1312,7 @@ def execute_pending_auto(*, limit: int = 3) -> list[dict]:
             "skipped": skipped,
             "error": error,
             "pending": bool(result.get("pending")),
+            "retryable": bool(result.get("retryable")),
             "dollars": result.get("summary") and None,
         })
         if result.get("ok"):
@@ -1316,11 +1325,11 @@ def execute_pending_auto(*, limit: int = 3) -> list[dict]:
                 done[-1]["dollars"] = float(order.get("dollars") or 0)
         elif skipped:
             continue
-        elif result.get("pending"):
+        elif result.get("pending") or result.get("retryable"):
             log_activity(
                 "crypto",
-                f"Robinhood 주문 체결 대기: {order.get('side')} {order.get('symbol')} "
-                f"({result.get('state') or 'unknown'})",
+                f"Robinhood 지정가 재확인: {order.get('side')} {order.get('symbol')} "
+                f"({result.get('state') or '새 가격 재시도'})",
             )
             # Do not submit buys while a preceding sell is still unresolved.
             break

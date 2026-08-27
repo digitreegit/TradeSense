@@ -1,4 +1,4 @@
-"""Alpaca broker wrapper: account, daily bars, market orders.
+"""Alpaca broker wrapper: account, daily bars, marketable-limit orders.
 
 Uses the free IEX feed for stocks and the free crypto feed. Fractional
 notional orders keep a $3K account fully investable.
@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, ROUND_DOWN, ROUND_UP
 
 import pandas as pd
 
@@ -44,6 +45,7 @@ def _order_snapshot(order) -> dict:
         "qty": float(get("qty") or 0),
         "filled_qty": float(get("filled_qty") or 0),
         "filled_avg_price": float(get("filled_avg_price") or 0),
+        "limit_price": float(get("limit_price") or 0),
     }
 
 
@@ -161,6 +163,58 @@ class Broker:
             log.warning("latest_price(%s) failed: %s", symbol, exc)
             return None
 
+    def latest_quote(self, symbol: str) -> tuple[float, float] | None:
+        """Return (bid, ask), using Alpaca's free feeds."""
+        try:
+            if "/" in symbol:
+                from alpaca.data.requests import CryptoLatestQuoteRequest
+
+                quotes = self.crypto_data.get_crypto_latest_quote(
+                    CryptoLatestQuoteRequest(symbol_or_symbols=symbol)
+                )
+            else:
+                from alpaca.data.requests import StockLatestQuoteRequest
+
+                quotes = self.stock_data.get_stock_latest_quote(
+                    StockLatestQuoteRequest(symbol_or_symbols=symbol, feed="iex")
+                )
+            quote = quotes[symbol]
+            bid, ask = float(quote.bid_price), float(quote.ask_price)
+            if bid > 0 and ask > 0:
+                return bid, ask
+        except Exception as exc:
+            log.warning("latest_quote(%s) failed: %s", symbol, exc)
+        return None
+
+    def marketable_limit_price(
+        self,
+        symbol: str,
+        side: str,
+        *,
+        reference_price: float | None = None,
+        emergency: bool = False,
+    ) -> float:
+        """Quote-derived price cap/floor with exchange-valid stock ticks."""
+        quote = self.latest_quote(symbol)
+        fallback = float(reference_price or 0) or float(self.latest_price(symbol) or 0)
+        if quote:
+            base = quote[1] if side == "buy" else quote[0]
+        else:
+            base = fallback
+        if base <= 0:
+            raise RuntimeError(f"{symbol} 지정가를 계산할 시세가 없습니다.")
+        buffer = Decimal("0.01") if emergency and side == "sell" else Decimal("0.0025")
+        raw = (
+            Decimal(str(base)) * (Decimal("1") + buffer)
+            if side == "buy"
+            else Decimal(str(base)) * (Decimal("1") - buffer)
+        )
+        tick = Decimal("0.0001") if raw < 1 else Decimal("0.01")
+        rounded = raw.quantize(
+            tick, rounding=ROUND_UP if side == "buy" else ROUND_DOWN
+        )
+        return float(rounded)
+
     def market_open_now(self) -> bool:
         try:
             return bool(self.trading.get_clock().is_open)
@@ -205,11 +259,20 @@ class Broker:
             time.sleep(1)
         return latest
 
+    def cancel_order(self, order_id: str) -> bool:
+        try:
+            self.trading.cancel_order_by_id(order_id)
+            return True
+        except Exception as exc:
+            log.warning("cancel_order(%s) failed: %s", order_id, exc)
+            return False
+
     def buy_notional(
-        self, symbol: str, dollars: float, *, client_order_id: str
+        self, symbol: str, dollars: float, *, client_order_id: str,
+        limit_price: float
     ) -> dict | None:
         from alpaca.trading.enums import OrderSide, TimeInForce
-        from alpaca.trading.requests import MarketOrderRequest
+        from alpaca.trading.requests import LimitOrderRequest
 
         tif = TimeInForce.GTC if "/" in symbol else TimeInForce.DAY
         try:
@@ -224,9 +287,9 @@ class Broker:
         if existing:
             return existing
         try:
-            order = self.trading.submit_order(MarketOrderRequest(
+            order = self.trading.submit_order(LimitOrderRequest(
                 symbol=symbol, notional=round(dollars, 2), side=OrderSide.BUY, time_in_force=tif,
-                client_order_id=client_order_id,
+                client_order_id=client_order_id, limit_price=limit_price,
             ))
             return _order_snapshot(order)
         except Exception as exc:
@@ -246,10 +309,11 @@ class Broker:
             }
 
     def sell_all(
-        self, symbol: str, *, qty: float, client_order_id: str
+        self, symbol: str, *, qty: float, client_order_id: str,
+        limit_price: float
     ) -> dict | None:
         from alpaca.trading.enums import OrderSide, TimeInForce
-        from alpaca.trading.requests import MarketOrderRequest
+        from alpaca.trading.requests import LimitOrderRequest
 
         try:
             existing = self.get_order_by_client_id(client_order_id)
@@ -264,10 +328,10 @@ class Broker:
             return existing
         tif = TimeInForce.GTC if "/" in symbol else TimeInForce.DAY
         try:
-            order = self.trading.submit_order(MarketOrderRequest(
+            order = self.trading.submit_order(LimitOrderRequest(
                 symbol=symbol.replace("/", ""), qty=abs(float(qty)),
                 side=OrderSide.SELL, time_in_force=tif,
-                client_order_id=client_order_id,
+                client_order_id=client_order_id, limit_price=limit_price,
             ))
             return _order_snapshot(order)
         except Exception as exc:

@@ -34,6 +34,9 @@ _ALPACA_TERMINAL_FAILURE = frozenset({
     "canceled", "expired", "rejected", "replaced", "suspended",
     "calculated", "done_for_day",
 })
+_EMERGENCY_SELL_REASONS = frozenset({
+    "stop", "intraday-stop", "opening-stop", "dd-halt",
+})
 
 
 def _alpaca_status(order) -> str:
@@ -201,7 +204,7 @@ class Engine:
             store.set(_ALPACA_ATTEMPTS_KEY, attempts)
 
     def _latest_order(self, result):
-        """Poll briefly, while keeping non-final orders durable for next cron."""
+        """Poll briefly, then cancel a resting limit for fresh-price retry."""
         if not isinstance(result, dict):
             return result
         status = _alpaca_status(result)
@@ -211,8 +214,31 @@ class Engine:
             if callable(waiter):
                 latest = waiter(order_id, timeout=12)
                 if latest:
-                    return latest
+                    result = latest
+                    status = _alpaca_status(result)
+            if status not in _ALPACA_FILLED | _ALPACA_TERMINAL_FAILURE:
+                cancel = getattr(self.broker, "cancel_order", None)
+                if callable(cancel) and cancel(order_id):
+                    waiter = getattr(self.broker, "wait_for_order", None)
+                    if callable(waiter):
+                        canceled = waiter(order_id, timeout=5)
+                        if canceled:
+                            return canceled
         return result
+
+    def _marketable_limit_price(
+        self, sym: str, side: str, reference: float, *, emergency: bool = False
+    ) -> float:
+        calculator = getattr(self.broker, "marketable_limit_price", None)
+        if callable(calculator):
+            return float(calculator(
+                sym, side, reference_price=reference, emergency=emergency
+            ))
+        # Compatibility for simple dry-run/test brokers.
+        factor = 0.99 if emergency and side == "sell" else (
+            1.0025 if side == "buy" else 0.9975
+        )
+        return round(float(reference) * factor, 4 if reference < 1 else 2)
 
     def _execute_sell(self, sym: str, meta_sleeve: str, reason: str,
                       broker_positions: dict[str, dict]) -> bool:
@@ -225,13 +251,37 @@ class Engine:
             return True
         key, attempt = self._ensure_attempt("sell", sym, meta_sleeve, reason)
         cid = attempt["client_order_id"]
+        limit_price = float(attempt.get("limit_price") or 0)
+        if limit_price <= 0:
+            reference = float(pos.get("current_price") or 0)
+            if reference <= 0 and float(pos.get("qty") or 0) != 0:
+                reference = abs(
+                    float(pos.get("market_value") or 0) / float(pos["qty"])
+                )
+            try:
+                limit_price = self._marketable_limit_price(
+                    sym, "sell", reference,
+                    emergency=reason in _EMERGENCY_SELL_REASONS,
+                )
+            except Exception as exc:
+                log.error("sell %s limit price failed: %s", sym, exc)
+                self._update_attempt(key, status="quote-failed")
+                return False
+            attempt["limit_price"] = limit_price
+            self._update_attempt(key, limit_price=limit_price)
         try:
             submitted = self.broker.sell_all(
-                sym, qty=pos["qty"], client_order_id=cid
+                sym, qty=pos["qty"], client_order_id=cid,
+                limit_price=limit_price,
             )
         except TypeError:
             # Backward-compatible test/dry-run broker.
-            submitted = self.broker.sell_all(sym)
+            try:
+                submitted = self.broker.sell_all(
+                    sym, qty=pos["qty"], client_order_id=cid
+                )
+            except TypeError:
+                submitted = self.broker.sell_all(sym)
         if submitted is True:
             final = {"status": "filled"}
         elif not submitted:
@@ -318,14 +368,30 @@ class Engine:
                 atr_value=atr_val,
                 reference_price=price,
             )
+        limit_price = float(attempt.get("limit_price") or 0)
+        if limit_price <= 0:
+            try:
+                limit_price = self._marketable_limit_price(sym, "buy", price)
+            except Exception as exc:
+                log.error("buy %s limit price failed: %s", sym, exc)
+                self._update_attempt(key, status="quote-failed")
+                return None
+            attempt["limit_price"] = limit_price
+            self._update_attempt(key, limit_price=limit_price)
         cid = attempt["client_order_id"]
         try:
             submitted = self.broker.buy_notional(
-                sym, dollars, client_order_id=cid
+                sym, dollars, client_order_id=cid,
+                limit_price=limit_price,
             )
         except TypeError:
             # Backward-compatible test/dry-run broker.
-            submitted = self.broker.buy_notional(sym, dollars)
+            try:
+                submitted = self.broker.buy_notional(
+                    sym, dollars, client_order_id=cid
+                )
+            except TypeError:
+                submitted = self.broker.buy_notional(sym, dollars)
         if submitted is None:
             self._update_attempt(key, status="unknown")
             return None
