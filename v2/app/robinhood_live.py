@@ -330,7 +330,20 @@ def apply_robinhood_live(book: dict, snap: dict) -> None:
         mark = price if price > 0 else fallback_px
         if pair in book.get("positions", {}):
             pos = book["positions"][pair]
-            pos["units"] = [{"dollars": qty * mark, "price": mark, "qty": qty}]
+            old_units = pos.get("units") or []
+            old_qty = sum(float(u.get("qty") or 0) for u in old_units)
+            old_cost = sum(float(u.get("dollars") or 0) for u in old_units)
+            avg_cost = float(pos.get("avg_cost") or 0)
+            if avg_cost > 0:
+                cost = qty * avg_cost
+            elif old_qty > 0 and qty <= old_qty:
+                cost = old_cost * qty / old_qty
+            elif old_qty > 0:
+                cost = old_cost + (qty - old_qty) * mark
+            else:
+                cost = qty * mark
+            basis_price = cost / qty if qty > 0 else mark
+            pos["units"] = [{"dollars": cost, "price": basis_price, "qty": qty}]
             if live_quoted:
                 pos["peak_price"] = max(float(pos.get("peak_price") or mark), mark)
         else:

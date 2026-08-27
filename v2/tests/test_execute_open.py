@@ -38,6 +38,16 @@ class FakeStore:
     def pending_replace_dicts(self, orders):
         self.pending = [dict(o) for o in orders]
 
+    def pending_replace(self, orders):
+        self.pending = [
+            {
+                "symbol": o.symbol, "sleeve": o.sleeve, "side": o.side,
+                "slot_weight": o.slot_weight, "stop_mult": o.stop_mult,
+                "reason": o.reason, "created_at": "2026-01-01T00:00:00+00:00",
+            }
+            for o in orders
+        ]
+
     def pos_meta_all(self):
         return {k: dict(v) for k, v in self.pos_meta.items()}
 
@@ -136,6 +146,10 @@ def test_hard_brake_at_open_cancels_buys_and_liquidates(monkeypatch):
     store = FakeStore()
     store.kv["brake"] = {"peak_equity": 1000.0, "halted": False}
     store.pending = [_buy("QQQ")]
+    store.pos_meta["SPY"] = {
+        "symbol": "SPY", "sleeve": "momentum", "stop_level": 80.0,
+        "stop_mult": 3.0, "entry_date": "2026-01-01", "held_days": 2,
+    }
     pos = {"SPY": {"qty": 1, "market_value": 700.0, "avg_entry": 100.0,
                    "current_price": 70.0, "unrealized_pl": -300.0}}
     broker = FakeBroker(equity=700.0, cash=0.0, positions=pos)  # 30% overnight dd
@@ -146,6 +160,101 @@ def test_hard_brake_at_open_cancels_buys_and_liquidates(monkeypatch):
     assert broker.sold == ["SPY"]           # liquidated, not bought
     assert broker.bought == []
     assert store.pending == []              # queued buys cancelled
+
+
+def test_manual_holding_is_visible_to_broker_but_not_adopted(monkeypatch):
+    store = FakeStore()
+    pos = {"AAPL": {"qty": 1, "market_value": 100.0, "avg_entry": 100.0,
+                    "current_price": 100.0, "unrealized_pl": 0.0}}
+    eng = _make_engine(monkeypatch, FakeBroker(positions=pos), store)
+    assert eng._pos_metas(pos) == {}
+    assert store.pos_meta == {}
+
+
+class PendingBuyBroker(FakeBroker):
+    def __init__(self):
+        super().__init__(equity=1000.0, cash=1000.0)
+        self.client_ids = []
+        self.fill_on_call = 2
+
+    def buy_notional(self, sym, dollars, *, client_order_id):
+        self.client_ids.append(client_order_id)
+        if len(self.client_ids) < self.fill_on_call:
+            return {
+                "id": "alpaca-buy-1", "client_order_id": client_order_id,
+                "status": "accepted", "filled_qty": 0, "filled_avg_price": 0,
+            }
+        self._positions[sym] = {
+            "qty": 2, "market_value": 200.0, "avg_entry": 100.0,
+            "current_price": 100.0, "unrealized_pl": 0.0,
+        }
+        return {
+            "id": "alpaca-buy-1", "client_order_id": client_order_id,
+            "status": "filled", "filled_qty": 2, "filled_avg_price": 100,
+        }
+
+    def wait_for_order(self, order_id, timeout=12):
+        return {
+            "id": order_id, "client_order_id": self.client_ids[-1],
+            "status": "accepted", "filled_qty": 0, "filled_avg_price": 0,
+        }
+
+
+def test_accepted_buy_keeps_queue_and_reuses_client_id_until_fill(monkeypatch):
+    store = FakeStore()
+    store.kv["brake"] = {"peak_equity": 1000.0, "halted": False}
+    store.pending = [_buy("SPY")]
+    broker = PendingBuyBroker()
+    eng = _make_engine(monkeypatch, broker, store)
+
+    assert eng.job_execute_open() is False
+    assert store.pending and store.pending[0]["symbol"] == "SPY"
+    assert "SPY" not in store.pos_meta
+    assert store.trades == []
+
+    # Simulate the accepted order filling between cron ticks. The next run must
+    # reconcile the saved client id even though cash is now reserved/zero and
+    # the position already appears at Alpaca.
+    broker._cash = 0.0
+    broker._positions["SPY"] = {
+        "qty": 2, "market_value": 200.0, "avg_entry": 100.0,
+        "current_price": 100.0, "unrealized_pl": 0.0,
+    }
+    assert eng.job_execute_open() is True
+    assert broker.client_ids[0] == broker.client_ids[1]
+    assert store.pending == []
+    assert "SPY" in store.pos_meta
+    assert len(store.trades) == 1
+
+
+class PendingSellBroker(FakeBroker):
+    def sell_all(self, sym, *, qty, client_order_id):
+        self.sold.append((sym, client_order_id))
+        return {
+            "id": "alpaca-sell-1", "client_order_id": client_order_id,
+            "status": "accepted", "filled_qty": 0, "filled_avg_price": 0,
+        }
+
+    def wait_for_order(self, order_id, timeout=12):
+        return {"id": order_id, "status": "accepted"}
+
+
+def test_hard_brake_keeps_unconfirmed_liquidation_for_retry(monkeypatch):
+    store = FakeStore()
+    store.kv["brake"] = {"peak_equity": 1000.0, "halted": False}
+    store.pending = [_buy("QQQ")]
+    store.pos_meta["SPY"] = {
+        "symbol": "SPY", "sleeve": "momentum", "stop_level": 80.0,
+        "stop_mult": 3.0, "entry_date": "2026-01-01", "held_days": 2,
+    }
+    pos = {"SPY": {"qty": 1, "market_value": 700.0, "avg_entry": 100.0,
+                   "current_price": 70.0, "unrealized_pl": -300.0}}
+    broker = PendingSellBroker(equity=700.0, cash=0.0, positions=pos)
+    eng = _make_engine(monkeypatch, broker, store)
+
+    assert eng.job_execute_open() is False
+    assert [(o["side"], o["symbol"]) for o in store.pending] == [("sell", "SPY")]
+    assert "SPY" in store.pos_meta
 
 
 def test_partial_buy_failure_keeps_only_failed_orders(monkeypatch):

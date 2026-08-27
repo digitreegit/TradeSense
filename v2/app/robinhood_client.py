@@ -114,12 +114,16 @@ class RobinhoodCryptoClient:
         data = self.request("GET", path)
         return data if isinstance(data, dict) else {}
 
-    def get_orders(self, **params: str) -> list[dict]:
-        """List crypto orders (paginated). Optional filters: state, symbol, side."""
-        q = ""
-        if params:
-            q = "?" + "&".join(f"{k}={v}" for k, v in params.items() if v is not None)
-        path = f"/api/v1/crypto/trading/orders/{q}"
+    def get_orders(self, *, api_version: str = "v1", **params: str) -> list[dict]:
+        """List crypto orders from the same API version used to place them."""
+        version = str(api_version or "v1").lower()
+        if version not in ("v1", "v2"):
+            raise ValueError(f"unsupported Robinhood API version: {api_version}")
+        query = {k: v for k, v in params.items() if v is not None}
+        if version == "v2":
+            query.setdefault("account_number", self.get_account_number())
+        q = "?" + "&".join(f"{k}={v}" for k, v in query.items()) if query else ""
+        path = f"/api/{version}/crypto/trading/orders/{q}"
         out: list[dict] = []
         while path:
             data = self.request("GET", path)
@@ -133,13 +137,30 @@ class RobinhoodCryptoClient:
             path = parsed.path + (f"?{parsed.query}" if parsed.query else "")
         return out
 
-    def get_order(self, order_id: str) -> dict:
-        """Fetch one order by id (list filter — path form is undocumented)."""
-        rows = self.get_orders(id=order_id)
-        if rows:
-            return rows[0]
-        data = self.request("GET", f"/api/v1/crypto/trading/orders/{order_id}/")
-        return data if isinstance(data, dict) else {}
+    def get_order(self, order_id: str, *, api_version: str | None = None) -> dict:
+        """Fetch one order, preferring the API version that accepted it."""
+        versions = (str(api_version).lower(),) if api_version else ("v1", "v2")
+        last_error: Exception | None = None
+        for version in versions:
+            try:
+                if version == "v2":
+                    account = self.get_account_number()
+                    path = (
+                        f"/api/v2/crypto/trading/orders/{order_id}/"
+                        f"?account_number={account}"
+                    )
+                    data = self.request("GET", path)
+                else:
+                    data = self.request(
+                        "GET", f"/api/v1/crypto/trading/orders/{order_id}/"
+                    )
+                if isinstance(data, dict) and data:
+                    return {**data, "_api_version": version}
+            except Exception as exc:
+                last_error = exc
+        if last_error is not None:
+            raise last_error
+        return {}
 
     def get_trading_pairs(self, *symbols: str) -> list[dict]:
         query = self._query_params("symbol", *symbols) if symbols else ""
@@ -222,7 +243,10 @@ class RobinhoodCryptoClient:
         return rows[0]
 
     def get_account_number(self) -> str:
-        acc = self.get_account()
+        try:
+            acc = self.get_account()
+        except RobinhoodAPIError:
+            acc = {}
         num = acc.get("account_number")
         if num:
             return str(num)
@@ -239,7 +263,7 @@ class RobinhoodCryptoClient:
         try:
             data = self.request("POST", "/api/v1/crypto/trading/orders/", body=payload)
             if isinstance(data, dict):
-                return data
+                return {**data, "_api_version": "v1"}
             raise RobinhoodAPIError("주문 응답을 읽을 수 없습니다.")
         except RobinhoodAPIError as exc:
             if "403" not in str(exc):
@@ -257,18 +281,28 @@ class RobinhoodCryptoClient:
             if v1_err:
                 raise v1_err
             raise RobinhoodAPIError("주문 응답을 읽을 수 없습니다.")
-        return data
+        return {**data, "_api_version": "v2"}
 
     def get_recent_filled_orders(self, *, limit: int = 50) -> list[dict]:
         """Filled crypto orders, newest first when API provides timestamps."""
-        try:
-            rows = self.get_orders(state="filled", limit=str(limit))
-        except RobinhoodAPIError:
-            rows = self.get_orders(limit=str(limit))
-            rows = [
-                r for r in rows
-                if str(r.get("state") or "").lower() in ("filled", "partially_filled")
-            ]
+        rows: list[dict] = []
+        errors: list[Exception] = []
+        for version in ("v1", "v2"):
+            try:
+                fetched = self.get_orders(
+                    api_version=version, state="filled", limit=str(limit)
+                )
+                rows.extend({**r, "_api_version": version} for r in fetched)
+            except Exception as exc:
+                errors.append(exc)
+        if not rows and len(errors) == 2:
+            raise errors[-1]
+        # An account/order can be visible through both versions. Keep one row.
+        by_id = {str(r.get("id") or f"anon-{i}"): r for i, r in enumerate(rows)}
+        rows = [
+            r for r in by_id.values()
+            if str(r.get("state") or "").lower() == "filled"
+        ]
         rows.sort(
             key=lambda r: str(r.get("updated_at") or r.get("created_at") or ""),
             reverse=True,

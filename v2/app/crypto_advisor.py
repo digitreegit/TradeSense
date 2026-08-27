@@ -558,9 +558,14 @@ def _action_key(o: dict) -> tuple:
 
 
 def _cooldown_key(o: dict) -> tuple:
+    kind = o.get("kind") or ""
+    if o.get("side") == "buy":
+        return _action_key(o)
     if o.get("kind") == "profit_stage":
         return (*_action_key(o), "profit_stage", o.get("profit_tier"))
-    return _action_key(o)
+    if kind in FULL_EXIT_KINDS:
+        return (*_action_key(o), "full_exit")
+    return (*_action_key(o), "partial_sell")
 
 
 _SELL_KIND_PRIORITY = {
@@ -912,7 +917,7 @@ def auto_confirm_from_robinhood(
     # 1) Match Robinhood filled orders (most reliable).
     for fill in filled_orders or []:
         state = str(fill.get("state") or "").lower()
-        if state not in ("filled", "partially_filled"):
+        if state != "filled":
             continue
         fill_id = str(fill.get("id") or "")
         if fill_id and fill_id in used_fill_ids:
@@ -951,6 +956,10 @@ def auto_confirm_from_robinhood(
     # 2) Qty delta vs baseline (works when orders API is empty / delayed).
     for order in pending:
         if order.get("status") in _TERMINAL:
+            continue
+        if order.get("rh_order_id"):
+            # API-submitted orders must be finalized from their order state.
+            # A holdings delta can represent only the partial portion filled.
             continue
         pair = order.get("pair") or ""
         if not pair or pair in used_pairs:
@@ -1164,11 +1173,15 @@ def _execute_on_robinhood(order: dict, dollars: float) -> dict:
         require_live_quote=get_execution_mode() == "auto",
         expected_price=float(order.get("price") or 0) or None,
         existing_order_id=order.get("rh_order_id"),
+        existing_api_version=order.get("rh_api_version"),
+        bypass_price_drift=sell_all,
     )
     if result.get("client_order_id"):
         order["rh_client_order_id"] = result["client_order_id"]
     if result.get("rh_order_id"):
         order["rh_order_id"] = result["rh_order_id"]
+    if result.get("rh_api_version"):
+        order["rh_api_version"] = result["rh_api_version"]
     if not result.get("ok"):
         return result
     order["rh_state"] = result.get("state")
@@ -1204,6 +1217,8 @@ def confirm_order(order_id: str, actual_dollars: float | None = None) -> dict:
                 "ok": False,
                 "error": placed.get("error") or "Robinhood 주문 실패",
                 "execution_mode": mode,
+                "pending": bool(placed.get("pending")),
+                "state": placed.get("state"),
             }
         dollars = float(placed.get("dollars") or dollars)
 
@@ -1288,6 +1303,7 @@ def execute_pending_auto(*, limit: int = 3) -> list[dict]:
             "ok": bool(result.get("ok")),
             "skipped": skipped,
             "error": error,
+            "pending": bool(result.get("pending")),
             "dollars": result.get("summary") and None,
         })
         if result.get("ok"):
@@ -1300,6 +1316,14 @@ def execute_pending_auto(*, limit: int = 3) -> list[dict]:
                 done[-1]["dollars"] = float(order.get("dollars") or 0)
         elif skipped:
             continue
+        elif result.get("pending"):
+            log_activity(
+                "crypto",
+                f"Robinhood 주문 체결 대기: {order.get('side')} {order.get('symbol')} "
+                f"({result.get('state') or 'unknown'})",
+            )
+            # Do not submit buys while a preceding sell is still unresolved.
+            break
         else:
             error = result.get("error") or "Robinhood 자동 주문 실패"
             set_execution_mode("manual")
@@ -1425,9 +1449,8 @@ def import_holdings(
 ) -> dict:
     """Rebuild the book from the user's real Robinhood holdings.
 
-    Cost basis inside the book is marked to market at import (so summary P/L
-    measures improvement *since import*); the original avg cost is kept per
-    position for the truthful total-return display. `principal` is the
+    Cost basis uses the original average cost when it is available; otherwise
+    it is anchored once at import and preserved across live refreshes. `principal` is the
     recovery target (original capital); if omitted it is inferred from
     qty × avg_cost + cash.
 
@@ -1456,8 +1479,9 @@ def import_holdings(
             continue
         price = m["price"]
         avg_cost = float(h["avg_cost"]) if h.get("avg_cost") else None
+        basis_price = avg_cost if avg_cost and avg_cost > 0 else price
         book["positions"][pair] = {
-            "units": [{"dollars": qty * price, "price": price, "qty": qty}],
+            "units": [{"dollars": qty * basis_price, "price": basis_price, "qty": qty}],
             "anchor": price,
             "step": _step_for(m["range30"]),
             "avg_cost": avg_cost,

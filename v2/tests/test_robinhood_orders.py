@@ -11,6 +11,7 @@ def test_qty_str_formatting():
     assert float(_qty_str(0.00123456789)) > 0
     assert _qty_str(12.5) == "12.5"
     assert _qty_str(1000000) == "1000000"
+    assert _qty_str(12345678.9) == "12345678.9"
     with pytest.raises(ValueError):
         _qty_str(0)
 
@@ -134,5 +135,54 @@ def test_unfilled_order_is_not_applied_as_success():
          patch("app.robinhood_orders.time.sleep"):
         out = place_market_dollars(side="buy", pair="XRP/USD", dollars=100)
     assert out["ok"] is False
+    assert out["pending"] is True
     assert out["rh_order_id"] == "ord-open"
     assert "체결" in out["error"]
+
+
+def test_partial_fill_stays_pending_until_fully_filled():
+    mock = MagicMock()
+    mock.get_trading_pairs.return_value = [{"symbol": "XRP-USD", "is_api_tradable": True}]
+    mock.get_primary_account_v2.return_value = {"is_api_tradable": True}
+    mock.get_account.return_value = {"buying_power": "500"}
+    mock.get_best_bid_ask.return_value = {
+        "results": [{"symbol": "XRP-USD", "price": "1.50"}],
+    }
+    partial = {
+        "id": "ord-partial", "state": "partially_filled",
+        "filled_asset_quantity": "10", "average_price": "1.50",
+    }
+    mock.place_order.return_value = partial
+    mock.get_order.return_value = partial
+    with patch("app.robinhood_orders.get_credentials", return_value=("k", "p")), \
+         patch("app.robinhood_orders.RobinhoodCryptoClient", return_value=mock), \
+         patch("app.robinhood_orders.time.sleep"):
+        out = place_market_dollars(side="buy", pair="XRP/USD", dollars=100)
+    assert out["ok"] is False
+    assert out["pending"] is True
+    assert out["state"] == "partially_filled"
+
+
+def test_emergency_sell_can_bypass_recommendation_price_drift():
+    mock = MagicMock()
+    mock.get_trading_pairs.return_value = [{"symbol": "XRP-USD", "is_api_tradable": True}]
+    mock.get_primary_account_v2.return_value = {"is_api_tradable": True}
+    mock.get_best_bid_ask.return_value = {
+        "results": [{"symbol": "XRP-USD", "price": "1.00"}],
+    }
+    mock.get_all_holdings.return_value = [
+        {"asset_code": "XRP", "quantity_available_for_trading": "100"},
+    ]
+    mock.place_order.return_value = {
+        "id": "ord-stop", "state": "filled",
+        "filled_asset_quantity": "100", "average_price": "1.00",
+    }
+    with patch("app.robinhood_orders.get_credentials", return_value=("k", "p")), \
+         patch("app.robinhood_orders.RobinhoodCryptoClient", return_value=mock), \
+         patch("app.robinhood_orders.time.sleep"):
+        out = place_market_dollars(
+            side="sell", pair="XRP/USD", dollars=200, sell_all=True,
+            expected_price=1.50, bypass_price_drift=True,
+        )
+    assert out["ok"] is True
+    mock.place_order.assert_called_once()

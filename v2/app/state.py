@@ -350,7 +350,10 @@ class Store:
         self._exec("DELETE FROM pending_orders")
         self._exec("DELETE FROM equity_curve")
         self._exec("DELETE FROM trades")
-        self._exec("DELETE FROM kv WHERE key IN ('brake','regime') OR key LIKE 'job_ran:%'")
+        self._exec(
+            "DELETE FROM kv WHERE key IN ('brake','regime','alpaca_order_attempts') "
+            "OR key LIKE 'job_ran:%'"
+        )
 
     def storage_health(self) -> dict:
         backend = "postgres" if self.pg else "sqlite"

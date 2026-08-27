@@ -348,6 +348,26 @@ def test_auto_failure_locks_manual_and_stops():
     set_mode.assert_called_once_with("manual")
 
 
+def test_auto_accepted_order_waits_without_locking_manual():
+    from unittest.mock import patch
+    from app.crypto_advisor import execute_pending_auto
+
+    pending = [
+        {"id": "s1", "side": "sell", "symbol": "SOL", "pair": "SOL/USD",
+         "kind": "hard_stop", "dollars": 200},
+    ]
+    with patch("app.crypto_advisor.store") as mock_store, \
+         patch("app.robinhood_config.get_execution_mode", return_value="auto"), \
+         patch("app.robinhood_config.set_execution_mode") as set_mode, \
+         patch("app.crypto_advisor.confirm_order", return_value={
+             "ok": False, "pending": True, "state": "open", "error": "waiting",
+         }), patch("app.crypto_advisor.log_activity"):
+        mock_store.get.return_value = pending
+        out = execute_pending_auto()
+    assert out[0]["pending"] is True
+    set_mode.assert_not_called()
+
+
 def test_auto_skips_app_only_symbol_without_locking():
     from unittest.mock import patch
     from app.crypto_advisor import execute_pending_auto
@@ -577,6 +597,24 @@ def test_collapse_actionable_keeps_one_sell_per_symbol():
     assert pending[0]["kind"] == "exit"
     assert len(confirmed) == 1
     assert confirmed[0]["kind"] == "take_profit"
+
+
+def test_recent_trim_does_not_suppress_new_hard_stop():
+    from app.crypto_advisor import _merge_pending
+
+    old = [{
+        "id": "trim", "side": "sell", "symbol": "XRP", "pair": "XRP/USD",
+        "kind": "trim", "dollars": 100, "status": "confirmed",
+        "confirmed_at": datetime.now(timezone.utc).isoformat(),
+    }]
+    fresh = [{
+        "id": "stop", "side": "sell", "symbol": "XRP", "pair": "XRP/USD",
+        "kind": "hard_stop", "dollars": 500, "status": "pending",
+    }]
+    merged = _merge_pending(old, fresh)
+    active = [o for o in merged if o.get("status") != "confirmed"]
+    assert len(active) == 1
+    assert active[0]["kind"] == "hard_stop"
 
 
 def test_collapse_actionable_keeps_one_buy_per_symbol():

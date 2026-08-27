@@ -10,7 +10,11 @@ from app.crypto_advisor import (
     holdings_qty_changed,
     _merge_pending,
 )
-from app.robinhood_live import fetch_robinhood_snapshot, merge_live_into_summary
+from app.robinhood_live import (
+    apply_robinhood_live,
+    fetch_robinhood_snapshot,
+    merge_live_into_summary,
+)
 
 
 def _bars(closes: list[float]) -> pd.DataFrame:
@@ -172,6 +176,31 @@ def test_merge_live_into_summary_overrides_totals():
     assert out["positions"][0]["price"] == pytest.approx(1.07)
 
 
+def test_live_refresh_preserves_cost_basis_instead_of_marking_to_market():
+    book = {
+        "cash": 100.0,
+        "positions": {
+            "XRP/USD": {
+                "units": [{"dollars": 180.0, "price": 1.80, "qty": 100.0}],
+                "avg_cost": 1.80,
+                "peak_price": 2.0,
+            },
+        },
+    }
+    snap = {
+        "buying_power": 100.0,
+        "positions": [{
+            "symbol": "XRP", "qty": 100.0, "price": 1.07,
+            "live_quoted": True,
+        }],
+    }
+    with patch("app.robinhood_live.fetch_bars", return_value={}):
+        apply_robinhood_live(book, snap)
+    unit = book["positions"]["XRP/USD"]["units"][0]
+    assert unit["dollars"] == pytest.approx(180.0)
+    assert unit["price"] == pytest.approx(1.80)
+
+
 def test_fetch_snapshot_adds_stocks_value_to_total():
     mock_client = MagicMock()
     mock_client.get_account.return_value = {"buying_power": "724.82"}
@@ -320,6 +349,32 @@ def test_auto_confirm_from_filled_order_when_qty_already_synced():
     assert len(confirmed) == 1
     assert confirmed[0]["auto_confirm_source"] == "order"
     assert confirmed[0]["actual_dollars"] == pytest.approx(1000.0, abs=1)
+
+
+def test_auto_confirm_does_not_finalize_partial_order():
+    now = datetime.now(timezone.utc)
+    pending = [{
+        "id": "abc", "side": "sell", "symbol": "SOL", "pair": "SOL/USD",
+        "dollars": 800, "status": "pending", "baseline_qty": 20.0,
+        "rh_order_id": "rh-1",
+        "created_at": (now - timedelta(minutes=5)).isoformat(),
+    }]
+    partial = [{
+        "id": "rh-1", "symbol": "SOL-USD", "side": "sell",
+        "state": "partially_filled", "filled_asset_quantity": "2",
+        "average_price": "80", "updated_at": now.isoformat(),
+    }]
+    snap = {
+        "positions": [{
+            "symbol": "SOL", "pair": "SOL/USD", "qty": 16.0, "price": 80.0,
+        }],
+    }
+    with patch("app.crypto_advisor.store"):
+        confirmed = auto_confirm_from_robinhood(
+            {"SOL/USD": 20.0}, snap, pending, partial
+        )
+    assert confirmed == []
+    assert pending[0]["status"] == "pending"
 
 
 def test_auto_confirm_ignores_tiny_qty_noise():

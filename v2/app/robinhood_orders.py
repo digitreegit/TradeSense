@@ -5,6 +5,7 @@ import logging
 import time
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from typing import Any
 
 from .robinhood_client import RobinhoodAPIError, RobinhoodCryptoClient
@@ -14,20 +15,21 @@ log = logging.getLogger(__name__)
 
 # Poll fill briefly after place — market crypto usually fills fast.
 _POLL_SECONDS = (0.4, 0.8, 1.2, 2.0)
-_FILLED_STATES = frozenset({"filled", "partially_filled"})
+_FILLED_STATES = frozenset({"filled"})
+_PENDING_STATES = frozenset({"open", "pending", "partially_filled", ""})
 
 
 def _qty_str(qty: float) -> str:
     """Format asset qty for RH (string decimals, no sci-notation)."""
     if qty <= 0:
         raise ValueError("수량은 0보다 커야 합니다.")
-    # SHIB needs many integer digits; BTC needs fine precision.
-    if qty >= 1000:
-        s = f"{qty:.0f}"
-    elif qty >= 1:
-        s = f"{qty:.8f}".rstrip("0").rstrip(".")
-    else:
-        s = f"{qty:.10f}".rstrip("0").rstrip(".")
+    # Always round down: a sell-all quantity must never exceed the available
+    # balance. Preserve fractional quantities even for large-supply coins.
+    try:
+        value = Decimal(str(qty)).quantize(Decimal("0.0000000001"), rounding=ROUND_DOWN)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError("올바른 수량이 아닙니다.") from exc
+    s = format(value, "f").rstrip("0").rstrip(".")
     if not s or s == "0":
         raise ValueError("수량이 너무 작습니다.")
     return s
@@ -97,6 +99,8 @@ def place_market_dollars(
     require_live_quote: bool = False,
     expected_price: float | None = None,
     existing_order_id: str | None = None,
+    existing_api_version: str | None = None,
+    bypass_price_drift: bool = False,
 ) -> dict[str, Any]:
     """Place a market order sized in USD notional (converted to asset qty).
 
@@ -120,8 +124,13 @@ def place_market_dollars(
 
     if existing_order_id:
         try:
-            existing = client.get_order(str(existing_order_id))
+            existing = client.get_order(
+                str(existing_order_id), api_version=existing_api_version
+            )
             state = str(existing.get("state") or "").lower()
+            api_version = str(
+                existing.get("_api_version") or existing_api_version or "v1"
+            )
             notional = _order_notional(existing)
             if state in _FILLED_STATES and notional > 0:
                 return {
@@ -129,12 +138,26 @@ def place_market_dollars(
                     "qty": float(existing.get("filled_asset_quantity") or 0),
                     "price": float(existing.get("average_price") or 0),
                     "client_order_id": cid, "rh_order_id": existing_order_id,
+                    "state": state, "rh_api_version": api_version,
+                }
+            if state in _PENDING_STATES or (state in _FILLED_STATES and notional <= 0):
+                return {
+                    "ok": False,
+                    "pending": True,
+                    "error": f"기존 Robinhood 주문이 아직 {state or 'unknown'} 상태입니다.",
+                    "order": existing,
+                    "client_order_id": cid,
+                    "rh_order_id": existing_order_id,
+                    "rh_api_version": api_version,
                     "state": state,
                 }
             return {
                 "ok": False,
-                "error": f"기존 Robinhood 주문이 아직 {state or 'unknown'} 상태입니다.",
+                "error": f"기존 Robinhood 주문이 {state or 'unknown'} 상태로 종료됐습니다.",
                 "client_order_id": cid,
+                "rh_order_id": existing_order_id,
+                "rh_api_version": api_version,
+                "state": state,
             }
         except Exception as exc:
             return {
@@ -206,7 +229,7 @@ def place_market_dollars(
                     "error": "Robinhood 시세가 2분 이상 오래되어 자동 주문을 중단했습니다.",
                     "client_order_id": cid,
                 }
-    if expected_price and float(expected_price) > 0:
+    if not bypass_price_drift and expected_price and float(expected_price) > 0:
         drift = abs(price / float(expected_price) - 1)
         if drift > 0.03:
             return {
@@ -275,6 +298,7 @@ def place_market_dollars(
         return {"ok": False, "error": f"주문 실패: {exc}", "client_order_id": cid}
 
     order_id = placed.get("id")
+    api_version = str(placed.get("_api_version") or "v1")
     final = placed
     for wait in _POLL_SECONDS:
         state = str(final.get("state") or "").lower()
@@ -290,27 +314,37 @@ def place_market_dollars(
         time.sleep(wait)
         if order_id:
             try:
-                final = client.get_order(str(order_id)) or final
+                final = client.get_order(
+                    str(order_id), api_version=api_version
+                ) or final
             except Exception:
                 pass
 
     filled_dollars = _order_notional(final)
-    if filled_dollars <= 0:
+    final_state = str(final.get("state") or "").lower()
+    if final_state not in _FILLED_STATES or filled_dollars <= 0:
         return {
             "ok": False,
-            "error": f"주문 체결을 확인하지 못했습니다 (상태: {final.get('state') or 'unknown'}).",
+            "pending": True,
+            "error": (
+                "주문은 접수됐지만 완전 체결을 아직 확인하지 못했습니다 "
+                f"(상태: {final.get('state') or 'unknown'}). 다음 실행에서 다시 확인합니다."
+            ),
             "order": final,
             "client_order_id": cid,
             "rh_order_id": order_id,
+            "rh_api_version": api_version,
+            "state": final_state,
         }
 
     return {
         "ok": True,
         "order": final,
         "dollars": round(filled_dollars, 2),
-        "qty": float(qty_s),
-        "price": price,
+        "qty": float(final.get("filled_asset_quantity") or qty_s),
+        "price": float(final.get("average_price") or price),
         "client_order_id": cid,
         "rh_order_id": order_id,
+        "rh_api_version": api_version,
         "state": final.get("state"),
     }

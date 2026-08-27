@@ -79,8 +79,21 @@ def test_place_order_retries_v2_on_v1_403():
         ]
         out = client.place_order(body)
     assert out["id"] == "ord-v2"
+    assert out["_api_version"] == "v2"
     assert req.call_count == 2
     assert req.call_args_list[1][0][1] == v2_path
+
+
+def test_get_v2_order_uses_v2_endpoint_and_account_number():
+    client = RobinhoodCryptoClient(_DOC_API_KEY, _DOC_PRIVATE)
+    with patch.object(client, "request", return_value={
+        "id": "ord-v2", "state": "filled",
+    }) as req, patch.object(client, "get_account_number", return_value="acct-9"):
+        out = client.get_order("ord-v2", api_version="v2")
+    assert out["_api_version"] == "v2"
+    req.assert_called_once_with(
+        "GET", "/api/v2/crypto/trading/orders/ord-v2/?account_number=acct-9"
+    )
 
 
 def test_pair_allows_api_orders_prefers_v2_flag():
