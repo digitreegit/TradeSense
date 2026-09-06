@@ -413,6 +413,12 @@
     .table-cards td:first-child { padding-top: 0; }
   }
 
+  .trade-toggle { appearance:none; width:42px; height:24px; border:1px solid #64748b; border-radius:20px; background:#475569; position:relative; cursor:pointer; flex-shrink:0; }
+  .trade-toggle::before { content:""; position:absolute; width:18px; height:18px; top:2px; left:2px; border-radius:50%; background:white; transition:transform .15s; }
+  .trade-toggle:checked { background:#16834b; border-color:#16834b; }
+  .trade-toggle:checked::before { transform:translateX(18px); }
+  .trade-toggle:focus-visible { outline:2px solid #60a5fa; outline-offset:3px; }
+  .trade-toggle:disabled { opacity:.5; cursor:wait; }
 </style>
 </head>
 <body>
@@ -527,13 +533,18 @@
       <input type="password" class="input" id="rh-api-key" autocomplete="off" placeholder="rh-api-…">
       <span class="field-label">Private Key (Base64)</span>
       <input type="password" class="input" id="rh-private-key" autocomplete="off" placeholder="Ed25519 private key">
-      <span class="field-label">실행 모드</span>
+      <label style="display:flex;align-items:center;gap:12px;margin:14px 0;cursor:pointer">
+        <input type="checkbox" role="switch" id="rh-auto-mode" aria-label="Robinhood 자동 거래" class="trade-toggle">
+        <span>자동 거래 <b id="rh-auto-label">OFF · 수동</b></span>
+      </label>
+      <p class="field-hint">ON: 다음 스케줄러 점검부터 API 자동 주문 · OFF: 신규 자동 주문 중지. 이미 접수된 주문은 취소되지 않습니다.</p>
+      <span class="field-label">실행 모드 (반자동 포함)</span>
       <select class="input" id="rh-exec-mode" aria-label="크립토 실행 모드">
         <option value="manual">수동 — 앱에서 직접 거래 후 확인</option>
         <option value="semi">반자동 — 확인 누르면 API 주문</option>
         <option value="auto">완전자동 — 스케줄이 주문까지 실행</option>
       </select>
-      <p class="field-hint" id="rh-exec-hint" style="margin:4px 0 8px">반자동: 승인 필요할 때 텔레그램 → 앱에서 [API 주문]. 완전자동은 검증 후.</p>
+      <p class="field-hint" id="rh-exec-hint" style="margin:4px 0 8px">반자동: 승인 필요할 때 텔레그램 → 앱에서 [API 주문]. 자동: 24시간 15분 간격으로 매도 우선 실행. 키에 Place orders 권한이 필요합니다.</p>
       <div class="btn-row">
         <button type="button" class="btn btn-primary btn-sm" id="btn-save-rh-keys">키 저장</button>
         <button type="button" class="btn btn-ghost btn-sm" id="btn-save-rh-mode">모드 저장</button>
@@ -797,6 +808,19 @@ function renderConnection(st) {
   const label = $('conn-label');
   const detail = $('conn-detail');
   dot.className = 'status-dot';
+  const selectedMode = $('rh-exec-mode');
+  if (selectedMode) selectedMode.value = st?.execution_mode || 'manual';
+  const autoSwitch = $('rh-auto-mode');
+  if (autoSwitch) autoSwitch.checked = st?.execution_mode === 'auto';
+  const autoLabel = $('rh-auto-label');
+  if (autoLabel) autoLabel.textContent = st?.execution_mode === 'auto' ? 'ON · 자동' : st?.execution_mode === 'semi' ? 'OFF · 반자동' : 'OFF · 수동';
+  const readinessHint = $('rh-exec-hint');
+  if (readinessHint) {
+    const last = st?.last_auto_run;
+    readinessHint.textContent = (st?.readiness?.reason || '계좌 연결 확인됨. 키에 Place orders 권한이 필요합니다.')
+      + ' · 자동 모드는 24시간 15분 간격 점검'
+      + (last?.checked_at ? ` · 마지막 점검: ${new Date(last.checked_at).toLocaleString()} (${last.result || ''})` : ' · 스케줄러 점검 기록 없음');
+  }
   if (!st?.configured) {
     label.textContent = 'Alpaca 키 미설정';
     detail.textContent = '라이브 API 키(AK…)를 저장하거나 Vercel 환경변수를 설정하세요.';
@@ -1301,8 +1325,8 @@ function renderCrypto(d, {quiet = false} = {}) {
   const execMode = d.execution_mode || 'manual';
   const modeNote = {
     manual: '매수·매도는 Robinhood 앱에서 직접 실행한 뒤 아래에서 확인하세요.',
-    semi: '아래 <b>API 주문</b>을 누르면 TradeSense가 Robinhood에 시장가 주문을 넣습니다.',
-    auto: '완전자동 — 시장가 주문으로 손실이 날 수 있습니다. 주문 실패 시 즉시 수동으로 잠기며 다음 점검까지 거래를 중단합니다.',
+    semi: '아래 <b>API 주문</b>을 누르면 TradeSense가 Robinhood에 가격 한도가 있는 지정가 주문을 넣습니다.',
+    auto: '자동 — 24시간 15분 간격으로 매도 우선 지정가 주문. 미체결은 다음 점검에서 확인하고, 복구 불가 오류는 수동 모드로 전환합니다.',
   }[execMode] || '';
 
   html += `<div class="rh-advisor">
@@ -1459,6 +1483,19 @@ function renderRobinhoodStatus(st) {
   const detail = $('rh-detail');
   const delBtn = $('btn-delete-rh-keys');
   dot.className = 'status-dot';
+  const selectedMode = $('rh-exec-mode');
+  if (selectedMode) selectedMode.value = st?.execution_mode || 'manual';
+  const autoSwitch = $('rh-auto-mode');
+  if (autoSwitch) autoSwitch.checked = st?.execution_mode === 'auto';
+  const autoLabel = $('rh-auto-label');
+  if (autoLabel) autoLabel.textContent = st?.execution_mode === 'auto' ? 'ON · 자동' : st?.execution_mode === 'semi' ? 'OFF · 반자동' : 'OFF · 수동';
+  const readinessHint = $('rh-exec-hint');
+  if (readinessHint) {
+    const last = st?.last_auto_run;
+    readinessHint.textContent = (st?.readiness?.reason || '계좌 연결 확인됨. 키에 Place orders 권한이 필요합니다.')
+      + ' · 자동 모드는 24시간 15분 간격 점검'
+      + (last?.checked_at ? ` · 마지막 점검: ${new Date(last.checked_at).toLocaleString()} (${last.result || ''})` : ' · 스케줄러 점검 기록 없음');
+  }
   if (!st?.configured) {
     label.textContent = 'API 키 미설정';
     detail.textContent = 'Robinhood 웹(classic) → 크립토 설정에서 API 키를 발급하세요.';
@@ -1487,9 +1524,13 @@ function renderRobinhoodStatus(st) {
   if (modeSel && st.execution_mode) modeSel.value = st.execution_mode;
 }
 
-async function saveRobinhoodMode() {
+async function saveRobinhoodMode(requestedMode) {
   const msg = $('rh-msg');
-  const mode = ($('rh-exec-mode')?.value || 'manual').trim();
+  const mode = typeof requestedMode === 'string' ? requestedMode : ($('rh-exec-mode')?.value || 'manual').trim();
+  const autoSwitch = $('rh-auto-mode');
+  const saveButton = $('btn-save-rh-mode');
+  if (autoSwitch) autoSwitch.disabled = true;
+  if (saveButton) saveButton.disabled = true;
   try {
     const r = await api('/api/crypto/execution-mode', {
       method: 'POST',
@@ -1500,15 +1541,21 @@ async function saveRobinhoodMode() {
     if (!d.ok) {
       msg.textContent = d.error || '모드 저장 실패';
       msg.className = 'msg err';
+      await loadRobinhoodStatus();
       return;
     }
     const labels = {manual: '수동', semi: '반자동', auto: '완전자동'};
     msg.textContent = `실행 모드: ${labels[d.mode] || d.mode}`;
     msg.className = 'msg ok';
+    await loadRobinhoodStatus();
     loadCrypto({quiet: true});
   } catch (e) {
     msg.textContent = String(e.message || e);
     msg.className = 'msg err';
+    await loadRobinhoodStatus();
+  } finally {
+    if (autoSwitch) autoSwitch.disabled = false;
+    if (saveButton) saveButton.disabled = false;
   }
 }
 
@@ -1715,6 +1762,7 @@ $('btn-analyze-screenshots').addEventListener('click', analyzeScreenshots);
 $('btn-refresh-crypto').addEventListener('click', loadCrypto);
 $('btn-save-rh-keys').addEventListener('click', saveRobinhoodKeys);
 $('btn-save-rh-mode')?.addEventListener('click', saveRobinhoodMode);
+$('rh-auto-mode')?.addEventListener('change', e => saveRobinhoodMode(e.target.checked ? 'auto' : 'manual'));
 $('btn-delete-rh-keys').addEventListener('click', deleteRobinhoodKeys);
 $('btn-robinhood-sync').addEventListener('click', syncRobinhood);
 

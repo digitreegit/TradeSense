@@ -1,10 +1,9 @@
 """Crypto advisor — the bot tells the user exactly what to buy or sell
 on Robinhood. Primary objective: recover original principal.
 
-Alpaca cannot trade crypto in this account's state, so no real orders are
-ever placed here. Proposed orders stay pending until the user confirms
-(optionally with the actual Robinhood fill size). The book is updated only
-on confirm. Checks run every ~15 min while awake (06:00–23:59 ET);
+Execution uses Robinhood: manual confirmation, semi-auto API orders, or
+scheduled automatic API orders. Proposed orders remain pending until their
+execution is confirmed. Checks run every ~15 min around the clock;
 Telegram only when a tip needs approval (quiet 00:00–05:59 ET).
 
 Recovery playbook: do not average down a concentrated bag (XRP). Trim
@@ -70,8 +69,9 @@ MIN_UNIT = 25.0
 BEAR_SIZE = 0.75       # recovery: deploy 75% size in a bear, not half
 CASH_FLOOR = 0.15      # keep 15% cash; the rest can work
 RSI_MAX = 75.0         # skip only clearly overbought strength
+GRID_TAKE_PROFIT_ENABLED = True  # research switch; do not tune on one window
 NO_AVERAGEDOWN = 0.15  # never add if price is >15% below original avg cost
-SCHEDULE = "수시 점검 (06:00–24:00 ET) · 거래 필요할 때만 텔레그램 · 00–06시 조용"
+SCHEDULE = "24시간 15분 간격 점검 · 거래 필요할 때만 텔레그램 · 00–06시 알림 조용"
 QUIET_START_HOUR = 0   # inclusive ET
 QUIET_END_HOUR = 6     # exclusive — no Telegram midnight–6 AM ET
 
@@ -104,7 +104,9 @@ def fetch_bars(days: int = 400) -> dict[str, pd.DataFrame]:
             }
         ).set_index("date")
         df.index = pd.to_datetime(df.index).tz_localize(None).normalize()
-        out[sym] = df
+        # Daily trend signals must not oscillate with the unfinished UTC bar.
+        today = pd.Timestamp(datetime.now(timezone.utc).date())
+        out[sym] = df.loc[df.index < today]
     return out
 
 
@@ -135,6 +137,20 @@ def _coin_metrics(df: pd.DataFrame) -> dict | None:
 def _step_for(range30: float) -> float:
     """RuleFive step sized to the coin's own daily range (~1.5 average days)."""
     return round(min(MAX_STEP, max(MIN_STEP, range30 * 1.5)), 2)
+
+
+def _entry_quality(metrics: dict) -> bool:
+    """Require absolute strength as well as relative rank for every buy.
+
+    Live prices can invalidate a completed daily uptrend. Recheck the EMA
+    against the live price rather than trusting the cached trend label.
+    """
+    return bool(
+        metrics["trend"] == "up"
+        and metrics["price"] > metrics["ema50"]
+        and metrics["ret30"] > 0
+        and metrics["rsi14"] < RSI_MAX
+    )
 
 
 def _new_book() -> dict:
@@ -275,7 +291,8 @@ def generate_orders(
 
     def _pos_value(pos: dict, sym: str) -> float:
         m = metrics.get(sym)
-        px = m["price"] if m else pos["units"][-1]["price"]
+        px = (live_prices[sym] if sym in fresh_pairs else
+              m["price"] if m else pos["units"][-1]["price"])
         return sum(u["qty"] for u in pos["units"]) * px
 
     # size units off the whole book (real holdings + cash), not a fixed $1000
@@ -286,6 +303,10 @@ def generate_orders(
     if bear:
         unit = max(MIN_UNIT, round(unit * BEAR_SIZE, 0))
     floor = CASH_FLOOR * total_value
+
+    def _fits_cap(sym: str, dollars: float) -> bool:
+        value = _pos_value(sim["positions"][sym], sym) if sym in sim["positions"] else 0.0
+        return total_value > 0 and value + dollars <= MAX_WEIGHT * total_value + 1e-9
 
     def _order(side: str, sym: str, dollars: float, price: float,
                reason: str, kind: str, step: float, **extra):
@@ -307,9 +328,10 @@ def generate_orders(
     for sym in list(sim["positions"]):
         m = metrics.get(sym)
         pos = sim["positions"][sym]
-        if m is None:
-            continue
-        price, step = m["price"], pos["step"]
+        # A held coin may have no Alpaca daily history (API-only/new listing).
+        # Robinhood live stops still protect it independently of trend data.
+        price = live_prices[sym] if sym in fresh_pairs else (m or {}).get("price", 0)
+        step = pos["step"]
         value = sum(u["qty"] for u in pos["units"]) * price
         weight = value / total_value if total_value > 0 else 0.0
 
@@ -328,6 +350,9 @@ def generate_orders(
                 apply_order(sim, orders[-1], risk["dollars"])
                 sold_this_run.add(sym)
                 continue
+
+        if m is None:
+            continue
 
         # 0) dust that is not trending up: consolidate into cash
         if value < DUST_MIN and m["trend"] != "up":
@@ -353,7 +378,7 @@ def generate_orders(
             _order("sell", sym, value, price, "추세 이탈 — 전량 매도", "exit", step)
             apply_order(sim, orders[-1], value)
             sold_this_run.add(sym)
-        elif price >= pos["anchor"] * (1 + step):
+        elif GRID_TAKE_PROFIT_ENABLED and price >= pos["anchor"] * (1 + step):
             u = pos["units"][-1]
             got = u["qty"] * price
             _order("sell", sym, got, price, f"익절 +{step:.0%}", "take_profit", step)
@@ -365,6 +390,8 @@ def generate_orders(
             and sim["cash"] - floor >= unit
             and not (book.get("risk_day") or {}).get("buy_halted")
             and not _underwater(pos, price)
+            and _fits_cap(sym, unit)
+            and _entry_quality(m)
         ):
             _order("buy", sym, unit, price, f"−{step:.0%} 추가 매수", "add", step)
             apply_order(sim, orders[-1], unit)
@@ -379,18 +406,13 @@ def generate_orders(
             return False
         return True
 
-    def _fits_cap(sym: str, dollars: float) -> bool:
-        value = _pos_value(sim["positions"][sym], sym) if sym in sim["positions"] else 0.0
-        return total_value <= 0 or (value + dollars) / total_value <= MAX_WEIGHT + 1e-9
-
     # Put trim proceeds to work in relative strength — don't let cash sit.
     # Rank by 30-day return (what's actually going up), not raw range.
     held_rs = sorted(
         (
             (sym, metrics[sym]) for sym in sim["positions"]
             if metrics.get(sym)
-            and metrics[sym]["trend"] == "up"
-            and metrics[sym]["rsi14"] < RSI_MAX
+            and _entry_quality(metrics[sym])
             and sym not in sold_this_run
             and sym not in bought_this_run
             and not _underwater(sim["positions"][sym], metrics[sym]["price"])
@@ -410,13 +432,15 @@ def generate_orders(
         (
             (sym, m) for sym, m in metrics.items()
             if sym not in sim["positions"] and sym not in sold_this_run
-            and m["trend"] == "up" and m["rsi14"] < RSI_MAX
+            and _entry_quality(m)
         ),
         key=lambda x: x[1]["ret30"], reverse=True,
     )
     for sym, m in candidates:
         if not _can_deploy(new_slot=True):
             break
+        if not _fits_cap(sym, unit):
+            continue
         step = _step_for(m["range30"])
         why = "원금 회복 — 상승 추세 진입"
         if bear:
@@ -1563,7 +1587,9 @@ def _fmt_px(v: float) -> str:
 
 
 def run_scheduled(slot: str = "check") -> bool:
-    """Frequent awake-hours check. Telegram only when tips need approval."""
+    """Round-the-clock check. Telegram respects independent quiet hours."""
+    from .robinhood_config import get_execution_mode
+
     data = advise_and_apply(force=True)
     if not data.get("ok"):
         error = data.get("error")
@@ -1582,10 +1608,11 @@ def run_scheduled(slot: str = "check") -> bool:
 
     n = len(data.get("orders") or [])
     # Only notify when there is something to approve/execute (deduped).
+    notification_failed = False
     if n:
         if not notify_crypto_orders(data, "승인 요청", force=False):
             log_activity("crypto", f"크립토 어드바이저({slot}) — 텔레그램 발송 실패")
-            return False
+            notification_failed = True
 
     s = data.get("summary") or {}
     gap = s.get("gap") or 0
@@ -1594,14 +1621,19 @@ def run_scheduled(slot: str = "check") -> bool:
         f"현재 ${s.get('total', 0):,.0f} / 원금 ${principal:,.0f} "
         f"(남음 ${gap:,.0f})"
     )
-    failed = next((r for r in auto_results if not r.get("ok") and not r.get("skipped")), None)
+    failed = next((r for r in auto_results if not r.get("ok")
+                   and not r.get("skipped") and not r.get("pending")
+                   and not r.get("retryable")), None)
+    waiting = any(r.get("pending") or r.get("retryable") for r in auto_results)
     attempted = [r for r in auto_results if not r.get("skipped")]
     store.set(LAST_AUTO_KEY, {
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "result": "failed_locked_manual" if failed else (
+            "orders_pending" if waiting else
             "orders_succeeded" if any(r.get("ok") for r in attempted) else "no_signal"
         ),
-        "mode": data.get("execution_mode"),
+        "mode": get_execution_mode(),
+        "notification_failed": notification_failed,
         "orders_attempted": len(attempted),
         "orders_succeeded": sum(1 for r in attempted if r.get("ok")),
         "error": failed.get("error") if failed else None,

@@ -442,6 +442,14 @@ class Engine:
             log.error("no SPY data; will retry decision on next tick")
             return False
 
+        now_et = datetime.now(ZoneInfo(settings.timezone))
+        if features[config.REGIME_SYMBOL].index[-1].date() != now_et.date():
+            # Cron also fires on weekday holidays. Reusing Friday's bars on
+            # Monday would erase Tuesday's queued rotation and age positions
+            # without a trading session. Delayed data must likewise retry.
+            log.warning("no current-session SPY bar; preserve pending orders")
+            return False
+
         equity = self.broker.equity()
         cash = self.broker.cash()
         brake = self._brake()
@@ -494,13 +502,13 @@ class Engine:
             return True
 
         rows = {s: f.iloc[-1] for s, f in features.items()}
-        now_et = datetime.now(ZoneInfo(settings.timezone))
         next_open = self.broker.next_market_open()
         # Holiday-aware: rebalance on the session before Monday, which can be
         # Thursday when Friday is a market holiday.
         week_rollover = (
-            next_open.astimezone(ZoneInfo(settings.timezone)).weekday()
-            == config.MOMENTUM_REBALANCE_WEEKDAY
+            strategy.week_boundary(
+                now_et, next_open.astimezone(ZoneInfo(settings.timezone))
+            )
             if next_open is not None
             else now_et.weekday() == 4
         )

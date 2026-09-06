@@ -355,3 +355,23 @@ def test_close_decision_carries_only_unexecuted_held_sells():
     assert [(o.side, o.symbol) for o in merged] == [
         ("sell", "AAPL"), ("buy", "XLK")
     ]
+
+
+def test_holiday_decision_preserves_friday_queue_and_position_age(monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    class HolidayClock:
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 9, 7, 16, 35, tzinfo=ZoneInfo('America/New_York'))
+    monkeypatch.setattr(engine_mod, 'datetime', HolidayClock)
+    st = FakeStore()
+    st.pending = [{'symbol': 'QQQ', 'side': 'buy', 'sleeve': 'momentum'}]
+    monkeypatch.setattr(engine_mod, 'store', st)
+    eng = Engine()
+    eng._broker = MagicMock()
+    eng._features = lambda *a, **kw: {'SPY': pd.DataFrame({'close': [650]}, index=pd.to_datetime(['2026-09-04']))}
+    assert eng.job_daily_decision() is False
+    assert st.pending == [{'symbol': 'QQQ', 'side': 'buy', 'sleeve': 'momentum'}]
+    eng._broker.equity.assert_not_called()
+    assert st.kv == {}

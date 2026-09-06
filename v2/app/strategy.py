@@ -18,6 +18,11 @@ from . import config
 from .indicators import annualized_vol, atr, ema, momentum_score, rsi, sma
 
 
+def week_boundary(current_session, next_session) -> bool:
+    """First session of a new ISO week, including Monday market holidays."""
+    return current_session.isocalendar()[:2] != next_session.isocalendar()[:2]
+
+
 def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     """Precompute all indicator columns for one symbol's daily bars.
 

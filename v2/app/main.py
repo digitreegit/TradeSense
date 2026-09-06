@@ -60,8 +60,8 @@ GUARDS = {
     "stops": (True, lambda h, m: (h == 9 and m >= 31) or 10 <= h < 16, False),
     "decision": (True, lambda h, m: (h == 16 and m >= 30) or h == 17, True),
     "crypto": (False, lambda h, m: True, False),
-    # Every cron tick (~15m) between 06:00 and 23:59 ET (quiet 00:00–05:59).
-    "crypto_advise": (False, lambda h, m: 6 <= h <= 23, False),
+    # Risk checks run overnight too; Telegram quiet hours are independent.
+    "crypto_advise": (False, lambda h, m: True, False),
 }
 
 
@@ -91,9 +91,9 @@ def _start_scheduler() -> "object":
     sched.add_job(wrap(engine.job_daily_decision),
                   CronTrigger(day_of_week="mon-fri", hour=16, minute=35, timezone=tz))
     sched.add_job(wrap(engine.job_crypto), CronTrigger(minute=5, timezone=tz))
-    # Crypto advisor: every 15 min while awake (06:00–23:45 ET). Quiet overnight.
+    # Crypto trades around the clock; only notifications sleep overnight.
     sched.add_job(wrap(lambda: run_scheduled("check")),
-                  CronTrigger(hour="6-23", minute="0,15,30,45", timezone=tz))
+                  CronTrigger(minute="0,15,30,45", timezone=tz))
     sched.start()
     return sched
 

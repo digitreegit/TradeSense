@@ -210,7 +210,7 @@ class Backtester:
                 )
                 for sym, pos in positions.items()
             }
-            week_rollover = cal[i + 1].weekday() == config.MOMENTUM_REBALANCE_WEEKDAY
+            week_rollover = strategy.week_boundary(today, cal[i + 1])
             pending = decide(
                 rows=rows, positions=metas,
                 stock_syms=self.momentum_syms, crypto_syms=self.crypto_syms,

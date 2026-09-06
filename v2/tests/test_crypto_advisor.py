@@ -798,3 +798,68 @@ def test_generate_orders_no_add_and_rotate_same_symbol():
     sol_buys = [o for o in orders if o["side"] == "buy" and o["symbol"] == "SOL"]
     assert len(sol_buys) == 1
     assert sol_buys[0]["kind"] == "add"
+
+
+def test_dip_add_cannot_cross_portfolio_weight_cap():
+    closes = wavy_uptrend()
+    price = float(closes[-1])
+    book = _new_book()
+    book['cash'] = 660.0
+    book['positions']['SOL/USD'] = {
+        'units': [{'dollars': 340, 'price': price, 'qty': 340 / price}],
+        'anchor': price / 0.94, 'step': 0.05,
+    }
+    orders, _, _ = generate_orders({'SOL/USD': make_frame(closes)}, book)
+    assert not [o for o in orders if o['side'] == 'buy']
+
+
+def test_small_book_minimum_buy_cannot_cross_weight_cap():
+    book = _new_book()
+    book['cash'] = 60
+    orders, _, _ = generate_orders({'SOL/USD': make_frame(wavy_uptrend())}, book)
+    assert not [o for o in orders if o['side'] == 'buy']
+
+
+def test_live_stop_works_without_daily_history():
+    book = _new_book()
+    book['cash'] = 600
+    book['positions']['NEW/USD'] = {
+        'units': [{'dollars': 400, 'price': 100, 'qty': 4}],
+        'avg_cost': 100, 'anchor': 100, 'step': 0.05,
+    }
+    orders, _, _ = generate_orders({}, book, live_prices={'NEW/USD': 90}, live_quote_fresh=True)
+    assert len(orders) == 1
+    assert orders[0]['kind'] == 'hard_stop'
+    assert orders[0]['dollars'] == 360
+
+
+def test_fetch_bars_excludes_unfinished_daily_candle(monkeypatch):
+    from types import SimpleNamespace
+    from app.crypto_advisor import fetch_bars
+    from alpaca.data.historical import CryptoHistoricalDataClient
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    bars = [SimpleNamespace(timestamp=day, open=100, high=110, low=90, close=100)
+            for day in [today - timedelta(days=1), today]]
+    monkeypatch.setattr(CryptoHistoricalDataClient, 'get_crypto_bars',
+                        lambda *args, **kwargs: SimpleNamespace(data={'BTC/USD': bars}))
+    frame = fetch_bars()['BTC/USD']
+    assert len(frame) == 1
+    assert frame.index[-1].date() == (today - timedelta(days=1)).date()
+
+
+def test_entry_quality_rejects_losing_relative_winner_and_live_trend_break():
+    from app.crypto_advisor import _entry_quality
+    good = dict(trend='up', price=110, ema50=100, ret30=0.1, rsi14=55)
+    assert _entry_quality(good)
+    assert not _entry_quality({**good, 'ret30': -0.01})
+    assert not _entry_quality({**good, 'price': 99})
+    assert not _entry_quality({**good, 'trend': 'side'})
+    assert not _entry_quality({**good, 'rsi14': 90})
+
+
+def test_crypto_guard_runs_overnight_without_enabling_execution():
+    from app.main import GUARDS
+    weekdays_only, window, daily = GUARDS['crypto_advise']
+    assert not weekdays_only
+    assert not daily
+    assert all(window(hour, 15) for hour in range(24))

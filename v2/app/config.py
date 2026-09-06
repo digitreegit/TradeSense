@@ -46,7 +46,7 @@ EQUITY_UNIVERSE: list[str] = EQUITY_ETFS + SINGLE_STOCKS
 # 2018/2020/2022/2024 improved CAGR/Sharpe versus the former 0.50 setting.
 SINGLE_NAME_SCALE = 0.65
 
-# Alpaca crypto — NOT available in NJ and many US states. See:
+# Alpaca crypto requires account-specific eligibility; verify before enabling. See:
 # https://alpaca.markets/support/alpaca-cryptocurrency
 CRYPTO_UNIVERSE: list[str] = ["BTC/USD", "ETH/USD"]
 
@@ -137,7 +137,7 @@ class Settings(BaseSettings):
     trading_mode: str = "live"           # live only; kept for logging/compat
     initial_capital: float = 3000.0
     timezone: str = "America/New_York"
-    # NJ and many US states cannot trade crypto on Alpaca — default off.
+    # Default off until this Alpaca account is approved for crypto trading.
     crypto_enabled: bool = False
 
     # Optional LLM news overlay

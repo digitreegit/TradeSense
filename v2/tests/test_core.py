@@ -196,3 +196,12 @@ def test_decide_defensive_when_no_crypto():
     orders = decide(rows, {}, [], [], regime.BEAR, week_rollover=False,
                     defensive_syms=["GLD", "TLT"])
     assert any(o.symbol == "GLD" and o.side == "buy" and o.sleeve == DEFENSIVE for o in orders)
+
+
+def test_week_boundary_handles_monday_holiday_and_year_boundary():
+    from datetime import date
+    from app.strategy import week_boundary
+    assert week_boundary(date(2026, 9, 4), date(2026, 9, 8))
+    assert week_boundary(date(2026, 4, 2), date(2026, 4, 6))
+    assert week_boundary(date(2026, 12, 31), date(2027, 1, 4))
+    assert not week_boundary(date(2026, 9, 8), date(2026, 9, 9))

@@ -52,6 +52,7 @@ def save_keys(api_key: str, private_key: str) -> None:
 
 
 def clear_keys() -> None:
+    store.set(EXEC_MODE_KEY, "manual")
     store.set(CONFIG_KEY, {})
 
 
@@ -64,8 +65,10 @@ def set_execution_mode(mode: str) -> str:
     mode = (mode or "").strip().lower()
     if mode not in EXEC_MODES:
         raise ValueError(f"모드는 {', '.join(EXEC_MODES)} 중 하나여야 합니다.")
-    if mode in ("semi", "auto") and not is_configured():
-        raise ValueError("API 주문을 쓰려면 Robinhood 키를 먼저 연결하세요.")
+    if mode in ("semi", "auto"):
+        error = execution_readiness(test_connection())
+        if error:
+            raise ValueError(error)
     store.set(EXEC_MODE_KEY, mode)
     # Switching into semi with pending tips → notify immediately.
     if mode == "semi":
@@ -85,6 +88,18 @@ def set_execution_mode(mode: str) -> str:
         except Exception:
             pass
     return mode
+
+
+def execution_readiness(connection: dict) -> str | None:
+    """Read-only preflight; account eligibility does not prove key order scope."""
+    if not connection.get("connected"):
+        return "Robinhood 연결을 확인할 수 없습니다. 키와 조회 권한을 확인하세요."
+    account = connection.get("account") or {}
+    if str(account.get("status") or "").lower() != "active":
+        return "Robinhood 계좌가 active 상태가 아닙니다."
+    if account.get("is_api_tradable") is not True:
+        return "계좌의 API 거래 가능 여부를 확인하지 못했습니다. Robinhood 계좌 설정을 확인하세요."
+    return None
 
 
 def test_connection() -> dict:
@@ -133,4 +148,10 @@ def status_dict() -> dict:
         "connection": conn,
         "execution_mode": get_execution_mode(),
         "execution_modes": list(EXEC_MODES),
+        "readiness": {
+            "account_ready": execution_readiness(conn) is None,
+            "reason": execution_readiness(conn),
+            "order_permission": "키의 Place orders 권한과 코인별 지원 여부는 별도로 필요합니다.",
+        },
+        "last_auto_run": store.get("crypto_last_auto_run"),
     }
