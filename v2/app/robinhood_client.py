@@ -114,7 +114,7 @@ class RobinhoodCryptoClient:
         data = self.request("GET", path)
         return data if isinstance(data, dict) else {}
 
-    def get_orders(self, *, api_version: str = "v1", **params: str) -> list[dict]:
+    def get_orders(self, *, api_version: str = "v1", max_pages: int | None = None, **params: str) -> list[dict]:
         """List crypto orders from the same API version used to place them."""
         version = str(api_version or "v1").lower()
         if version not in ("v1", "v2"):
@@ -125,13 +125,15 @@ class RobinhoodCryptoClient:
         q = "?" + "&".join(f"{k}={v}" for k, v in query.items()) if query else ""
         path = f"/api/{version}/crypto/trading/orders/{q}"
         out: list[dict] = []
+        pages = 0
         while path:
+            pages += 1
             data = self.request("GET", path)
             if not isinstance(data, dict):
                 break
             out.extend(data.get("results") or [])
             nxt = data.get("next") or ""
-            if not nxt:
+            if not nxt or (max_pages is not None and pages >= max_pages):
                 break
             parsed = urlparse(nxt)
             path = parsed.path + (f"?{parsed.query}" if parsed.query else "")

@@ -1069,7 +1069,7 @@ function renderCryptoOrder(o, {history = false, mode = 'manual', buyingPower = n
     : '';
   const appOnly = o.api_tradable === false;
   let fill;
-  if (history || o.status === 'confirmed') {
+  if (o.status === 'confirmed') {
     const via = o.api_executed ? ' · API' : (o.auto_confirmed ? ' · RH 감지' : '');
     fill = `<div class="fill"><span class="done">확인됨${via} · 실제 ${usd2(o.actual_dollars ?? o.dollars)}${when ? ` · ${when}` : ''}</span></div>`;
   } else if (o.status === 'denied') {
@@ -1290,10 +1290,11 @@ function renderCrypto(d, {quiet = false} = {}) {
     const updated = rh.updated_at ? new Date(rh.updated_at).toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'}) : '';
     const bpVal = Number(rh.buying_power ?? cash ?? 0);
     html += `<div class="rh-portfolio">
-      <div class="rh-total">${rhMoney(total)}</div>
-      ${renderRhDayChange(rh.day_change, rh.day_change_pct)}
-      <div class="rh-live"><span class="rh-live-dot"></span> LIVE · Crypto API${updated ? ` · ${updated}` : ''}</div>
-      <div class="rh-scope">크립토 보유 + Buying power. 주식·Investing Cash는 Robinhood Crypto API에 없습니다.</div>
+      <div class="rh-section-sub">${rh.account_total != null ? "Individual 전체 잔고 · 대조 기반 추정" : "크립토 운용 잔고 · 전체 계좌 합계 아님"}</div>
+      <div class="rh-total">${rhMoney(rh.account_total ?? total)}</div>
+      ${rh.account_total == null ? renderRhDayChange(rh.day_change, rh.day_change_pct) : ""}
+      <div class="rh-live"><span class="rh-live-dot"></span> 크립토 시세 · Crypto API${updated ? ` · ${updated}` : ''}</div>
+      <div class="rh-scope">크립토와 Buying power는 API 기준입니다. 전체 잔고는 아래에서 Robinhood Individual 금액과 대조할 수 있습니다.</div>
     </div>
     <div class="rh-row">
       <span>Crypto</span>
@@ -1303,6 +1304,16 @@ function renderCrypto(d, {quiet = false} = {}) {
       <span>Buying power <span class="rh-hint">(매수 가능)</span></span>
       <span class="rh-row-val">${rhMoney(bpVal)}</span>
     </div>
+    ${rh.reconciliation ? `<div class="rh-row"><span>주식 · 대조 시점 평가액</span><span>${rhMoney(rh.reconciliation.stocks_value)}</span></div>
+      <div class="rh-row"><span>기타 자산·현금 대조 차액 <span class="rh-hint">(분류 미확인)</span></span><span>${rhMoney(rh.reconciliation.other_value)}</span></div>
+      <div class="rh-section-sub">대조 시각 ${escapeHtml(new Date(rh.reconciliation.captured_at).toLocaleString())} · 주식·기타 금액은 자동 갱신되지 않습니다. 입출금·주식 거래 후 다시 대조하세요. 주문 가능 금액에는 포함하지 않습니다.</div>` : ''}
+    <details style="margin:18px 0"><summary style="cursor:pointer">Robinhood 전체 잔고 맞추기</summary>
+      <p class="field-hint">같은 시점의 Individual 전체 잔고, TradeSense 크립토 운용 합계(Crypto + Buying power), 주식 평가액을 입력하세요. 차액은 표시용으로만 저장하며 매매 자금은 바뀌지 않습니다.</p>
+      <label>Individual 전체 잔고 $<input class="input" type="number" min="0" step="0.01" id="rh-reference-total" value="${rh.reconciliation?.reference_total ?? ''}"></label>
+      <label>동일 시점 크립토 운용 합계 $<input class="input" type="number" min="0" step="0.01" id="rh-reference-crypto" value="${Number(total).toFixed(2)}"></label>
+      <label>주식 평가액 $<input class="input" type="number" min="0" step="0.01" id="rh-reference-stocks" value="${Number(rh.reconciliation?.stocks_value ?? rh.stocks_value ?? 0).toFixed(2)}"></label>
+      <button type="button" class="btn btn-ghost" id="btn-balance-reference">잔고 대조 저장</button><p id="balance-reference-message" role="status"></p>
+    </details>
     ${rh.unpriced?.length ? `<div class="rh-warn">시세 미반영 ${rh.unpriced.map(u => escapeHtml(u.symbol)).join(', ')}</div>` : ''}
     <div class="rh-section">
       <div class="rh-section-head"><h3>Crypto</h3></div>
@@ -1390,8 +1401,49 @@ function renderCrypto(d, {quiet = false} = {}) {
     </div>
   </div>`;
 
+  html += `<section class="rh-section"><h3>거래 History · 최근 주문</h3>
+    <p class="rh-section-sub">체결 금액은 실제 체결분만 표시합니다. 추천·거부는 거래 체결이 아닙니다.</p>
+    <div id="crypto-activity-orders">${history.length ? history.map(o => renderCryptoOrder(o, {history: true})).join('') : '<div class="empty">거래 내역을 조회 중입니다.</div>'}</div>
+    <h3 style="margin-top:24px">자동 점검 활동</h3><div id="crypto-activity-log"></div></section>`;
   $('crypto-body').innerHTML = html;
   bindCryptoEvents(d);
+  $('btn-balance-reference')?.addEventListener('click', saveBalanceReference);
+  loadCryptoActivity();
+}
+
+async function saveBalanceReference() {
+  const message = $('balance-reference-message');
+  const total = $('rh-reference-total').value;
+  if (!total) { message.textContent = 'Individual 전체 잔고를 입력하세요.'; return; }
+  try {
+    const r = await api('/api/crypto/balance-reference', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({total: Number(total), crypto_total: Number($('rh-reference-crypto').value), stocks_value: Number($('rh-reference-stocks').value)})});
+    const data = await r.json();
+    if (!r.ok || !data.ok) throw new Error(data.error || '저장 실패');
+    await loadCrypto({quiet: true});
+  } catch (e) { message.textContent = String(e.message || e); }
+}
+
+async function loadCryptoActivity() {
+  const el = $('crypto-activity-orders'), log = $('crypto-activity-log');
+  if (!el) return;
+  const states = {filled: '체결', confirmed: '체결 확인', denied: '추천 거부', canceled: '취소', cancelled: '취소', rejected: '주문 거절', failed: '실패', open: '접수·대기', pending: '대기', partially_filled: '부분 체결'};
+  try {
+    const r = await api('/api/crypto/activity');
+    const data = await r.json();
+    if (!r.ok || !data.ok) throw new Error(data.error || '거래 내역 조회 실패');
+    if (!el.isConnected) return;
+    el.innerHTML = (data.warning ? `<p class="rh-warn">${escapeHtml(data.warning)}</p>` : '') +
+      (data.orders.length ? `<div style="overflow-x:auto">${table(data.orders, [
+        {h: '시각', f: o => o.ts ? escapeHtml(new Date(o.ts).toLocaleString()) : '—'},
+        {h: '종목', f: o => escapeHtml(o.symbol || '')},
+        {h: '주문', f: o => o.side === 'buy' ? '매수' : o.side === 'sell' ? '매도' : '—'},
+        {h: '상태', f: o => escapeHtml(states[o.status] || o.status || '확인 중')},
+        {h: '체결 금액', f: o => o.filled_dollars != null ? rhMoney(o.filled_dollars) : '—'},
+        {h: '출처 / 사유', f: o => escapeHtml([o.source, o.reason].filter(Boolean).join(' · '))}
+      ])}</div>` : '<div class="empty">아직 기록된 주문이 없습니다.</div>');
+    log.innerHTML = data.activity.length ? data.activity.map(a => `<div class="rh-row"><span>${escapeHtml(new Date(a.ts).toLocaleString())}</span><span>${escapeHtml(a.message || '')}</span></div>`).join('') : '<div class="empty">자동 점검 기록이 없습니다.</div>';
+  } catch (e) { if (el.isConnected) el.insertAdjacentHTML('afterbegin', `<p class="rh-warn">${escapeHtml(String(e.message || e))}</p>`); }
 }
 
 async function confirmCryptoOrder(id) {

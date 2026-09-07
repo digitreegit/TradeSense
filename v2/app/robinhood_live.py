@@ -150,7 +150,8 @@ def fetch_robinhood_snapshot() -> dict | None:
             if df is not None and len(df) >= 2:
                 closes = [float(c) for c in df["close"].tail(20).tolist()]
                 row["sparkline"] = closes
-                prev = float(df["close"].iloc[-2])
+                # fetch_bars excludes the unfinished UTC day.
+                prev = float(df["close"].iloc[-1])
                 if price > 0 and prev > 0:
                     row["day_change"] = round((price - prev) * qty, 2)
                     row["day_change_pct"] = price / prev - 1
@@ -168,10 +169,13 @@ def fetch_robinhood_snapshot() -> dict | None:
     # that live sum — never mix screenshot cash/stocks into it.
     crypto_total = holdings_value + buying_power
     account_total = crypto_total
+    from .crypto_display import account_view, RECONCILIATION_KEY
+    display = account_view(crypto_total, store.get(RECONCILIATION_KEY))
     base = max(holdings_value, 1e-9)
     day_change_pct = (day_change / base) if base > 0 else 0.0
 
     return {
+        **display,
         "buying_power": round(buying_power, 2),
         "cash": round(buying_power, 2),
         "cash_label": "Buying power",

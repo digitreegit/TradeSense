@@ -341,6 +341,34 @@ def crypto_advice(request: Request):
     return JSONResponse(advise_and_apply())
 
 
+@app.get("/api/crypto/activity")
+def crypto_activity(request: Request):
+    if not _admin_authorized(request):
+        return _unauthorized()
+    from .crypto_display import activity_snapshot
+    return JSONResponse(activity_snapshot())
+
+
+class BalanceReferenceBody(BaseModel):
+    total: float
+    crypto_total: float
+    stocks_value: float = 0.0
+
+
+@app.post("/api/crypto/balance-reference")
+def crypto_balance_reference(body: BalanceReferenceBody, request: Request):
+    if not _admin_authorized(request):
+        return _unauthorized()
+    from .crypto_display import RECONCILIATION_KEY, reconcile
+    try:
+        reference = reconcile(body.total, body.crypto_total, body.stocks_value)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    store.set(RECONCILIATION_KEY, reference)
+    store.set("crypto_advice", None)
+    return JSONResponse({"ok": True, "reference": reference})
+
+
 @app.post("/api/notify/test")
 def notify_test(request: Request):
     """텔레그램 설정 진단 — 테스트 메시지를 실제로 발송해본다."""
