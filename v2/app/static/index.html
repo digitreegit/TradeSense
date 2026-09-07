@@ -1270,6 +1270,43 @@ function bindCryptoEvents(d) {
   scheduleCryptoRefresh(d);
 }
 
+function cryptoRunStatus(d, now = Date.now()) {
+  const mode = d.execution_mode || 'manual';
+  const run = d.last_auto_run || {};
+  const checked = Date.parse(run.checked_at || '');
+  const age = now - checked;
+  const stamp = Number.isFinite(checked)
+    ? ` · 마지막 확인 ${new Date(checked).toLocaleString([], {month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit'})}` : '';
+  const status = (text, tone = '') => ({text: text + stamp, tone});
+  if (mode !== 'auto') {
+    if (run.result === 'failed_locked_manual') return status('자동매매 중지 · 주문 오류로 수동 전환', 'red');
+    return status(mode === 'semi' ? '반자동 · 주문 승인 대기' : '자동매매 OFF · 수동 모드');
+  }
+  if (!Number.isFinite(checked)) return status('자동매매 ON · 첫 자동 점검 대기');
+  if (age < -60000) return status('자동매매 확인 필요 · 점검 시각 불일치', 'red');
+  if (age > 30 * 60 * 1000) return status('자동매매 확인 필요 · 30분 이상 점검 기록 없음', 'red');
+  if (run.error || ['failed', 'failed_locked_manual'].includes(run.result)) return status('자동매매 오류 · 확인 필요', 'red');
+  if (run.mode !== 'auto') return status('자동매매 ON · 첫 자동 점검 대기');
+  const active = (d.orders || []).filter(o => !['confirmed', 'denied'].includes(o.status));
+  if (active.some(o => o.api_tradable === false)) return status('자동매매 점검 완료 · API 주문 제한 종목 있음', 'red');
+  if (run.result === 'orders_pending') return status('자동매매 정상 · 주문 체결 확인 중', 'green');
+  if (active.length) return status('자동매매 점검 완료 · 다음 주문 처리 대기');
+  if (run.result === 'orders_succeeded') return status('자동매매 정상 · 최근 주문 체결 완료', 'green');
+  if (run.result === 'no_signal') return status('자동매매 정상 · 관망 중', 'green');
+  return status('자동매매 확인 필요 · 점검 결과 미확인');
+}
+
+function updateCryptoRunStatus() {
+  const el = $('crypto-run-status');
+  if (!el || !lastCryptoData) return;
+  const status = cryptoRunStatus(lastCryptoData);
+  el.textContent = status.text;
+  el.className = `rh-section-sub ${status.tone}`;
+}
+
+// Keep the stale indicator honest even when a refresh fails or quotes stop.
+setInterval(updateCryptoRunStatus, 30000);
+
 function renderCrypto(d, {quiet = false} = {}) {
   if (!d.ok) {
     $('crypto-body').innerHTML = `<div class="empty">${escapeHtml(d.error || '분석 실패')}</div>`;
@@ -1289,6 +1326,7 @@ function renderCrypto(d, {quiet = false} = {}) {
   let html = `<div class="rh-wrap">
     <div class="rh-portfolio">
       <div class="section-head"><span>${rh?.account_total != null ? '전체 잔고 · 추정' : '크립토 잔고'}</span><span class="rh-tag">${modeLabel}</span></div>
+      <div id="crypto-run-status" role="status" aria-live="polite"></div>
       <div class="rh-total">${rhMoney(rh?.account_total ?? total)}</div>
       <div class="rh-section-sub">매수 가능 ${rhMoney(cash)} · ${rh ? '크립토 시세 갱신 ' + escapeHtml(new Date(rh.updated_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})) : '저장된 잔고'}</div>
       <div class="rh-hint">${rh?.account_total != null ? '주식·기타 금액은 대조 시점 기준이며 자동 갱신되지 않습니다.' : '크립토 평가액 + 매수 가능 금액 · 주식 제외'}</div>
@@ -1314,7 +1352,7 @@ function renderCrypto(d, {quiet = false} = {}) {
   if (active.length) {
     html += `<section class="rh-section"><h3>${execMode === 'auto' ? '진행 중 주문' : '거래 요청'}</h3>` +
       active.map(o => renderCryptoOrder(o, {mode: execMode, buyingPower: cash})).join('') + '</section>';
-  } else html += '<p class="rh-section-sub">현재 새 주문 없음 · 보유 유지</p>';
+  }
   html += `<section class="rh-section"><h3>거래 History</h3><div id="crypto-activity-orders"><div class="empty">최근 거래 조회 중…</div></div></section>`;
   if (rh) html += `    <details style="margin:18px 0"><summary style="cursor:pointer">전체 잔고 대조 설정</summary>
       <p class="field-hint">같은 시점의 Individual 전체 잔고, TradeSense 크립토 운용 합계(Crypto + Buying power), 주식 평가액을 입력하세요. 차액은 표시용으로만 저장하며 매매 자금은 바뀌지 않습니다.</p>
@@ -1325,6 +1363,7 @@ function renderCrypto(d, {quiet = false} = {}) {
     </details>`;
   html += '</div>';
   $('crypto-body').innerHTML = html;
+  updateCryptoRunStatus();
   bindCryptoEvents(d);
   $('btn-balance-reference')?.addEventListener('click', saveBalanceReference);
   loadCryptoActivity();
