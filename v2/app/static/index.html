@@ -1276,135 +1276,54 @@ function renderCrypto(d, {quiet = false} = {}) {
     return;
   }
   lastCryptoData = d;
-  const m = d.market || {};
-  const s = d.summary || {};
-  const rh = d.robinhood_live;
-  const usd2 = v => '$' + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
-  const holdings = rh?.positions?.length ? rh.positions : (s.positions || []);
+  const m = d.market || {}, s = d.summary || {}, rh = d.robinhood_live;
   const total = rh?.crypto_total ?? rh?.total ?? s.crypto_total ?? s.total;
   const cash = rh?.buying_power ?? s.buying_power ?? s.cash;
-
-  let html = '<div class="rh-wrap">';
-
-  if (rh) {
-    const updated = rh.updated_at ? new Date(rh.updated_at).toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'}) : '';
-    const bpVal = Number(rh.buying_power ?? cash ?? 0);
-    html += `<div class="rh-portfolio">
-      <div class="rh-section-sub">${rh.account_total != null ? "Individual 전체 잔고 · 대조 기반 추정" : "크립토 운용 잔고 · 전체 계좌 합계 아님"}</div>
-      <div class="rh-total">${rhMoney(rh.account_total ?? total)}</div>
-      ${rh.account_total == null ? renderRhDayChange(rh.day_change, rh.day_change_pct) : ""}
-      <div class="rh-live"><span class="rh-live-dot"></span> 크립토 시세 · Crypto API${updated ? ` · ${updated}` : ''}</div>
-      <div class="rh-scope">크립토와 Buying power는 API 기준입니다. 전체 잔고는 아래에서 Robinhood Individual 금액과 대조할 수 있습니다.</div>
+  const holdings = rh ? (rh.positions || []) : (s.positions || []);
+  const {active, history} = splitCryptoOrders(d);
+  lastCryptoHistory = history;
+  const execMode = d.execution_mode || 'manual';
+  const modeLabel = {auto: '자동 거래 ON', semi: '반자동', manual: '수동 거래'}[execMode] || '수동 거래';
+  const marketLabel = {BULL: '좋음 · 강세', CHOP: '보통 · 혼조', BEAR: '나쁨 · 약세'}[m.label] || '시장 확인 중';
+  const marketClass = ['BULL', 'CHOP', 'BEAR'].includes(m.label) ? m.label : '';
+  let html = `<div class="rh-wrap">
+    <div class="rh-portfolio">
+      <div class="section-head"><span>${rh?.account_total != null ? '전체 잔고 · 추정' : '크립토 잔고'}</span><span class="rh-tag">${modeLabel}</span></div>
+      <div class="rh-total">${rhMoney(rh?.account_total ?? total)}</div>
+      <div class="rh-section-sub">매수 가능 ${rhMoney(cash)} · ${rh ? '크립토 시세 갱신 ' + escapeHtml(new Date(rh.updated_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})) : '저장된 잔고'}</div>
+      <div class="rh-hint">${rh?.account_total != null ? '주식·기타 금액은 대조 시점 기준이며 자동 갱신되지 않습니다.' : '크립토 평가액 + 매수 가능 금액 · 주식 제외'}</div>
     </div>
-    <div class="rh-row">
-      <span>Crypto</span>
-      <span class="rh-row-val">${rhMoney(rh.holdings_value || 0)}</span>
+    <div class="crypto-market" style="margin:16px 0 24px">
+      <span class="pill ${marketClass}">${marketLabel}</span><span>${escapeHtml(m.comment || '')}</span>
     </div>
-    <div class="rh-row">
-      <span>Buying power <span class="rh-hint">(매수 가능)</span></span>
-      <span class="rh-row-val">${rhMoney(bpVal)}</span>
-    </div>
-    ${rh.reconciliation ? `<div class="rh-row"><span>주식 · 대조 시점 평가액</span><span>${rhMoney(rh.reconciliation.stocks_value)}</span></div>
-      <div class="rh-row"><span>기타 자산·현금 대조 차액 <span class="rh-hint">(분류 미확인)</span></span><span>${rhMoney(rh.reconciliation.other_value)}</span></div>
-      <div class="rh-section-sub">대조 시각 ${escapeHtml(new Date(rh.reconciliation.captured_at).toLocaleString())} · 주식·기타 금액은 자동 갱신되지 않습니다. 입출금·주식 거래 후 다시 대조하세요. 주문 가능 금액에는 포함하지 않습니다.</div>` : ''}
-    <details style="margin:18px 0"><summary style="cursor:pointer">Robinhood 전체 잔고 맞추기</summary>
+    <section class="rh-section"><h3>보유 종목 · 결과</h3>
+      <div style="overflow-x:auto">${holdings.length ? table(holdings, [
+        {h: '종목', f: p => `<b>${escapeHtml(p.symbol)}</b>`},
+        {h: '평가액', f: p => p.value != null ? rhMoney(p.value) : '—'},
+        {h: '오늘 변동', f: p => p.day_change != null ? `<span class="${Number(p.day_change) >= 0 ? 'green' : 'red'}">${Number(p.day_change) > 0 ? '+' : ''}${rhMoney(p.day_change)}</span>` : '—'},
+        {h: '평가손익', f: p => {
+          const meta = (s.positions || []).find(x => x.symbol === p.symbol) || p;
+          if (!(Number(meta.avg_cost) > 0) || !(Number(p.price) > 0)) return '평단 미확인';
+          const pnl = (Number(p.price) - Number(meta.avg_cost)) * Number(p.qty || 0);
+          return `<span class="${pnl >= 0 ? 'green' : 'red'}">${pnl > 0 ? '+' : ''}${rhMoney(pnl)}</span>`;
+        }}
+      ]) : '<div class="empty">보유 종목 없음</div>'}</div>
+    </section>`;
+  if (rh?.unpriced?.length) html += `<p class="rh-warn">시세 미확인: ${rh.unpriced.map(p => escapeHtml(p.symbol)).join(', ')}</p>`;
+  if (d.last_auto_run?.error) html += `<p class="rh-warn">거래 오류: ${escapeHtml(d.last_auto_run.error)}</p>`;
+  if (active.length) {
+    html += `<section class="rh-section"><h3>${execMode === 'auto' ? '진행 중 주문' : '거래 요청'}</h3>` +
+      active.map(o => renderCryptoOrder(o, {mode: execMode, buyingPower: cash})).join('') + '</section>';
+  } else html += '<p class="rh-section-sub">현재 새 주문 없음 · 보유 유지</p>';
+  html += `<section class="rh-section"><h3>거래 History</h3><div id="crypto-activity-orders"><div class="empty">최근 거래 조회 중…</div></div></section>`;
+  if (rh) html += `    <details style="margin:18px 0"><summary style="cursor:pointer">전체 잔고 대조 설정</summary>
       <p class="field-hint">같은 시점의 Individual 전체 잔고, TradeSense 크립토 운용 합계(Crypto + Buying power), 주식 평가액을 입력하세요. 차액은 표시용으로만 저장하며 매매 자금은 바뀌지 않습니다.</p>
       <label>Individual 전체 잔고 $<input class="input" type="number" min="0" step="0.01" id="rh-reference-total" value="${rh.reconciliation?.reference_total ?? ''}"></label>
       <label>동일 시점 크립토 운용 합계 $<input class="input" type="number" min="0" step="0.01" id="rh-reference-crypto" value="${Number(total).toFixed(2)}"></label>
       <label>주식 평가액 $<input class="input" type="number" min="0" step="0.01" id="rh-reference-stocks" value="${Number(rh.reconciliation?.stocks_value ?? rh.stocks_value ?? 0).toFixed(2)}"></label>
       <button type="button" class="btn btn-ghost" id="btn-balance-reference">잔고 대조 저장</button><p id="balance-reference-message" role="status"></p>
-    </details>
-    ${rh.unpriced?.length ? `<div class="rh-warn">시세 미반영 ${rh.unpriced.map(u => escapeHtml(u.symbol)).join(', ')}</div>` : ''}
-    <div class="rh-section">
-      <div class="rh-section-head"><h3>Crypto</h3></div>
-      <div class="rh-section-sub">${escapeHtml(apiRailNote(rh))}</div>
-      ${renderRhHoldings(holdings)}
-    </div>`;
-  } else {
-    html += `<div class="parsed-note" style="margin-bottom:16px">
-      설정에서 Robinhood API를 연결하면 앱과 같은 잔액·보유가 실시간으로 표시됩니다.
-    </div>`;
-    if (holdings.length) {
-      html += `<div class="rh-section">${renderRhHoldings(holdings.map(p => ({
-        ...p, sparkline: p.sparkline || [], day_change_pct: p.day_change_pct ?? 0,
-      })))}</div>`;
-    }
-  }
-
-  const {active, history} = splitCryptoOrders(d);
-  lastCryptoHistory = history;
-  const execMode = d.execution_mode || 'manual';
-  const modeNote = {
-    manual: '매수·매도는 Robinhood 앱에서 직접 실행한 뒤 아래에서 확인하세요.',
-    semi: '아래 <b>API 주문</b>을 누르면 TradeSense가 Robinhood에 가격 한도가 있는 지정가 주문을 넣습니다.',
-    auto: '자동 — 24시간 15분 간격으로 매도 우선 지정가 주문. 미체결은 다음 점검에서 확인하고, 복구 불가 오류는 수동 모드로 전환합니다.',
-  }[execMode] || '';
-
-  html += `<div class="rh-advisor">
-    <h3>실행 가이드 <span class="rh-hint">· ${execMode === 'manual' ? '수동' : execMode === 'semi' ? '반자동' : '완전자동'}</span></h3>
-    <p class="rh-orders-note">${modeNote}</p>
-    ${execMode === 'auto' ? '<button type="button" class="btn btn-ghost btn-sm" id="btn-crypto-manual-now">즉시 수동 전환</button>' : ''}
-    ${d.last_auto_run ? `<div class="rh-section-sub">마지막 자동 점검 · ${escapeHtml(new Date(d.last_auto_run.checked_at).toLocaleString())} · ${escapeHtml(d.last_auto_run.result || '')}${d.last_auto_run.error ? ` · ${escapeHtml(d.last_auto_run.error)}` : ''}${d.last_auto_run.quote_at ? ` · 시세 ${escapeHtml(new Date(d.last_auto_run.quote_at).toLocaleTimeString())}` : ''}</div>` : ''}
-    <div class="section-head">
-      <h3 style="font-size:14px;color:var(--text);text-transform:none;letter-spacing:0">지금 할 일</h3>
-      <button type="button" class="btn btn-ghost btn-sm" id="btn-crypto-history">History${history.length ? ` (${history.length})` : ''}</button>
-    </div>`;
-
-  if (active.length) {
-    const bp = rh?.buying_power ?? s.buying_power ?? null;
-    html += active.map(o => renderCryptoOrder(o, {mode: execMode, buyingPower: bp})).join('');
-  } else {
-    const idle = (d.idle_reasons && d.idle_reasons.length)
-      ? d.idle_reasons
-      : ((d.last_auto_run && d.last_auto_run.idle_reasons) || []);
-    const why = idle.map(r => `<li>${escapeHtml(r)}</li>`).join('');
-    html += `<div class="empty">할 일 없음 — 보유 유지</div>`;
-    if (why) html += `<ul class="rh-section-sub" style="margin:8px 0 0 18px;line-height:1.55">${why}</ul>`;
-  }
-
-  html += `<div class="briefing-section" style="margin-top:16px"><h3>원금 회복</h3></div>
-    <div class="crypto-recovery">
-      <span class="principal-edit">
-        원금 $<input type="number" min="1" step="1" id="crypto-principal-input"
-          value="${Math.round(Number(s.principal || s.budget || 0))}" aria-label="원금 목표">
-        <button type="button" class="btn btn-ghost btn-sm" id="btn-crypto-principal">저장</button>
-      </span>
-      · 현재 <b>${usd2(total)}</b>
-      · 남음 <span class="${plClass(-(s.gap || 0))}">${usd2(s.gap || 0)}</span>
-      (${pct(s.recovered_pct || 0)})
-      <div class="bar"><span style="width:${Math.min(100, Math.max(0, (s.recovered_pct || 0) * 100)).toFixed(1)}%"></span></div>
-    </div>`;
-
-  if (s.positions && s.positions.length) {
-    html += table(s.positions, [
-      {h: '코인', f: r => `<b>${r.symbol}</b>${r.units > 1 ? ` <span style="color:var(--dim);font-size:11px">×${r.units}</span>` : ''}`},
-      {h: '평가액', f: r => usd2(r.value)},
-      {h: '평단', f: r => r.avg_cost ? '$' + cpx(r.avg_cost) : '—'},
-      {h: '하드 스톱', f: r => r.hard_stop ? '$' + cpx(r.hard_stop) : '—'},
-      {h: '트레일링', f: r => r.trailing_stop ? '$' + cpx(r.trailing_stop) : '—'},
-      {h: '다음 익절', f: r => r.next_profit ? '$' + cpx(r.next_profit) : '—'},
-      {h: '최고가', f: r => r.peak_price ? '$' + cpx(r.peak_price) : '—'},
-    ]);
-  }
-
-  html += `
-    <div class="crypto-market">
-      <span class="pill ${m.label}">${m.label}</span>
-      <div>${escapeHtml(m.comment || '')}
-        <span style="color:var(--dim);font-size:12px"><br>BTC $${cpx(m.btc_price)}
-        (30일 ${m.btc_ret30 >= 0 ? '+' : ''}${pct(m.btc_ret30 || 0)})</span>
-      </div>
-    </div>
-    <div class="btn-row" style="justify-content:space-between;align-items:center;margin-top:12px">
-      <span class="field-hint" style="margin:0">${new Date(d.generated_at).toLocaleString()} · ${escapeHtml(d.schedule || '')}</span>
-      <button type="button" class="btn btn-ghost" id="btn-crypto-reset">포트폴리오 리셋</button>
-    </div>
-  </div>`;
-
-  html += `<section class="rh-section"><h3>거래 History · 최근 주문</h3>
-    <p class="rh-section-sub">체결 금액은 실제 체결분만 표시합니다. 추천·거부는 거래 체결이 아닙니다.</p>
-    <div id="crypto-activity-orders">${history.length ? history.map(o => renderCryptoOrder(o, {history: true})).join('') : '<div class="empty">거래 내역을 조회 중입니다.</div>'}</div>
-    <h3 style="margin-top:24px">자동 점검 활동</h3><div id="crypto-activity-log"></div></section>`;
+    </details>`;
+  html += '</div>';
   $('crypto-body').innerHTML = html;
   bindCryptoEvents(d);
   $('btn-balance-reference')?.addEventListener('click', saveBalanceReference);
@@ -1424,26 +1343,37 @@ async function saveBalanceReference() {
   } catch (e) { message.textContent = String(e.message || e); }
 }
 
+let cryptoHistoryLimit = 10;
+
+function renderRecentCryptoHistory(el, data) {
+  const states = {filled: '체결', confirmed: '체결 확인', denied: '추천 거부', canceled: '취소', cancelled: '취소', rejected: '주문 거절', failed: '실패', open: '대기', pending: '대기', partially_filled: '부분 체결'};
+  const orders = data.orders || [];
+  const visible = orders.slice(0, cryptoHistoryLimit);
+  el.innerHTML = (data.warning ? `<p class="rh-warn">${escapeHtml(data.warning)}</p>` : '') +
+    (visible.length ? `<div style="overflow-x:auto">${table(visible, [
+      {h: '시각', f: o => o.ts ? escapeHtml(new Date(o.ts).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', year:'numeric'})) : '—'},
+      {h: '종목', f: o => escapeHtml(o.symbol || '')},
+      {h: '매수/매도', f: o => o.side === 'buy' ? '매수' : o.side === 'sell' ? '매도' : '—'},
+      {h: '결과', f: o => escapeHtml(states[o.status] || o.status || '확인 중')},
+      {h: '체결 금액', f: o => o.filled_dollars != null ? rhMoney(o.filled_dollars) : '—'},
+    ])}</div>` : '<div class="empty">아직 거래 내역이 없습니다.</div>') +
+    (orders.length > visible.length ? '<button type="button" class="btn btn-ghost" data-history-more>See more</button>' : '');
+  el.querySelector('[data-history-more]')?.addEventListener('click', () => {
+    cryptoHistoryLimit += 10;
+    renderRecentCryptoHistory(el, data);
+  });
+}
+
 async function loadCryptoActivity() {
-  const el = $('crypto-activity-orders'), log = $('crypto-activity-log');
+  const el = $('crypto-activity-orders');
   if (!el) return;
-  const states = {filled: '체결', confirmed: '체결 확인', denied: '추천 거부', canceled: '취소', cancelled: '취소', rejected: '주문 거절', failed: '실패', open: '접수·대기', pending: '대기', partially_filled: '부분 체결'};
   try {
     const r = await api('/api/crypto/activity');
     const data = await r.json();
     if (!r.ok || !data.ok) throw new Error(data.error || '거래 내역 조회 실패');
     if (!el.isConnected) return;
-    el.innerHTML = (data.warning ? `<p class="rh-warn">${escapeHtml(data.warning)}</p>` : '') +
-      (data.orders.length ? `<div style="overflow-x:auto">${table(data.orders, [
-        {h: '시각', f: o => o.ts ? escapeHtml(new Date(o.ts).toLocaleString()) : '—'},
-        {h: '종목', f: o => escapeHtml(o.symbol || '')},
-        {h: '주문', f: o => o.side === 'buy' ? '매수' : o.side === 'sell' ? '매도' : '—'},
-        {h: '상태', f: o => escapeHtml(states[o.status] || o.status || '확인 중')},
-        {h: '체결 금액', f: o => o.filled_dollars != null ? rhMoney(o.filled_dollars) : '—'},
-        {h: '출처 / 사유', f: o => escapeHtml([o.source, o.reason].filter(Boolean).join(' · '))}
-      ])}</div>` : '<div class="empty">아직 기록된 주문이 없습니다.</div>');
-    log.innerHTML = data.activity.length ? data.activity.map(a => `<div class="rh-row"><span>${escapeHtml(new Date(a.ts).toLocaleString())}</span><span>${escapeHtml(a.message || '')}</span></div>`).join('') : '<div class="empty">자동 점검 기록이 없습니다.</div>';
-  } catch (e) { if (el.isConnected) el.insertAdjacentHTML('afterbegin', `<p class="rh-warn">${escapeHtml(String(e.message || e))}</p>`); }
+    renderRecentCryptoHistory(el, data);
+  } catch (e) { if (el.isConnected) el.innerHTML = `<p class="rh-warn">${escapeHtml(String(e.message || e))}</p>`; }
 }
 
 async function confirmCryptoOrder(id) {
