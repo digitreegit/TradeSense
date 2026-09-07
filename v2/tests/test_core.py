@@ -122,6 +122,19 @@ def _rows():
     return {"SPY": strong, "QQQ": strong, "BTC/USD": strong}
 
 
+def test_refill_is_research_only_and_does_not_rotate_existing_holding(monkeypatch):
+    from app import config
+    assert config.MOMENTUM_REFILL_ENABLED is False
+    rows = _rows()
+    positions = {"DIA": PosMeta("DIA", MOMENTUM, 1, None)}
+    baseline = decide(rows, positions, ["SPY", "QQQ"], [], regime.BULL, False)
+    assert not any(o.sleeve == MOMENTUM for o in baseline)
+    monkeypatch.setattr(config, "MOMENTUM_REFILL_ENABLED", True)
+    research = decide(rows, positions, ["SPY", "QQQ"], [], regime.BULL, False)
+    assert len([o for o in research if o.side == "buy" and o.sleeve == MOMENTUM]) == 2
+    assert not any(o.side == "sell" for o in research)
+
+
 def test_decide_sells_on_stop_breach():
     rows = _rows()
     positions = {"SPY": PosMeta("SPY", MOMENTUM, held_days=5, stop_level=999999.0)}

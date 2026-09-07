@@ -82,23 +82,30 @@ def decide(
     pending_buys: set[str] = set()
 
     # 2) momentum rotation on week boundary (decide before Monday, fill Monday)
-    if week_rollover:
+    momentum_count = sum(p.sleeve == MOMENTUM for p in positions.values())
+    refill = config.MOMENTUM_REFILL_ENABLED and momentum_count < config.MOMENTUM_TOP_N
+    if week_rollover or refill:
         stock_rows = {s: rows[s] for s in stock_syms if s in rows}
         targets = strategy.select_momentum(stock_rows)
         for sym, pos in positions.items():
-            if pos.sleeve == MOMENTUM and sym not in targets and sym not in pending_sells:
+            if week_rollover and pos.sleeve == MOMENTUM and sym not in targets and sym not in pending_sells:
                 pending.append(PendingOrder(sym, MOMENTUM, "sell", reason="rotate"))
                 pending_sells.add(sym)
         if expo > 0:
             slot = 0.9 / config.MOMENTUM_TOP_N * expo
+            available = config.MOMENTUM_TOP_N - sum(
+                p.sleeve == MOMENTUM and s not in pending_sells
+                for s, p in positions.items()
+            )
             for sym in targets:
-                if sym not in positions and sym not in pending_sells:
+                if available > 0 and sym not in positions and sym not in pending_sells:
                     pending.append(PendingOrder(
                         sym, MOMENTUM, "buy",
                         slot_weight=slot * _name_scale(sym),
                         stop_mult=config.MOMENTUM_STOP_ATR,
                     ))
                     pending_buys.add(sym)
+                    available -= 1
 
     # 3) dip-buy entries daily (skipped in BEAR: no knife catching)
     if reg != regime.BEAR:

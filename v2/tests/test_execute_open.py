@@ -155,6 +155,28 @@ def _buy(sym):
             "created_at": "2026-01-01T00:00:00+00:00"}
 
 
+def test_missing_daily_data_keeps_unsubmitted_buy_for_retry(monkeypatch):
+    st = FakeStore()
+    st.pending = [_buy("SPY")]
+    broker = FakeBroker(equity=500, cash=500)
+    eng = _make_engine(monkeypatch, broker, st)
+    eng._features = lambda *a, **kw: {}
+    assert eng.job_execute_open() is False
+    assert [o["symbol"] for o in st.pending] == ["SPY"]
+    assert broker.bought == []
+
+
+def test_invalid_atr_keeps_unsubmitted_buy_for_retry(monkeypatch):
+    st = FakeStore()
+    st.pending = [_buy("SPY")]
+    broker = FakeBroker(equity=500, cash=500)
+    eng = _make_engine(monkeypatch, broker, st)
+    eng._features = lambda *a, **kw: {"SPY": pd.DataFrame({"close": [100], "atr": [float('nan')]})}
+    assert eng.job_execute_open() is False
+    assert [o["symbol"] for o in st.pending] == ["SPY"]
+    assert broker.bought == []
+
+
 def _sell(sym):
     order = _buy(sym)
     order.update({"side": "sell", "slot_weight": 0.0, "reason": "rotate"})

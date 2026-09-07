@@ -9,6 +9,16 @@ class NotFoundError(RuntimeError):
     status_code = 404
 
 
+def test_daily_stock_bars_request_adjusted_prices_for_live_indicators():
+    broker = Broker.__new__(Broker)
+    broker.stock_data = MagicMock()
+    broker.stock_data.get_stock_bars.return_value = SimpleNamespace(data={})
+    assert broker.daily_bars(["NVDA", "SPY"]) == {}
+    request = broker.stock_data.get_stock_bars.call_args.args[0]
+    assert request.adjustment.value == "all"
+    assert request.feed.value == "iex"
+
+
 def _filled_order(client_order_id: str):
     return SimpleNamespace(
         id="alpaca-1",

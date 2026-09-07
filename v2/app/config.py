@@ -67,6 +67,7 @@ REGIME_SYMBOL = "SPY"
 # ---------------------------------------------------------------------------
 MOMENTUM_LOOKBACK = 63          # ~3 months of trading days
 MOMENTUM_TOP_N = 3              # concurrent momentum holdings
+MOMENTUM_REFILL_ENABLED = False # research only: daily refill underperformed weekly entries
 MOMENTUM_REBALANCE_WEEKDAY = 0  # Monday
 # Rank by absolute return. The former return/volatility score systematically
 # preferred slow, low-beta names (DIA/XLF/XLV) during strong growth markets.

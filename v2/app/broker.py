@@ -128,7 +128,8 @@ class Broker:
 
         if stocks:
             req = StockBarsRequest(
-                symbol_or_symbols=stocks, timeframe=TimeFrame.Day, start=start, feed="iex"
+                symbol_or_symbols=stocks, timeframe=TimeFrame.Day, start=start,
+                feed="iex", adjustment="all",
             )
             data = self.stock_data.get_stock_bars(req).data
             for sym in stocks:

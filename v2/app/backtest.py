@@ -104,6 +104,7 @@ class Backtester:
         trades: list[Trade] = []
         brake = DrawdownBrake(peak_equity=self.initial_capital)
         equity_hist: dict[pd.Timestamp, float] = {}
+        cash_weights: list[float] = []
 
         cal = self.calendar
         warmup = 210
@@ -185,6 +186,7 @@ class Backtester:
                 if pos.stop is not None and not pd.isna(row["atr"]):
                     pos.stop.update(close, float(row["atr"]), pos.stop_mult)
             equity_hist[today] = equity
+            cash_weights.append(cash / equity if equity > 0 else 1.0)
             brake.update(equity)
 
             # 3) decide at close -> pending orders for tomorrow's open -------
@@ -219,7 +221,9 @@ class Backtester:
             )
 
         curve = pd.Series(equity_hist).sort_index()
-        return Result(equity_curve=curve, trades=trades, metrics=compute_metrics(curve, trades))
+        metrics = compute_metrics(curve, trades)
+        metrics["avg_cash_weight"] = round(float(np.mean(cash_weights)), 4) if cash_weights else None
+        return Result(equity_curve=curve, trades=trades, metrics=metrics)
 
 
 def compute_metrics(curve: pd.Series, trades: list[Trade]) -> dict:

@@ -329,16 +329,18 @@ class Engine:
         )
         feats = features.get(sym)
         if feats is None or feats.empty:
-            # Never discard an already-submitted order just because market data
-            # is temporarily unavailable; keep it queued for reconciliation.
-            return None if existing_attempt else 0.0
+            # Missing data is retryable for both fresh and submitted orders.
+            # Otherwise a transient outage silently deletes a weekly entry.
+            log.warning("buy %s deferred: completed daily data unavailable", sym)
+            return None
         row = feats.iloc[-1]
         price = self.broker.latest_price(sym) or float(row["close"])
         atr_val = float(
             (existing_attempt or {}).get("atr_value") or row["atr"]
         )
         if pd.isna(atr_val) or atr_val <= 0:
-            return None if existing_attempt else 0.0
+            log.warning("buy %s deferred: valid ATR unavailable", sym)
+            return None
         if existing_attempt:
             dollars = float(existing_attempt.get("requested_dollars") or 0)
             attempt = existing_attempt
