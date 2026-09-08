@@ -1394,6 +1394,7 @@ function renderRecentCryptoHistory(el, data) {
       {h: '종목', f: o => escapeHtml(o.symbol || '')},
       {h: '매수/매도', f: o => o.side === 'buy' ? '매수' : o.side === 'sell' ? '매도' : '—'},
       {h: '결과', f: o => escapeHtml(states[o.status] || o.status || '확인 중')},
+      {h: '체결 단가', f: o => Number(o.price) > 0 ? rhMoney(o.price) : '—'},
       {h: '체결 금액', f: o => o.filled_dollars != null ? rhMoney(o.filled_dollars) : '—'},
     ])}</div>` : '<div class="empty">아직 거래 내역이 없습니다.</div>') +
     (orders.length > visible.length ? '<button type="button" class="btn btn-ghost" data-history-more>See more</button>' : '');

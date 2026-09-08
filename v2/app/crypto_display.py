@@ -48,18 +48,25 @@ def activity_snapshot() -> dict:
             matched.add(tip['id'])
         qty = float(row.get('filled_asset_quantity') or 0)
         price = float(row.get('average_price') or 0)
+        if price <= 0 and tip:
+            price = float(tip.get('price') or 0)
         rows.append({'id': oid, 'ts': row.get('updated_at') or row.get('created_at'),
                      'symbol': row.get('symbol'), 'side': row.get('side'),
-                     'status': row.get('state'), 'qty': qty, 'price': price,
+                     'status': row.get('state'), 'qty': qty or None,
+                     'price': price or None,
                      'filled_dollars': qty * price if qty and price else None,
                      'source': 'Robinhood', 'reason': (tip or {}).get('reason', '')})
     for tip in pending:
         if tip.get('id') in matched:
             continue
+        price = float(tip.get('price') or 0)
+        filled = tip.get('actual_dollars') if tip.get('status') == 'confirmed' else None
+        qty = (float(filled) / price) if filled and price > 0 else None
         rows.append({'id': tip.get('id'), 'ts': tip.get('confirmed_at') or tip.get('denied_at') or tip.get('created_at'),
                      'symbol': tip.get('symbol'), 'side': tip.get('side'),
                      'status': tip.get('rh_state') or tip.get('status'),
-                     'filled_dollars': tip.get('actual_dollars') if tip.get('status') == 'confirmed' else None,
+                     'qty': qty, 'price': price or None,
+                     'filled_dollars': filled,
                      'source': 'TradeSense', 'reason': tip.get('reason', '')})
     rows.sort(key=lambda row: str(row.get('ts') or ''), reverse=True)
     return {'ok': True, 'orders': rows[:100],

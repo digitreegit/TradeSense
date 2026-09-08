@@ -349,6 +349,7 @@ def test_auto_confirm_from_filled_order_when_qty_already_synced():
     assert len(confirmed) == 1
     assert confirmed[0]["auto_confirm_source"] == "order"
     assert confirmed[0]["actual_dollars"] == pytest.approx(1000.0, abs=1)
+    assert confirmed[0]["price"] == pytest.approx(82.0)
 
 
 def test_auto_confirm_does_not_finalize_partial_order():

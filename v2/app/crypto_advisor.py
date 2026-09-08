@@ -891,13 +891,16 @@ def _qty_delta_dollars(
     return round(delta * price, 2)
 
 
-def _mark_confirmed(order: dict, dollars: float, *, source: str) -> None:
+def _mark_confirmed(order: dict, dollars: float, *, source: str, fill_price: float | None = None) -> None:
     recommended = float(order.get("dollars") or 0)
     order["status"] = "confirmed"
     order["actual_dollars"] = round(float(dollars), 2)
     order["confirmed_at"] = datetime.now(timezone.utc).isoformat()
     order["auto_confirmed"] = True
     order["auto_confirm_source"] = source
+    px = float(fill_price or 0)
+    if px > 0:
+        order["price"] = px
     log_activity(
         "crypto",
         f"자동 확인 {order.get('side')} {order.get('symbol')} "
@@ -969,7 +972,10 @@ def auto_confirm_from_robinhood(
             # Ignore fills that clearly happened before this tip was created.
             if fill_ts and rec_ts and fill_ts < rec_ts - timedelta(minutes=5):
                 continue
-            _mark_confirmed(order, dollars, source="order")
+            _mark_confirmed(
+                order, dollars, source="order",
+                fill_price=float(fill.get("average_price") or 0) or None,
+            )
             if fill_id:
                 order["rh_order_id"] = fill_id
                 used_fill_ids.add(fill_id)
@@ -1002,7 +1008,14 @@ def auto_confirm_from_robinhood(
         need = max(_AUTO_FILL_MIN_DOLLARS, recommended * _AUTO_FILL_MIN_FRAC)
         if dollars < need:
             continue
-        _mark_confirmed(order, dollars, source="qty")
+        snap_row = next(
+            (row for row in (snap.get("positions") or []) if row.get("pair") == pair),
+            None,
+        )
+        _mark_confirmed(
+            order, dollars, source="qty",
+            fill_price=float((snap_row or {}).get("price") or 0) or None,
+        )
         used_pairs.add(pair)
         confirmed.append(order)
 

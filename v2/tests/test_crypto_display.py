@@ -33,7 +33,22 @@ def test_history_dedupes_broker_versions_and_retains_denied_recommendations():
     assert len(result['orders']) == 2
     filled = next(o for o in result['orders'] if o['id'] == 'rh1')
     assert filled['filled_dollars'] == 600
+    assert filled['price'] == 60000
+    assert filled['qty'] == 0.01
     assert filled['status'] == 'partially_filled'
     denied = next(o for o in result['orders'] if o['id'] == 'tip2')
     assert denied['filled_dollars'] is None
     client.place_order.assert_not_called()
+
+
+def test_history_includes_fill_price_for_app_only_tips():
+    tips = [{'id': 'tip3', 'status': 'confirmed', 'symbol': 'XRP', 'side': 'buy',
+             'price': 1.84, 'actual_dollars': 184.0, 'confirmed_at': '2026-09-08T00:00:00Z'}]
+    st = MagicMock()
+    st.get.side_effect = lambda key, *args: tips if key == 'crypto_pending' else []
+    with patch('app.state.store', st), patch('app.robinhood_config.get_credentials', return_value=(None, None)):
+        result = activity_snapshot()
+    row = result['orders'][0]
+    assert row['price'] == 1.84
+    assert row['filled_dollars'] == 184.0
+    assert row['qty'] == pytest.approx(100.0)
