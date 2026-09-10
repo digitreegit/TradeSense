@@ -192,6 +192,52 @@ def test_insufficient_buying_power_is_hard_failure():
     assert not out.get("transient")
 
 
+def test_sell_locked_shares_are_transient_not_hard_lock():
+    """Held but unavailable (open order / settlement) must not lock auto."""
+    mock = _tradable_client()
+    mock.get_best_bid_ask.return_value = {"results": [{
+        "symbol": "SHIB-USD", "price": "0.000012",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }]}
+    mock.get_trading_pairs.return_value = [{"symbol": "SHIB-USD", "is_api_tradable": True}]
+    mock.get_all_holdings.return_value = [{
+        "asset_code": "SHIB",
+        "total_quantity": "100000000",
+        "quantity_available_for_trading": "0",
+    }]
+    with patch("app.robinhood_orders.get_credentials", return_value=("k", "p")), \
+         patch("app.robinhood_orders.RobinhoodCryptoClient", return_value=mock):
+        out = place_market_dollars(
+            side="sell", pair="SHIB/USD", dollars=1400, sell_all=True,
+            require_live_quote=True,
+        )
+    assert out["ok"] is False
+    assert out["transient"] is True
+    assert out["held_qty"] == pytest.approx(100000000)
+    assert not out.get("obsolete")
+    mock.place_order.assert_not_called()
+
+
+def test_sell_with_no_holding_is_obsolete_not_hard_lock():
+    mock = _tradable_client()
+    mock.get_best_bid_ask.return_value = {"results": [{
+        "symbol": "SHIB-USD", "price": "0.000012",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }]}
+    mock.get_trading_pairs.return_value = [{"symbol": "SHIB-USD", "is_api_tradable": True}]
+    mock.get_all_holdings.return_value = []
+    with patch("app.robinhood_orders.get_credentials", return_value=("k", "p")), \
+         patch("app.robinhood_orders.RobinhoodCryptoClient", return_value=mock):
+        out = place_market_dollars(
+            side="sell", pair="SHIB/USD", dollars=1400, sell_all=True,
+            require_live_quote=True,
+        )
+    assert out["ok"] is False
+    assert out.get("obsolete") is True
+    assert not out.get("transient")
+    mock.place_order.assert_not_called()
+
+
 def test_unfilled_order_is_not_applied_as_success():
     mock = MagicMock()
     mock.get_trading_pairs.return_value = [{"symbol": "XRP-USD", "is_api_tradable": True}]

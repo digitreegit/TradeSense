@@ -114,16 +114,53 @@ def _buying_power(client: RobinhoodCryptoClient) -> float:
     return float(acc.get("buying_power") or 0)
 
 
-def _available_qty(client: RobinhoodCryptoClient, asset_code: str) -> float:
+def _holding_qtys(
+    client: RobinhoodCryptoClient, asset_code: str
+) -> tuple[float, float]:
+    """Return (available_for_trading, total_quantity) for an asset code.
+
+    Dashboard holdings use total_quantity, but sells must use available.
+    Available can be 0 while total > 0 (open order, settlement lock).
+    """
     code = asset_code.upper().replace("-USD", "")
     for row in client.get_all_holdings():
         if str(row.get("asset_code") or "").upper() != code:
             continue
-        avail = row.get("quantity_available_for_trading")
-        if avail is None:
-            avail = row.get("total_quantity")
-        return float(avail or 0)
-    return 0.0
+        total = float(row.get("total_quantity") or 0)
+        avail_raw = row.get("quantity_available_for_trading")
+        avail = float(avail_raw) if avail_raw is not None else total
+        return avail, total
+    return 0.0, 0.0
+
+
+def _available_qty(client: RobinhoodCryptoClient, asset_code: str) -> float:
+    return _holding_qtys(client, asset_code)[0]
+
+
+def _no_sellable_qty_result(
+    asset: str, *, total: float, client_order_id: str
+) -> dict[str, Any]:
+    """Classify a zero-available sell: retry if still held, else drop tip."""
+    if total > 0:
+        # Still held — shares are locked temporarily. Do not lock auto mode.
+        return {
+            "ok": False,
+            "transient": True,
+            "held_qty": total,
+            "error": (
+                f"{asset} 매도 가능 수량이 없습니다 "
+                f"(보유 {total:g}는 있으나 잠금/정산 중일 수 있음). "
+                "다음 점검에서 재시도합니다."
+            ),
+            "client_order_id": client_order_id,
+        }
+    return {
+        "ok": False,
+        "obsolete": True,
+        "held_qty": 0.0,
+        "error": f"{asset} 매도 가능 수량이 없습니다.",
+        "client_order_id": client_order_id,
+    }
 
 
 def _order_notional(row: dict) -> float:
@@ -327,20 +364,17 @@ def place_market_dollars(
     limit_price = float(limit_price_s)
 
     if side == "sell" and sell_all:
-        qty = _available_qty(client, asset)
+        qty, held = _holding_qtys(client, asset)
         if qty <= 0:
-            return {"ok": False, "error": f"{asset} 매도 가능 수량이 없습니다."}
+            return _no_sellable_qty_result(asset, total=held, client_order_id=cid)
     else:
         # Buy quantity is based on the cap, so even a worst-price fill cannot
         # exceed the requested notional.
         qty = dollars / (limit_price if side == "buy" else price)
         if side == "sell":
-            avail = _available_qty(client, asset)
+            avail, held = _holding_qtys(client, asset)
             if avail <= 0:
-                return {
-                    "ok": False, "error": f"{asset} 매도 가능 수량이 없습니다.",
-                    "client_order_id": cid,
-                }
+                return _no_sellable_qty_result(asset, total=held, client_order_id=cid)
             if qty > avail:
                 qty = avail
 

@@ -481,6 +481,62 @@ def test_auto_skips_app_only_symbol_without_locking():
     assert skipped["ok"] is False
 
 
+def test_auto_locked_sell_qty_retries_without_locking():
+    """SHIB held but available=0 must not flip the whole account to manual."""
+    from unittest.mock import MagicMock, patch
+    from app.crypto_advisor import PENDING_KEY, TRANSIENT_KEY, execute_pending_auto
+
+    pending = [{
+        "id": "shib1", "side": "sell", "symbol": "SHIB", "pair": "SHIB/USD",
+        "kind": "trailing_stop", "dollars": 1486,
+    }]
+    saved: dict = {}
+    st = MagicMock()
+    st.get.side_effect = lambda key, *a: (
+        pending if key == PENDING_KEY else None
+    )
+    st.set.side_effect = lambda key, value: saved.__setitem__(key, value)
+    with patch("app.crypto_advisor.store", st), \
+         patch("app.robinhood_config.get_execution_mode", return_value="auto"), \
+         patch("app.robinhood_config.set_execution_mode") as set_mode, \
+         patch("app.crypto_advisor.confirm_order", return_value={
+             "ok": False, "transient": True,
+             "error": "SHIB 매도 가능 수량이 없습니다 (보유는 있으나 잠금/정산 중일 수 있음).",
+         }), patch("app.crypto_advisor.send"), patch("app.crypto_advisor.log_activity"):
+        out = execute_pending_auto()
+    assert out[0]["transient"] is True
+    assert not out[0].get("locked")
+    set_mode.assert_not_called()
+    assert saved[TRANSIENT_KEY]["count"] == 1
+
+
+def test_auto_obsolete_sell_dismisses_tip_without_locking():
+    from unittest.mock import MagicMock, patch
+    from app.crypto_advisor import PENDING_KEY, execute_pending_auto
+
+    pending = [{
+        "id": "gone1", "side": "sell", "symbol": "AVAX", "pair": "AVAX/USD",
+        "kind": "trailing_stop", "dollars": 400,
+    }]
+    saved: dict = {}
+    st = MagicMock()
+    st.get.side_effect = lambda key, *a: list(pending) if key == PENDING_KEY else None
+    st.set.side_effect = lambda key, value: saved.__setitem__(key, value)
+    with patch("app.crypto_advisor.store", st), \
+         patch("app.robinhood_config.get_execution_mode", return_value="auto"), \
+         patch("app.robinhood_config.set_execution_mode") as set_mode, \
+         patch("app.crypto_advisor.confirm_order", return_value={
+             "ok": False, "obsolete": True,
+             "error": "AVAX 매도 가능 수량이 없습니다.",
+         }), patch("app.crypto_advisor.send"), patch("app.crypto_advisor.log_activity"):
+        out = execute_pending_auto()
+    assert out[0]["skipped"] is True
+    assert out[0]["obsolete"] is True
+    set_mode.assert_not_called()
+    kept = saved[PENDING_KEY]
+    assert any(o.get("id") == "gone1" and o.get("status") == "denied" for o in kept)
+
+
 def test_unit_size_scales_with_real_book():
     """A $6,000 real book should size units off $6,000, not the $1,000 toy."""
     closes = wavy_uptrend()

@@ -1268,6 +1268,7 @@ def confirm_order(order_id: str, actual_dollars: float | None = None) -> dict:
                 "pending": bool(placed.get("pending")),
                 "retryable": bool(placed.get("retryable")),
                 "transient": bool(placed.get("transient")),
+                "obsolete": bool(placed.get("obsolete")),
                 "state": placed.get("state"),
             }
         dollars = float(placed.get("dollars") or dollars)
@@ -1321,6 +1322,29 @@ def _bump_transient_streak(error: str) -> int:
         "last_error": error,
     })
     return count
+
+
+def _dismiss_obsolete_tip(order: dict, reason: str) -> None:
+    """Mark a stale tip denied without locking auto or re-running advice."""
+    pending = store.get(PENDING_KEY) or []
+    tip = next((o for o in pending if o.get("id") == order.get("id")), None)
+    if tip is None or tip.get("status") in _TERMINAL:
+        return
+    tip["status"] = "denied"
+    tip["denied_at"] = datetime.now(timezone.utc).isoformat()
+    tip["deny_reason"] = reason
+    action = _action_key(tip)
+    pending = [
+        o for o in pending
+        if o.get("status") in _TERMINAL or _action_key(o) != action
+    ]
+    store.set(PENDING_KEY, pending)
+    store.set(CACHE_KEY, None)
+    log_activity(
+        "crypto",
+        f"추천 무효화 {tip.get('side')} {tip.get('symbol')} "
+        f"${float(tip.get('dollars') or 0):.0f} — {reason}",
+    )
 
 
 def execute_pending_auto(*, limit: int = 3) -> list[dict]:
@@ -1380,6 +1404,7 @@ def execute_pending_auto(*, limit: int = 3) -> list[dict]:
             "pending": bool(result.get("pending")),
             "retryable": bool(result.get("retryable")),
             "transient": bool(result.get("transient")),
+            "obsolete": bool(result.get("obsolete")),
             "dollars": result.get("summary") and None,
         })
         if result.get("ok"):
@@ -1391,6 +1416,13 @@ def execute_pending_auto(*, limit: int = 3) -> list[dict]:
             else:
                 done[-1]["dollars"] = float(order.get("dollars") or 0)
         elif skipped:
+            continue
+        elif result.get("obsolete"):
+            # Stale sell tip (no remaining holding). Drop it; keep auto on.
+            done[-1]["skipped"] = True
+            _dismiss_obsolete_tip(
+                order, result.get("error") or "매도 가능 수량 없음",
+            )
             continue
         elif result.get("pending") or result.get("retryable"):
             log_activity(
@@ -1676,7 +1708,8 @@ def run_scheduled(slot: str = "check") -> bool:
     )
     failed = next((r for r in auto_results if r.get("locked") or (
         not r.get("ok") and not r.get("skipped") and not r.get("pending")
-        and not r.get("retryable") and not r.get("transient"))), None)
+        and not r.get("retryable") and not r.get("transient")
+        and not r.get("obsolete"))), None)
     transient = None if failed else next(
         (r for r in auto_results if r.get("transient")), None)
     waiting = any(r.get("pending") or r.get("retryable") for r in auto_results)
