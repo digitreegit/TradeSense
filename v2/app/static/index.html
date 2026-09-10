@@ -1287,6 +1287,7 @@ function cryptoRunStatus(d, now = Date.now()) {
   if (age > 30 * 60 * 1000) return status('자동매매 확인 필요 · 30분 이상 점검 기록 없음', 'red');
   if (run.error || ['failed', 'failed_locked_manual'].includes(run.result)) return status('자동매매 오류 · 확인 필요', 'red');
   if (run.mode !== 'auto') return status('자동매매 ON · 첫 자동 점검 대기');
+  if (run.result === 'retry_transient') return status('자동매매 정상 · 일시 오류, 다음 점검에서 재시도');
   const active = (d.orders || []).filter(o => !['confirmed', 'denied'].includes(o.status));
   if (active.some(o => o.api_tradable === false)) return status('자동매매 점검 완료 · API 주문 제한 종목 있음', 'red');
   if (run.result === 'orders_pending') return status('자동매매 정상 · 주문 체결 확인 중', 'green');
@@ -1349,6 +1350,7 @@ function renderCrypto(d, {quiet = false} = {}) {
     </section>`;
   if (rh?.unpriced?.length) html += `<p class="rh-warn">시세 미확인: ${rh.unpriced.map(p => escapeHtml(p.symbol)).join(', ')}</p>`;
   if (d.last_auto_run?.error) html += `<p class="rh-warn">거래 오류: ${escapeHtml(d.last_auto_run.error)}</p>`;
+  else if (execMode === 'auto' && d.last_auto_run?.transient_error) html += `<p class="rh-hint">재시도 예정: ${escapeHtml(d.last_auto_run.transient_error)}</p>`;
   if (active.length) {
     html += `<section class="rh-section"><h3>${execMode === 'auto' ? '진행 중 주문' : '거래 요청'}</h3>` +
       active.map(o => renderCryptoOrder(o, {mode: execMode, buyingPower: cash})).join('') + '</section>';

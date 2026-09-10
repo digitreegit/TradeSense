@@ -54,6 +54,10 @@ NOTIFY_FP_KEY = "crypto_notify_fp"
 CACHE_KEY = "crypto_advice"
 QTY_SEEN_KEY = "crypto_rh_qty_seen"  # last RH qty used for fill detection
 LAST_AUTO_KEY = "crypto_last_auto_run"
+TRANSIENT_KEY = "crypto_auto_transient_streak"  # consecutive retryable ticks
+# Transient failures (quote drift, stale quote, network) retry on the next
+# 15-min tick. Lock auto mode only when they keep repeating (~1 hour).
+TRANSIENT_LOCK_AFTER = 4
 CACHE_TTL = 900.0      # panel refresh window; scheduled runs bypass it
 LIVE_CACHE_TTL = 45.0  # when Robinhood API is linked, refresh more often
 CONFIRM_COOLDOWN_HOURS = 24.0  # don't re-queue same side+symbol after confirm
@@ -1263,6 +1267,7 @@ def confirm_order(order_id: str, actual_dollars: float | None = None) -> dict:
                 "execution_mode": mode,
                 "pending": bool(placed.get("pending")),
                 "retryable": bool(placed.get("retryable")),
+                "transient": bool(placed.get("transient")),
                 "state": placed.get("state"),
             }
         dollars = float(placed.get("dollars") or dollars)
@@ -1294,9 +1299,33 @@ def confirm_order(order_id: str, actual_dollars: float | None = None) -> dict:
     return _ensure_order_split(data)
 
 
+def _lock_auto_to_manual(error: str) -> None:
+    from .robinhood_config import set_execution_mode
+
+    set_execution_mode("manual")
+    log_activity("crypto", f"자동 주문 실패 → 수동 잠금: {error}")
+    try:
+        send(f"🚨 TradeSense 자동거래가 수동으로 잠겼습니다.\n{error}")
+    except Exception:
+        log.exception("auto failure telegram failed")
+
+
+def _bump_transient_streak(error: str) -> int:
+    prev = store.get(TRANSIENT_KEY)
+    prev = prev if isinstance(prev, dict) else {}
+    count = int(prev.get("count") or 0) + 1
+    store.set(TRANSIENT_KEY, {
+        "count": count,
+        "first_at": prev.get("first_at") or datetime.now(timezone.utc).isoformat(),
+        "last_at": datetime.now(timezone.utc).isoformat(),
+        "last_error": error,
+    })
+    return count
+
+
 def execute_pending_auto(*, limit: int = 3) -> list[dict]:
     """Execute risk sells first, with at most two sells and one buy per tick."""
-    from .robinhood_config import get_execution_mode, set_execution_mode
+    from .robinhood_config import get_execution_mode
 
     if get_execution_mode() != "auto":
         return []
@@ -1350,6 +1379,7 @@ def execute_pending_auto(*, limit: int = 3) -> list[dict]:
             "error": error,
             "pending": bool(result.get("pending")),
             "retryable": bool(result.get("retryable")),
+            "transient": bool(result.get("transient")),
             "dollars": result.get("summary") and None,
         })
         if result.get("ok"):
@@ -1370,15 +1400,25 @@ def execute_pending_auto(*, limit: int = 3) -> list[dict]:
             )
             # Do not submit buys while a preceding sell is still unresolved.
             break
-        else:
-            error = result.get("error") or "Robinhood 자동 주문 실패"
-            set_execution_mode("manual")
-            log_activity("crypto", f"자동 주문 실패 → 수동 잠금: {error}")
-            try:
-                send(f"🚨 TradeSense 자동거래가 수동으로 잠겼습니다.\n{error}")
-            except Exception:
-                log.exception("auto failure telegram failed")
+        elif result.get("transient"):
+            error = result.get("error") or "Robinhood 일시 오류"
+            streak = _bump_transient_streak(error)
+            if streak >= TRANSIENT_LOCK_AFTER:
+                done[-1]["locked"] = True
+                _lock_auto_to_manual(f"일시 오류가 {streak}회 연속 반복됨 — {error}")
+            else:
+                log_activity(
+                    "crypto",
+                    f"자동 주문 일시 오류 · 다음 점검에서 재시도 "
+                    f"({streak}/{TRANSIENT_LOCK_AFTER}): {error}",
+                )
             break
+        else:
+            done[-1]["locked"] = True
+            _lock_auto_to_manual(result.get("error") or "Robinhood 자동 주문 실패")
+            break
+    if not any(r.get("transient") for r in done):
+        store.set(TRANSIENT_KEY, None)
     return done
 
 
@@ -1634,14 +1674,17 @@ def run_scheduled(slot: str = "check") -> bool:
         f"현재 ${s.get('total', 0):,.0f} / 원금 ${principal:,.0f} "
         f"(남음 ${gap:,.0f})"
     )
-    failed = next((r for r in auto_results if not r.get("ok")
-                   and not r.get("skipped") and not r.get("pending")
-                   and not r.get("retryable")), None)
+    failed = next((r for r in auto_results if r.get("locked") or (
+        not r.get("ok") and not r.get("skipped") and not r.get("pending")
+        and not r.get("retryable") and not r.get("transient"))), None)
+    transient = None if failed else next(
+        (r for r in auto_results if r.get("transient")), None)
     waiting = any(r.get("pending") or r.get("retryable") for r in auto_results)
     attempted = [r for r in auto_results if not r.get("skipped")]
     store.set(LAST_AUTO_KEY, {
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "result": "failed_locked_manual" if failed else (
+            "retry_transient" if transient else
             "orders_pending" if waiting else
             "orders_succeeded" if any(r.get("ok") for r in attempted) else "no_signal"
         ),
@@ -1650,6 +1693,7 @@ def run_scheduled(slot: str = "check") -> bool:
         "orders_attempted": len(attempted),
         "orders_succeeded": sum(1 for r in attempted if r.get("ok")),
         "error": failed.get("error") if failed else None,
+        "transient_error": transient.get("error") if transient else None,
         "quote_at": (data.get("robinhood_live") or {}).get("quote_at"),
         "idle_reasons": data.get("idle_reasons") or [],
     })

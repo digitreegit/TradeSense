@@ -348,6 +348,73 @@ def test_auto_failure_locks_manual_and_stops():
     set_mode.assert_called_once_with("manual")
 
 
+def _transient_store(streak: int | None):
+    """Store mock: pending list for PENDING_KEY, streak dict for TRANSIENT_KEY."""
+    from unittest.mock import MagicMock
+    from app.crypto_advisor import PENDING_KEY, TRANSIENT_KEY
+
+    pending = [{"id": "b1", "side": "buy", "symbol": "SOL", "pair": "SOL/USD",
+                "kind": "entry", "dollars": 100}]
+    saved: dict = {}
+    st = MagicMock()
+    st.get.side_effect = lambda key, *a: (
+        pending if key == PENDING_KEY
+        else ({"count": streak} if streak else None) if key == TRANSIENT_KEY
+        else None
+    )
+    st.set.side_effect = lambda key, value: saved.__setitem__(key, value)
+    return st, saved
+
+
+def test_auto_transient_error_retries_without_locking_manual():
+    from unittest.mock import patch
+    from app.crypto_advisor import TRANSIENT_KEY, execute_pending_auto
+
+    st, saved = _transient_store(None)
+    with patch("app.crypto_advisor.store", st), \
+         patch("app.robinhood_config.get_execution_mode", return_value="auto"), \
+         patch("app.robinhood_config.set_execution_mode") as set_mode, \
+         patch("app.crypto_advisor.confirm_order", return_value={
+             "ok": False, "transient": True,
+             "error": "추천가 대비 시세 변동 3.8%로 주문을 중단했습니다.",
+         }), patch("app.crypto_advisor.send"), patch("app.crypto_advisor.log_activity"):
+        out = execute_pending_auto()
+    assert out[0]["transient"] is True
+    assert not out[0].get("locked")
+    set_mode.assert_not_called()
+    assert saved[TRANSIENT_KEY]["count"] == 1
+
+
+def test_auto_transient_error_locks_after_repeated_ticks():
+    from unittest.mock import patch
+    from app.crypto_advisor import TRANSIENT_LOCK_AFTER, execute_pending_auto
+
+    st, _ = _transient_store(TRANSIENT_LOCK_AFTER - 1)
+    with patch("app.crypto_advisor.store", st), \
+         patch("app.robinhood_config.get_execution_mode", return_value="auto"), \
+         patch("app.robinhood_config.set_execution_mode") as set_mode, \
+         patch("app.crypto_advisor.confirm_order", return_value={
+             "ok": False, "transient": True, "error": "시세 조회 실패",
+         }), patch("app.crypto_advisor.send"), patch("app.crypto_advisor.log_activity"):
+        out = execute_pending_auto()
+    assert out[0]["locked"] is True
+    set_mode.assert_called_once_with("manual")
+
+
+def test_auto_success_resets_transient_streak():
+    from unittest.mock import patch
+    from app.crypto_advisor import TRANSIENT_KEY, execute_pending_auto
+
+    st, saved = _transient_store(2)
+    with patch("app.crypto_advisor.store", st), \
+         patch("app.robinhood_config.get_execution_mode", return_value="auto"), \
+         patch("app.robinhood_config.set_execution_mode"), \
+         patch("app.crypto_advisor.confirm_order", return_value={"ok": True, "orders": [], "order_history": []}), \
+         patch("app.crypto_advisor.log_activity"):
+        execute_pending_auto()
+    assert saved[TRANSIENT_KEY] is None
+
+
 def test_auto_accepted_order_waits_without_locking_manual():
     from unittest.mock import patch
     from app.crypto_advisor import execute_pending_auto

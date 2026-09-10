@@ -125,6 +125,73 @@ def test_auto_order_refuses_stale_robinhood_quote():
     mock.place_order.assert_not_called()
 
 
+def _tradable_client(**overrides):
+    mock = MagicMock()
+    mock.get_trading_pairs.return_value = [{"symbol": "XRP-USD", "is_api_tradable": True}]
+    mock.get_primary_account_v2.return_value = {"is_api_tradable": True}
+    mock.get_account.return_value = {"buying_power": "500"}
+    mock.get_best_bid_ask.return_value = {"results": [{
+        "symbol": "XRP-USD", "price": "1.50",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }]}
+    for k, v in overrides.items():
+        setattr(mock, k, v)
+    return mock
+
+
+def _place(mock, **kw):
+    with patch("app.robinhood_orders.get_credentials", return_value=("k", "p")), \
+         patch("app.robinhood_orders.RobinhoodCryptoClient", return_value=mock), \
+         patch("app.robinhood_orders.time.sleep"):
+        return place_market_dollars(side="buy", pair="XRP/USD", dollars=100, **kw)
+
+
+def test_price_drift_is_transient_not_hard_failure():
+    out = _place(_tradable_client(), expected_price=1.0, require_live_quote=True)
+    assert out["ok"] is False
+    assert "시세 변동" in out["error"]
+    assert out["transient"] is True
+
+
+def test_stale_quote_and_quote_error_are_transient():
+    stale = _tradable_client()
+    stale.get_best_bid_ask.return_value = {"results": [{
+        "symbol": "XRP-USD", "price": "1.50",
+        "timestamp": (datetime.now(timezone.utc) - timedelta(minutes=3)).isoformat(),
+    }]}
+    assert _place(stale, require_live_quote=True)["transient"] is True
+    down = _tradable_client()
+    down.get_best_bid_ask.side_effect = RuntimeError("connection reset")
+    assert _place(down, require_live_quote=True)["transient"] is True
+
+
+def test_robinhood_5xx_is_transient_but_4xx_is_hard():
+    from app.robinhood_client import RobinhoodAPIError
+
+    server = _tradable_client()
+    server.place_order.side_effect = RobinhoodAPIError("Robinhood API 503: upstream")
+    assert _place(server)["transient"] is True
+
+    forbidden = _tradable_client()
+    forbidden.place_order.side_effect = RobinhoodAPIError("Robinhood API 403: no permission")
+    with patch("app.robinhood_config.keys_from_dashboard", return_value=False):
+        out = _place(forbidden)
+    assert out["ok"] is False
+    assert out["transient"] is False
+
+    precheck = _tradable_client()
+    precheck.get_primary_account_v2.side_effect = RobinhoodAPIError("Robinhood API 401: bad key")
+    assert _place(precheck)["transient"] is False
+
+
+def test_insufficient_buying_power_is_hard_failure():
+    poor = _tradable_client()
+    poor.get_account.return_value = {"buying_power": "10"}
+    out = _place(poor)
+    assert out["ok"] is False
+    assert not out.get("transient")
+
+
 def test_unfilled_order_is_not_applied_as_success():
     mock = MagicMock()
     mock.get_trading_pairs.return_value = [{"symbol": "XRP-USD", "is_api_tradable": True}]

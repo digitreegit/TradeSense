@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -21,6 +22,22 @@ _POLL_SECONDS = (0.4, 0.8, 1.2, 2.0)
 _FILLED_STATES = frozenset({"filled"})
 _PENDING_STATES = frozenset({"open", "pending", "partially_filled", ""})
 _TERMINAL_STATES = frozenset({"canceled", "cancelled", "failed", "rejected"})
+
+
+def is_transient_error(exc: BaseException) -> bool:
+    """True when a failure is worth retrying on the next tick.
+
+    Robinhood 4xx (other than 429) means the request itself is wrong —
+    permissions, buying power, bad symbol — and needs a human. Anything
+    else (timeouts, DNS, 429, 5xx, unreadable bodies) is treated as a
+    hiccup; the auto executor escalates only if it keeps repeating.
+    """
+    if isinstance(exc, RobinhoodAPIError):
+        m = re.search(r"Robinhood API (\d{3})", str(exc))
+        if m:
+            code = int(m.group(1))
+            return code == 429 or code >= 500
+    return True
 
 
 def _qty_str(qty: float, increment: str | float | None = None) -> str:
@@ -203,6 +220,7 @@ def place_market_dollars(
         except Exception as exc:
             return {
                 "ok": False, "error": f"기존 주문 상태 확인 실패: {exc}",
+                "transient": is_transient_error(exc),
                 "client_order_id": cid,
             }
 
@@ -226,6 +244,7 @@ def place_market_dollars(
     except Exception as exc:
         return {
             "ok": False, "error": f"주문 사전 점검 실패: {exc}",
+            "transient": is_transient_error(exc),
             "client_order_id": cid,
         }
 
@@ -236,6 +255,7 @@ def place_market_dollars(
         except Exception as exc:
             return {
                 "ok": False, "error": f"Buying power 조회 실패: {exc}",
+                "transient": is_transient_error(exc),
                 "client_order_id": cid,
             }
         max_buy = round(bp * 0.98, 2)
@@ -260,7 +280,10 @@ def place_market_dollars(
             bid = ask = price = float(fallback_price)
             log.warning("live quote failed (%s), using fallback %.6f", exc, price)
         else:
-            return {"ok": False, "error": f"시세 조회 실패: {exc}"}
+            return {
+                "ok": False, "error": f"시세 조회 실패: {exc}",
+                "transient": True, "client_order_id": cid,
+            }
     else:
         if require_live_quote:
             from .crypto_risk import quote_is_fresh
@@ -268,14 +291,18 @@ def place_market_dollars(
                 return {
                     "ok": False,
                     "error": "Robinhood 시세가 2분 이상 오래되어 자동 주문을 중단했습니다.",
+                    "transient": True,
                     "client_order_id": cid,
                 }
     if not bypass_price_drift and expected_price and float(expected_price) > 0:
         drift = abs(price / float(expected_price) - 1)
         if drift > 0.03:
+            # The market moved, not the account. The next tick re-prices the
+            # tip from a fresh quote, so this must not lock auto mode.
             return {
                 "ok": False,
                 "error": f"추천가 대비 시세 변동 {drift:.1%}로 주문을 중단했습니다.",
+                "transient": True,
                 "client_order_id": cid,
             }
 
@@ -359,10 +386,16 @@ def place_market_dollars(
                 f"금액을 ${round(bp * 0.98):,.0f} 이하로 줄이거나 Robinhood 앱에서 "
                 "Investing Cash → Crypto로 자금을 옮기세요."
             )
-        return {"ok": False, "error": msg, "client_order_id": cid}
+        return {
+            "ok": False, "error": msg, "client_order_id": cid,
+            "transient": is_transient_error(exc),
+        }
     except Exception as exc:
         log.exception("robinhood place_order unexpected")
-        return {"ok": False, "error": f"주문 실패: {exc}", "client_order_id": cid}
+        return {
+            "ok": False, "error": f"주문 실패: {exc}", "client_order_id": cid,
+            "transient": is_transient_error(exc),
+        }
 
     order_id = placed.get("id")
     api_version = str(placed.get("_api_version") or "v1")
