@@ -4,15 +4,96 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-HARD_STOP_PCT = 0.08
-TRAILING_STOP_PCT = 0.07
-PROFIT_TIERS = (0.10, 0.20, 0.30)
+# Stop widths scale with each coin's own 30-day daily range (range30 =
+# mean((high-low)/close)). A fixed 7% trail on a coin that moves 6% a day is
+# a coin flip, so *_PCT is the floor and *_RANGE_MULT stretches it. Set the
+# mult to 0 for the legacy fixed-width behaviour (scripts/replay_crypto_live.py
+# compares both).
+HARD_STOP_PCT = 0.08            # floor
+HARD_STOP_RANGE_MULT = 3.0      # BTC (range ~3%) -> ~10%, SOL/alts -> 15% cap
+HARD_STOP_MAX = 0.15
+TRAILING_STOP_PCT = 0.07        # floor
+TRAILING_RANGE_MULT = 4.0       # BTC -> ~13%, SOL/alts -> 20% cap
+TRAILING_STOP_MAX = 0.20
+# "close": trail from the highest *completed daily close* since entry, so an
+# intraday spike does not ratchet the stop up under the price.
+# "tick": legacy — trail from the highest live quote seen.
+TRAILING_BASE = "close"
+# Staged partial profit-taking. Empty = let winners run to the trend exit;
+# the replay showed +10/20/30% trims capped the winners that paid for the
+# -8% full-size stop-outs.
+PROFIT_TIERS: tuple[float, ...] = ()
 PROFIT_SELL_FRACTION = 0.25
 CRASH_30M_PCT = 0.05
 DAILY_BUY_HALT_PCT = 0.05
 QUOTE_MAX_AGE_SECONDS = 120
 
 FULL_EXIT_KINDS = frozenset({"hard_stop", "trailing_stop", "crash_exit", "exit"})
+
+
+def _clamp(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
+
+
+def stop_widths(range30: float | None) -> dict[str, float]:
+    """Per-coin hard/trailing stop widths from its 30-day daily range."""
+    r = float(range30 or 0)
+    hard = HARD_STOP_PCT if HARD_STOP_RANGE_MULT <= 0 or r <= 0 else _clamp(
+        HARD_STOP_RANGE_MULT * r, HARD_STOP_PCT, HARD_STOP_MAX)
+    trail = TRAILING_STOP_PCT if TRAILING_RANGE_MULT <= 0 or r <= 0 else _clamp(
+        TRAILING_RANGE_MULT * r, TRAILING_STOP_PCT, TRAILING_STOP_MAX)
+    return {"hard_pct": round(hard, 4), "trail_pct": round(trail, 4)}
+
+
+def hard_pct_for(pos: dict) -> float:
+    try:
+        v = float(pos.get("hard_pct") or 0)
+    except (TypeError, ValueError):
+        v = 0.0
+    return v if v > 0 else HARD_STOP_PCT
+
+
+def trail_pct_for(pos: dict) -> float:
+    try:
+        v = float(pos.get("trail_pct") or 0)
+    except (TypeError, ValueError):
+        v = 0.0
+    return v if v > 0 else TRAILING_STOP_PCT
+
+
+def trailing_peak(pos: dict, price: float) -> float:
+    """Reference high for the trailing stop under the configured base."""
+    if TRAILING_BASE == "close":
+        base = float(pos.get("peak_close") or 0)
+        if base > 0:
+            return base
+    return max(float(pos.get("peak_price") or price), price)
+
+
+def sync_daily_risk(pos: dict, *, range30: float | None, last_close: float | None) -> None:
+    """Refresh per-position daily fields from completed bars.
+
+    Called on every advisor run with the newest *completed* daily bar, so
+    `peak_close` ratchets once per day and stop widths follow the coin's
+    current volatility. Safe on legacy positions that lack the fields.
+    """
+    widths = stop_widths(range30)
+    pos["hard_pct"] = widths["hard_pct"]
+    pos["trail_pct"] = widths["trail_pct"]
+    close = float(last_close or 0)
+    prev = float(pos.get("peak_close") or 0)
+    if prev <= 0:
+        # Seed from cost so a position bought above today's close is not
+        # instantly "under" a trail measured from a lower close.
+        avg = float(pos.get("avg_cost") or 0)
+        units = pos.get("units") or []
+        entry = avg if avg > 0 else max(
+            (float(u.get("price") or 0) for u in units), default=0.0)
+        prev = entry
+    if close > 0:
+        prev = max(prev, close)
+    if prev > 0:
+        pos["peak_close"] = prev
 
 
 def parse_ts(value: str | None) -> datetime | None:
@@ -128,17 +209,20 @@ def evaluate_position(
         return None
     value = qty * price
     avg = float(pos.get("avg_cost") or 0)
-    peak = max(float(pos.get("peak_price") or price), price)
+    hard = hard_pct_for(pos)
+    trail = trail_pct_for(pos)
+    peak = trailing_peak(pos, price)
 
-    if avg > 0 and price <= avg * (1 - HARD_STOP_PCT):
+    if avg > 0 and price <= avg * (1 - hard):
         return {
             "kind": "hard_stop", "dollars": value, "sell_all": True,
-            "reason": f"평단 손절 {price / avg - 1:.1%} (기준 -{HARD_STOP_PCT:.0%})",
+            "reason": f"평단 손절 {price / avg - 1:.1%} (기준 -{hard:.0%})",
         }
-    if peak > 0 and price <= peak * (1 - TRAILING_STOP_PCT):
+    if peak > 0 and price <= peak * (1 - trail):
+        base = "종가 고점" if TRAILING_BASE == "close" else "고점"
         return {
             "kind": "trailing_stop", "dollars": value, "sell_all": True,
-            "reason": f"고점 추적 손절 {price / peak - 1:.1%} (기준 -{TRAILING_STOP_PCT:.0%})",
+            "reason": f"{base} 추적 손절 {price / peak - 1:.1%} (기준 -{trail:.0%})",
         }
     if recent_drop <= -CRASH_30M_PCT:
         return {
@@ -164,12 +248,14 @@ def evaluate_position(
 
 def risk_levels(pos: dict) -> dict[str, float | None]:
     avg = float(pos.get("avg_cost") or 0)
-    peak = float(pos.get("peak_price") or 0)
+    peak = trailing_peak(pos, 0.0) if pos.get("peak_price") or pos.get("peak_close") else 0.0
     taken = {round(float(tier), 4) for tier in pos.get("profit_tiers_taken") or []}
     next_tier = next((tier for tier in PROFIT_TIERS if round(tier, 4) not in taken), None)
     return {
-        "hard_stop": avg * (1 - HARD_STOP_PCT) if avg > 0 else None,
-        "trailing_stop": peak * (1 - TRAILING_STOP_PCT) if peak > 0 else None,
+        "hard_stop": avg * (1 - hard_pct_for(pos)) if avg > 0 else None,
+        "trailing_stop": peak * (1 - trail_pct_for(pos)) if peak > 0 else None,
+        "hard_pct": hard_pct_for(pos),
+        "trail_pct": trail_pct_for(pos),
         "peak_price": peak or None,
         "next_profit": avg * (1 + next_tier) if avg > 0 and next_tier is not None else None,
     }

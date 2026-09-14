@@ -397,3 +397,50 @@ def test_holiday_decision_preserves_friday_queue_and_position_age(monkeypatch):
     assert st.pending == [{'symbol': 'QQQ', 'side': 'buy', 'sleeve': 'momentum'}]
     eng._broker.equity.assert_not_called()
     assert st.kv == {}
+
+
+def _held(sym, price, stop):
+    store = FakeStore()
+    store.kv["brake"] = {"peak_equity": 1000.0, "halted": False}
+    store.kv["regime"] = {"regime": "BULL"}
+    store.pos_meta[sym] = {
+        "symbol": sym, "sleeve": "momentum", "stop_level": stop,
+        "stop_mult": 3.0, "entry_date": "2026-01-01", "held_days": 3,
+    }
+    pos = {sym: {"qty": 1, "market_value": price, "avg_entry": 100.0,
+                 "current_price": price, "unrealized_pl": price - 100.0}}
+    return store, FakeBroker(equity=990.0, cash=900.0, positions=pos)
+
+
+def test_intraday_stop_waits_for_a_second_check(monkeypatch):
+    """One 30-min print under the stop is not enough — the backtest only
+    sees closes, so a single spike must not sell what it would have kept."""
+    store, broker = _held("AAPL", price=94.0, stop=95.0)
+    eng = _make_engine(monkeypatch, broker, store)
+
+    eng.job_intraday_stops()
+    assert broker.sold == []
+    assert store.kv[engine_mod.INTRADAY_BREACH_KEY] == {"AAPL": 1}
+
+    eng.job_intraday_stops()          # still under the stop 30 minutes later
+    assert broker.sold == ["AAPL"]
+    assert store.kv[engine_mod.INTRADAY_BREACH_KEY] == {}
+
+
+def test_intraday_stop_breach_counter_resets_when_price_recovers(monkeypatch):
+    store, broker = _held("AAPL", price=94.0, stop=95.0)
+    eng = _make_engine(monkeypatch, broker, store)
+    eng.job_intraday_stops()
+    broker._positions["AAPL"]["current_price"] = 96.0
+    eng.job_intraday_stops()
+    assert store.kv[engine_mod.INTRADAY_BREACH_KEY] == {}
+    broker._positions["AAPL"]["current_price"] = 94.0
+    eng.job_intraday_stops()
+    assert broker.sold == []          # count restarted at 1
+
+
+def test_intraday_stop_sells_immediately_on_deep_breach(monkeypatch):
+    store, broker = _held("AAPL", price=91.0, stop=95.0)   # 4.2% through
+    eng = _make_engine(monkeypatch, broker, store)
+    eng.job_intraday_stops()
+    assert broker.sold == ["AAPL"]

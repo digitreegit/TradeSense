@@ -29,6 +29,7 @@ from .state import store
 log = logging.getLogger(__name__)
 
 _ALPACA_ATTEMPTS_KEY = "alpaca_order_attempts"
+INTRADAY_BREACH_KEY = "intraday_stop_breaches"  # sym -> consecutive 30-min checks below stop
 _ALPACA_FILLED = frozenset({"filled"})
 _ALPACA_TERMINAL_FAILURE = frozenset({
     "canceled", "expired", "rejected", "replaced", "suspended",
@@ -768,16 +769,29 @@ class Engine:
         crypto_syms, _ = self._trend_universe()
         broker_positions = self.broker.positions()
         metas = self._pos_metas(broker_positions)
+        breaches = store.get(INTRADAY_BREACH_KEY) or {}
+        breaches = breaches if isinstance(breaches, dict) else {}
         sold = []
         for sym, meta in metas.items():
             if sym in crypto_syms or meta.stop_level is None:
                 continue
             price = broker_positions[sym]["current_price"]
-            if price <= meta.stop_level:
-                if self._execute_sell(
-                    sym, meta.sleeve, "intraday-stop", broker_positions
-                ):
-                    sold.append(sym)
+            if price > meta.stop_level:
+                breaches.pop(sym, None)
+                continue
+            count = int(breaches.get(sym) or 0) + 1
+            breaches[sym] = count
+            deep = price <= meta.stop_level * (1 - config.INTRADAY_STOP_HARD_BREACH)
+            if count < config.INTRADAY_STOP_CONFIRM_CHECKS and not deep:
+                log.info("intraday stop %s breached (%d/%d), waiting for confirmation",
+                         sym, count, config.INTRADAY_STOP_CONFIRM_CHECKS)
+                continue
+            if self._execute_sell(
+                sym, meta.sleeve, "intraday-stop", broker_positions
+            ):
+                sold.append(sym)
+                breaches.pop(sym, None)
+        store.set(INTRADAY_BREACH_KEY, {k: v for k, v in breaches.items() if k in metas})
         if sold:
             log_activity("stops", f"장중 손절: {', '.join(sold)}")
         # Intraday equity point so the dashboard curve moves during the day

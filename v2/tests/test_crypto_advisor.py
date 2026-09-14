@@ -8,6 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from app import crypto_advisor
 from app.crypto_advisor import (
     BEAR_SIZE, MAX_POSITIONS, MAX_STEP, MAX_UNITS, MAX_WEIGHT, MIN_STEP,
     TRIM_FRACTION, _new_book, _step_for, apply_order, generate_orders,
@@ -58,11 +59,9 @@ def test_uptrend_coin_gets_bought_and_downtrend_does_not():
     assert view["market"]["label"] in ("BULL", "CHOP")
 
 
-def test_take_profit_sells_a_unit_and_ratchets_anchor():
-    closes = wavy_uptrend()
-    frames = {"SOL/USD": make_frame(closes, daily_range=0.06)}
+def _grid_book(closes: np.ndarray, anchor_ratio: float) -> dict:
     price = float(closes[-1])
-    anchor = price / 1.10
+    anchor = price / anchor_ratio
     book = _new_book()
     book["cash"] = 875.0
     book["positions"]["SOL/USD"] = {
@@ -70,6 +69,14 @@ def test_take_profit_sells_a_unit_and_ratchets_anchor():
         "anchor": anchor,
         "step": 0.05,
     }
+    return book
+
+
+def test_take_profit_sells_a_unit_and_ratchets_anchor(monkeypatch):
+    monkeypatch.setattr(crypto_advisor, "GRID_TAKE_PROFIT_ENABLED", True)
+    closes = wavy_uptrend()
+    frames = {"SOL/USD": make_frame(closes, daily_range=0.06)}
+    book = _grid_book(closes, 1.10)
     orders, sim, _ = generate_orders(frames, book)
 
     sells = [o for o in orders if o["side"] == "sell" and o["symbol"] == "SOL"]
@@ -77,6 +84,15 @@ def test_take_profit_sells_a_unit_and_ratchets_anchor():
     assert "익절" in sells[0]["reason"]
     assert "SOL/USD" in book["positions"]   # live book waits for confirm
     assert "SOL/USD" not in sim["positions"]
+
+
+def test_grid_take_profit_is_off_by_default_so_winners_ride_the_trend():
+    """+10% above the anchor in an uptrend: no sell — the trend exit decides."""
+    closes = wavy_uptrend()
+    frames = {"SOL/USD": make_frame(closes, daily_range=0.06)}
+    orders, sim, _ = generate_orders(frames, _grid_book(closes, 1.10))
+    assert not [o for o in orders if o["side"] == "sell" and o["symbol"] == "SOL"]
+    assert "SOL/USD" in sim["positions"]
 
 
 def test_dip_triggers_one_add_buy():
@@ -122,16 +138,63 @@ def test_trend_break_liquidates_position():
     assert sim["realized_pl"] < 0
 
 
-def test_bear_market_reduces_entry_size():
-    frames = {
+def _bear_frames() -> dict:
+    return {
         "BTC/USD": make_frame(np.linspace(80_000, 50_000, 250), daily_range=0.03),
         "SOL/USD": make_frame(wavy_uptrend(), daily_range=0.06),
     }
-    orders, _, view = generate_orders(frames, _new_book())
+
+
+def test_bear_market_blocks_new_buys_and_explains_it():
+    """BTC below its 50EMA: an alt in its own uptrend is still not bought."""
+    orders, _, view = generate_orders(_bear_frames(), _new_book())
+    assert view["market"]["label"] == "BEAR"
+    assert not [o for o in orders if o["side"] == "buy"]
+    assert any("약세장" in r for r in view["idle_reasons"])
+
+
+def test_bear_market_reduces_entry_size_when_buys_allowed(monkeypatch):
+    monkeypatch.setattr(crypto_advisor, "BEAR_ALLOW_BUYS", True)
+    orders, _, view = generate_orders(_bear_frames(), _new_book())
     assert view["market"]["label"] == "BEAR"
     buys = [o for o in orders if o["side"] == "buy"]
     expected = round(1000 / MAX_POSITIONS / MAX_UNITS * BEAR_SIZE, 0)
     assert buys and all(o["dollars"] == expected for o in buys)
+
+
+def test_alt_breadth_alone_is_not_a_bear_market():
+    """Only BTC's own trend flips the label; weak alts while BTC is above its
+    50EMA must not block BTC/ETH entries."""
+    frames = {
+        "BTC/USD": make_frame(wavy_uptrend(), daily_range=0.03),
+        "ETH/USD": make_frame(np.linspace(200, 100, 250), daily_range=0.04),
+        "SOL/USD": make_frame(np.linspace(200, 100, 250), daily_range=0.06),
+        "DOGE/USD": make_frame(np.linspace(200, 100, 250), daily_range=0.06),
+        "UNI/USD": make_frame(np.linspace(200, 100, 250), daily_range=0.06),
+    }
+    orders, _, view = generate_orders(frames, _new_book())
+    assert view["market"]["label"] == "CHOP"
+    assert {o["symbol"] for o in orders if o["side"] == "buy"} == {"BTC"}
+
+
+def test_entries_limited_to_entry_universe_but_held_alts_still_managed():
+    frames = {
+        "BTC/USD": make_frame(wavy_uptrend(), daily_range=0.03),
+        "UNI/USD": make_frame(wavy_uptrend(), daily_range=0.06),
+        "DOGE/USD": make_frame(np.linspace(200, 100, 250), daily_range=0.06),
+    }
+    book = _new_book()
+    book["cash"] = 875.0
+    book["positions"]["DOGE/USD"] = {
+        "units": [{"dollars": 125.0, "price": 150.0, "qty": 125.0 / 150.0}],
+        "anchor": 150.0, "step": 0.05,
+    }
+    orders, _, _ = generate_orders(frames, book)
+    bought = {o["symbol"] for o in orders if o["side"] == "buy"}
+    assert "BTC" in bought
+    assert "UNI" not in bought                 # uptrend, but outside ENTRY_UNIVERSE
+    sells = [o for o in orders if o["side"] == "sell" and o["symbol"] == "DOGE"]
+    assert sells and sells[0]["kind"] == "exit"  # held alt still gets its trend exit
 
 
 def test_daily_loss_circuit_breaker_blocks_new_buys():
@@ -145,12 +208,13 @@ def test_daily_loss_circuit_breaker_blocks_new_buys():
     assert not any(order["side"] == "buy" for order in orders)
 
 
-def test_positions_capped_at_max():
+def test_positions_capped_at_max(monkeypatch):
     frames = {
         f"C{i}/USD": make_frame(wavy_uptrend(), daily_range=0.05)
         for i in range(6)
     }
     frames["BTC/USD"] = make_frame(wavy_uptrend(), daily_range=0.03)
+    monkeypatch.setattr(crypto_advisor, "ENTRY_UNIVERSE", list(frames))
     live = _new_book()
     orders, sim, _ = generate_orders(frames, live)
     assert live["positions"] == {}
@@ -230,8 +294,10 @@ def test_live_hard_stop_beats_daily_strategy():
         "units": [{"dollars": 400, "price": 100, "qty": 4}],
         "anchor": 100, "step": 0.05, "avg_cost": 100, "peak_price": 100,
     }
+    # range30 = 5% -> hard stop 3x = 15%; 84 is through it, and the daily
+    # trend (still up) must not override the live rule.
     orders, _, _ = generate_orders(
-        frames, book, live_prices={"SOL/USD": 91}, live_quote_fresh=True,
+        frames, book, live_prices={"SOL/USD": 84}, live_quote_fresh=True,
     )
     sells = [o for o in orders if o["symbol"] == "SOL" and o["side"] == "sell"]
     assert len(sells) == 1
@@ -258,7 +324,7 @@ def test_stale_quote_on_one_pair_does_not_block_other_risk():
     now = datetime.now(timezone.utc)
     orders, _, view = generate_orders(
         frames, book,
-        live_prices={"SOL/USD": 91, "SHIB/USD": shib_px},
+        live_prices={"SOL/USD": 84, "SHIB/USD": shib_px},
         quote_at_by_pair={
             "SOL/USD": now.isoformat(),
             "SHIB/USD": (now - timedelta(minutes=10)).isoformat(),
@@ -575,7 +641,8 @@ def test_trim_proceeds_rotate_into_relative_strength():
     frames = {
         "XRP/USD": make_frame(xrp, daily_range=0.05),
         "ETH/USD": make_frame(eth, daily_range=0.04),
-        "BTC/USD": make_frame(np.linspace(80_000, 50_000, 250), daily_range=0.03),
+        # BTC in its own uptrend: not a BEAR label, so rotation buys are allowed.
+        "BTC/USD": make_frame(wavy_uptrend(), daily_range=0.03),
     }
     xrp_px = float(xrp[-1])
     eth_px = float(eth[-1])
@@ -599,6 +666,27 @@ def test_trim_proceeds_rotate_into_relative_strength():
     assert rotates
     assert "재배치" in rotates[0]["reason"]
     assert not any(o["side"] == "buy" and o["symbol"] == "XRP" for o in orders)
+
+
+def test_trim_proceeds_do_not_rotate_in_a_bear():
+    """Same setup with BTC below its 50EMA: trim still happens, buys don't."""
+    xrp = np.linspace(2.0, 1.0, 250)
+    frames = {
+        "XRP/USD": make_frame(xrp, daily_range=0.05),
+        "ETH/USD": make_frame(wavy_uptrend(), daily_range=0.04),
+        "BTC/USD": make_frame(np.linspace(80_000, 50_000, 250), daily_range=0.03),
+    }
+    xrp_px = float(xrp[-1])
+    book = _new_book()
+    book["cash"] = 745.0
+    book["positions"]["XRP/USD"] = {
+        "units": [{"dollars": 5000 * xrp_px, "price": xrp_px, "qty": 5000.0}],
+        "anchor": xrp_px, "step": 0.05, "avg_cost": 1.80,
+    }
+    orders, _, view = generate_orders(frames, book)
+    assert view["market"]["label"] == "BEAR"
+    assert any(o["kind"] == "trim" and o["symbol"] == "XRP" for o in orders)
+    assert not any(o["side"] == "buy" for o in orders)
 
 
 def test_confirm_uses_actual_dollars_not_recommendation():
@@ -900,6 +988,50 @@ def test_merge_pending_requeues_denied_after_24h():
     assert len(active) == 1
     assert active[0]["id"] != "a"
     assert any(o.get("status") == "denied" and o["id"] == "a" for o in merged)
+
+
+def test_stop_out_blocks_rebuy_for_days_not_hours():
+    from app.crypto_advisor import _merge_pending, _recently_confirmed_actions
+
+    two_days_ago = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+    old = [
+        {"id": "s1", "side": "sell", "symbol": "SOL", "pair": "SOL/USD",
+         "kind": "trailing_stop", "dollars": 900, "status": "confirmed",
+         "confirmed_at": two_days_ago},
+        {"id": "t1", "side": "sell", "symbol": "XRP", "pair": "XRP/USD",
+         "kind": "trim", "dollars": 300, "status": "confirmed",
+         "confirmed_at": two_days_ago},
+    ]
+    recent = _recently_confirmed_actions(old)
+    assert ("buy", "SOL") in recent          # full exit: 5-day re-entry cooldown
+    assert ("buy", "XRP") not in recent      # partial trim: only the 24h rule
+    fresh = [
+        {"id": "b1", "side": "buy", "symbol": "SOL", "pair": "SOL/USD", "kind": "entry", "dollars": 1000},
+        {"id": "b2", "side": "buy", "symbol": "XRP", "pair": "XRP/USD", "kind": "entry", "dollars": 1000},
+    ]
+    active = [o for o in _merge_pending(old, fresh) if o.get("status") == "pending" or o.get("status") is None]
+    assert {o["symbol"] for o in active} == {"XRP"}
+
+    old[0]["confirmed_at"] = (datetime.now(timezone.utc) - timedelta(days=6)).isoformat()
+    assert ("buy", "SOL") not in _recently_confirmed_actions(old)
+
+
+def test_apply_order_keeps_avg_cost_so_hard_stop_arms_for_app_buys():
+    from app.crypto_risk import evaluate_position
+
+    book = _new_book()
+    entry = {"side": "buy", "symbol": "SOL", "pair": "SOL/USD", "kind": "entry",
+             "price": 100.0, "step": 0.05, "hard_pct": 0.10, "trail_pct": 0.15}
+    apply_order(book, entry, 500.0)
+    pos = book["positions"]["SOL/USD"]
+    assert pos["avg_cost"] == pytest.approx(100.0)
+    assert pos["hard_pct"] == 0.10 and pos["trail_pct"] == 0.15
+    assert pos["peak_close"] == pytest.approx(100.0)
+
+    apply_order(book, {**entry, "kind": "add", "price": 80.0}, 400.0)
+    assert pos["avg_cost"] == pytest.approx(900.0 / (5.0 + 5.0))
+    # -10% hard stop measured from the blended basis (90): 80 is through it.
+    assert evaluate_position("SOL/USD", pos, 80.0)["kind"] == "hard_stop"
 
 
 def test_generate_orders_no_add_and_rotate_same_symbol():

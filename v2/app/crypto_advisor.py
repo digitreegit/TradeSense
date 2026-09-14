@@ -31,6 +31,8 @@ from .crypto_risk import (
     quote_is_fresh,
     risk_levels,
     rolling_drop,
+    stop_widths,
+    sync_daily_risk,
 )
 from .indicators import ema, rsi, sma
 from .notify import send
@@ -48,6 +50,11 @@ CANDIDATES = [
 BUDGET = 1000.0
 MAX_POSITIONS = 4
 MAX_UNITS = 2          # per coin: initial entry + one add on the dip
+# Coins the strategy may buy (new entry, dip add, rotate). Held coins outside
+# this list are still managed — stops and trend exit — they just never get
+# bought again. 2024-03..2026-09 replay (scripts/replay_crypto_live.py):
+# all 12 coins -45%..-67%, these three -8%, BTC/ETH hold +23%/-28%.
+ENTRY_UNIVERSE: list[str] = ["BTC/USD", "ETH/USD", "SOL/USD"]
 BOOK_KEY = "crypto_book"
 PENDING_KEY = "crypto_pending"
 NOTIFY_FP_KEY = "crypto_notify_fp"
@@ -61,6 +68,9 @@ TRANSIENT_LOCK_AFTER = 4
 CACHE_TTL = 900.0      # panel refresh window; scheduled runs bypass it
 LIVE_CACHE_TTL = 45.0  # when Robinhood API is linked, refresh more often
 CONFIRM_COOLDOWN_HOURS = 24.0  # don't re-queue same side+symbol after confirm
+# After a stop-out / trend exit, do not buy the same coin back for this long.
+# 24h re-entries at the same price were paying the spread twice for nothing.
+STOP_COOLDOWN_HOURS = 24.0 * 5
 
 MIN_STEP = 0.04        # never advise a step tighter than 4%
 MAX_STEP = 0.12
@@ -70,10 +80,16 @@ TRIM_FRACTION_UP = 0.20
 MAX_TRIM = 0.50        # never dump more than half a bag in one check
 DUST_MIN = 50.0        # positions below this are consolidated when not trending up
 MIN_UNIT = 25.0
-BEAR_SIZE = 0.75       # recovery: deploy 75% size in a bear, not half
+BEAR_SIZE = 0.75       # unit size multiplier when BEAR buys are allowed
+# Open/add positions while BTC is below its 50EMA? Replay 2024-03..2026-09:
+# "uptrend" entries taken inside a BTC downtrend were dead-cat bounces;
+# sitting in cash there is what preserved capital.
+BEAR_ALLOW_BUYS = False
 CASH_FLOOR = 0.15      # keep 15% cash; the rest can work
 RSI_MAX = 75.0         # skip only clearly overbought strength
-GRID_TAKE_PROFIT_ENABLED = True  # research switch; do not tune on one window
+# Sell the last unit at +step. Off: the replay (scripts/replay_crypto_live.py)
+# showed it capped winners while the stops still took losers in full.
+GRID_TAKE_PROFIT_ENABLED = False
 NO_AVERAGEDOWN = 0.15  # never add if price is >15% below original avg cost
 SCHEDULE = "24시간 15분 간격 점검 · 거래 필요할 때만 텔레그램 · 00–06시 알림 조용"
 QUIET_START_HOUR = 0   # inclusive ET
@@ -164,6 +180,19 @@ def _new_book() -> dict:
     }
 
 
+def sync_book_daily_risk(book: dict, frames: dict[str, pd.DataFrame],
+                         metrics: dict[str, dict] | None = None) -> None:
+    """Refresh per-coin stop widths and the daily-close peak on every held
+    position from the newest completed bar. Mutates `book` in place."""
+    for pair, pos in (book.get("positions") or {}).items():
+        df = frames.get(pair)
+        m = (metrics or {}).get(pair) or (_coin_metrics(df) if df is not None else None)
+        last_close = float(df["close"].iloc[-1]) if df is not None and len(df) else None
+        sync_daily_risk(
+            pos, range30=(m or {}).get("range30"), last_close=last_close,
+        )
+
+
 def _underwater(pos: dict, price: float) -> bool:
     """True when adding would be averaging down a deep original loss."""
     avg = pos.get("avg_cost")
@@ -176,8 +205,10 @@ def _market_state(metrics: dict[str, dict]) -> tuple[str, str]:
     breadth = ups / len(metrics) if metrics else 0.0
     if btc and btc["trend"] == "up" and breadth >= 0.5:
         return "BULL", "강세 — BTC 상승 추세, 시장 폭 양호"
-    if (btc and btc["trend"] == "down") or breadth < 0.25:
-        return "BEAR", "약세 — 물타기 금지, 하락 편중은 축소, 강세 상대강도로만 재배치"
+    # BEAR follows BTC's own trend. Alt breadth alone used to flip the label
+    # and block BTC entries in early recoveries (replay: -11% -> -8%).
+    if (btc and btc["trend"] == "down") or (btc is None and breadth < 0.25):
+        return "BEAR", "약세 — BTC 하락 추세, 신규 매수 중단·현금 보유"
     return "CHOP", "혼조 — 상승 추세 코인만 제한적으로"
 
 
@@ -204,6 +235,8 @@ def _idle_reasons(
     )
     floor = CASH_FLOOR * total_value if total_value > 0 else 0.0
     daily = book.get("risk_day") or {}
+    if not BEAR_ALLOW_BUYS and _market_state(metrics)[0] == "BEAR":
+        reasons.append("약세장(BTC 일봉 50EMA 아래) — 신규·추가 매수 중단, 현금 보유")
     if daily.get("buy_halted"):
         reasons.append(
             f"일중 손실 {float(daily.get('change_pct') or 0):.1%}로 신규 매수만 차단"
@@ -247,7 +280,8 @@ def _idle_reasons(
             cooled.append(str(key[1]))
     if cooled:
         reasons.append(
-            "최근 24시간 내 실행한 종목은 재추천 안 함: " + ", ".join(dict.fromkeys(cooled))
+            "쿨다운 중(실행 후 24시간 · 손절/추세 이탈 후 5일) 재추천 안 함: "
+            + ", ".join(dict.fromkeys(cooled))
         )
     denied = [
         str(o.get("symbol"))
@@ -292,6 +326,9 @@ def generate_orders(
     bear = label == "BEAR"
     orders: list[dict] = []
     sim = copy.deepcopy(book)
+    # Stop widths / daily-close peak from completed bars (copy only; the
+    # caller persists the same sync on the real book).
+    sync_book_daily_risk(sim, frames, metrics)
 
     def _pos_value(pos: dict, sym: str) -> float:
         m = metrics.get(sym)
@@ -391,6 +428,8 @@ def generate_orders(
         elif (
             price <= pos["anchor"] * (1 - step)
             and len(pos["units"]) < MAX_UNITS
+            and (BEAR_ALLOW_BUYS or not bear)
+            and sym in ENTRY_UNIVERSE
             and sim["cash"] - floor >= unit
             and not (book.get("risk_day") or {}).get("buy_halted")
             and not _underwater(pos, price)
@@ -404,6 +443,8 @@ def generate_orders(
     def _can_deploy(new_slot: bool) -> bool:
         if (book.get("risk_day") or {}).get("buy_halted"):
             return False
+        if bear and not BEAR_ALLOW_BUYS:
+            return False
         if sim["cash"] - floor < unit:
             return False
         if new_slot and len(sim["positions"]) >= MAX_POSITIONS:
@@ -416,6 +457,7 @@ def generate_orders(
         (
             (sym, metrics[sym]) for sym in sim["positions"]
             if metrics.get(sym)
+            and sym in ENTRY_UNIVERSE
             and _entry_quality(metrics[sym])
             and sym not in sold_this_run
             and sym not in bought_this_run
@@ -436,6 +478,7 @@ def generate_orders(
         (
             (sym, m) for sym, m in metrics.items()
             if sym not in sim["positions"] and sym not in sold_this_run
+            and sym in ENTRY_UNIVERSE
             and _entry_quality(m)
         ),
         key=lambda x: x[1]["ret30"], reverse=True,
@@ -449,7 +492,8 @@ def generate_orders(
         why = "원금 회복 — 상승 추세 진입"
         if bear:
             why += " · 약세장 축소 크기"
-        _order("buy", sym, unit, m["price"], why, "entry", step)
+        _order("buy", sym, unit, m["price"], why, "entry", step,
+               **stop_widths(m["range30"]))
         apply_order(sim, orders[-1], unit)
 
     sim["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -471,6 +515,16 @@ def generate_orders(
     return orders, sim, view
 
 
+def _refresh_avg_cost(pos: dict) -> None:
+    """Keep `avg_cost` (the hard-stop and no-average-down basis) in step with
+    the units. Positions bought through the app used to have no avg_cost at
+    all, so the -8% hard stop never armed for them."""
+    qty = sum(float(u.get("qty") or 0) for u in pos.get("units") or [])
+    cost = sum(float(u.get("dollars") or 0) for u in pos.get("units") or [])
+    if qty > 0 and cost > 0:
+        pos["avg_cost"] = cost / qty
+
+
 def apply_order(book: dict, order: dict, dollars: float) -> None:
     """Apply one fill to the book at `order['price']` for `dollars` notional."""
     dollars = float(dollars)
@@ -486,11 +540,15 @@ def apply_order(book: dict, order: dict, dollars: float) -> None:
         if pair not in book["positions"]:
             book["positions"][pair] = {
                 "units": [], "anchor": price, "step": step,
-                "peak_price": price, "initial_risk_qty": 0.0,
-                "profit_tiers_taken": [],
+                "peak_price": price, "peak_close": price,
+                "initial_risk_qty": 0.0, "profit_tiers_taken": [],
             }
+            for key in ("hard_pct", "trail_pct"):
+                if float(order.get(key) or 0) > 0:
+                    book["positions"][pair][key] = float(order[key])
         pos = book["positions"][pair]
         pos["units"].append({"dollars": dollars, "price": price, "qty": qty})
+        _refresh_avg_cost(pos)
         pos["peak_price"] = max(float(pos.get("peak_price") or price), price)
         if float(pos.get("initial_risk_qty") or 0) <= 0:
             pos["initial_risk_qty"] = sum(float(u.get("qty") or 0) for u in pos["units"])
@@ -510,6 +568,8 @@ def apply_order(book: dict, order: dict, dollars: float) -> None:
         pos["anchor"] = pos["anchor"] * (1 + pos["step"])
         if not pos["units"]:
             del book["positions"][pair]
+        else:
+            _refresh_avg_cost(pos)
         return
     if kind in ("trim", "profit_stage"):
         # partial sell: reduce every unit proportionally, anchor unchanged
@@ -652,6 +712,15 @@ def _recently_confirmed_actions(orders: list[dict]) -> set[tuple]:
             continue
         if _is_recent(o.get("confirmed_at")):
             out.add(_cooldown_key(o))
+        # A full exit (stop / trend-off) also blocks buying the coin back
+        # for STOP_COOLDOWN_HOURS — otherwise the 24h cycle re-enters at the
+        # same price and pays the spread again.
+        if (
+            o.get("side") == "sell"
+            and o.get("kind") in FULL_EXIT_KINDS
+            and _is_recent(o.get("confirmed_at"), STOP_COOLDOWN_HOURS)
+        ):
+            out.add(("buy", o.get("symbol")))
     return out
 
 
@@ -1096,6 +1165,10 @@ def advise_and_apply(force: bool = False) -> dict:
         if not frames:
             raise RuntimeError("no crypto bars returned")
         book = store.get(BOOK_KEY) or _new_book()
+        # Persist per-coin stop widths and the daily-close trailing peak so the
+        # 15-minute live risk checks in the next tick use them too.
+        sync_book_daily_risk(book, frames)
+        store.set(BOOK_KEY, book)
         pending_old = store.get(PENDING_KEY) or []
         recent = _recently_confirmed_actions(pending_old)
         quote_at_by_pair = dict((rh_live or {}).get("quote_at_by_pair") or {})
@@ -1167,7 +1240,8 @@ def advise_and_apply(force: bool = False) -> dict:
             notes = list(view.get("idle_reasons") or [])
             if recent:
                 coins = [str(k[1]) for k in recent if len(k) >= 2]
-                msg = "최근 24시간 내 실행한 종목은 재추천 안 함: " + ", ".join(dict.fromkeys(coins))
+                msg = ("쿨다운 중(실행 후 24시간 · 손절/추세 이탈 후 5일) 재추천 안 함: "
+                       + ", ".join(dict.fromkeys(coins)))
                 if coins and msg not in notes:
                     notes.append(msg)
             view["idle_reasons"] = notes[:6]

@@ -84,7 +84,17 @@ DIP_PROFIT_TARGET = 0.04        # lock a 4% rebound; momentum keeps running
 DIP_ENTRY_MIN_VOLUME_RATIO = 1.0  # ignore low-participation dips
 DIP_MAX_HOLD_DAYS = 10
 DIP_STOP_ATR = 2.5
-DIP_MAX_POSITIONS = 2
+# One dip slot, not two: 2024-2026 backtest at $500 was the same CAGR
+# (34.9% vs 34.6%) with 18% fewer trades and a smaller drawdown. On a small
+# account every extra round trip is spread paid for nothing.
+DIP_MAX_POSITIONS = 1
+
+# Intraday (30-min) stop checks are not in the backtest, which only sees
+# closes. Require the breach to persist across consecutive checks before
+# selling so a single spike does not knock out a position the daily logic
+# would have kept; sell immediately when price is far through the stop.
+INTRADAY_STOP_CONFIRM_CHECKS = 2
+INTRADAY_STOP_HARD_BREACH = 0.03   # 3% below the stop: no waiting
 
 # A very long upper wick on >=2x normal volume marks a failed rally. This is
 # deliberately rare and applies only to momentum positions.
