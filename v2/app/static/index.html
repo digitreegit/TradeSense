@@ -1,741 +1,283 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TradeSense v3</title>
-<link rel="icon" href="/favicon.png?v=4" type="image/png" sizes="any">
-<link rel="icon" href="/favicon.svg?v=4" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/favicon.png?v=4">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TradeSense v4 — Grid</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/png" href="/favicon.png">
 <style>
   :root {
-    --bg: #0d1117; --panel: #161b22; --border: #21262d;
+    --bg: #0d1117; --panel: #161b22; --panel2: #1c2128; --border: #21262d;
     --text: #e6edf3; --dim: #8b949e;
     --green: #3fb950; --red: #f85149; --amber: #d29922; --blue: #58a6ff;
   }
   * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
   body {
     background: var(--bg); color: var(--text);
     font: 14px/1.5 -apple-system, 'SF Pro', Segoe UI, sans-serif;
-    margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+    display: flex; flex-direction: column; min-height: 100vh;
   }
-  .topbar {
-    display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
-    padding: 16px 24px 0; flex-shrink: 0;
-    width: 100%; max-width: 1008px; margin: 0 auto;
-  }
-  .topbar-main { min-width: 0; }
-  h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
-  .sub { color: var(--dim); font-size: 12px; }
-  .icon-bar { display: flex; gap: 8px; flex-shrink: 0; }
-  .icon-btn {
-    position: relative; width: 40px; height: 40px; border-radius: 10px;
-    border: 1px solid var(--border); background: var(--panel); color: var(--text);
-    cursor: pointer; display: flex; align-items: center; justify-content: center;
-    transition: background .15s, border-color .15s;
-  }
-  .icon-btn:hover { background: #1c2128; border-color: #30363d; }
-  .icon-btn.active { background: #1c2128; border-color: var(--blue); color: var(--blue); }
-  .icon-btn svg { width: 20px; height: 20px; }
-  .icon-btn.labeled { width: auto; padding: 0 12px; gap: 6px; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
-  .icon-btn.labeled svg { width: 18px; height: 18px; color: #f0b90b; }
-  .hero-icon { width: 18px; height: 18px; flex: 0 0 auto; vertical-align: -3px; }
-  .inline-icon { display: inline-block; margin-left: 5px; }
-  .badge {
-    position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px;
-    padding: 0 5px; border-radius: 999px; background: var(--blue); color: #fff;
-    font-size: 10px; font-weight: 700; line-height: 18px; text-align: center;
-    display: none;
-  }
-  .badge.show { display: block; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
-  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
-  .card .label { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
-  .card .value { font-size: 22px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
-  .green { color: var(--green); } .red { color: var(--red); } .amber { color: var(--amber); } .blue { color: var(--blue); }
-  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
-  .panel h2 { font-size: 13px; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 10px; }
+  .wrap { width: 100%; max-width: 1008px; margin: 0 auto; padding: 0 20px 40px; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 0 12px; }
+  h1 { font-size: 20px; font-weight: 700; }
+  h1 .blue { color: var(--blue); }
+  .tabs { display: flex; gap: 6px; }
+  .tab { border: 1px solid var(--border); background: var(--panel); color: var(--dim); padding: 7px 14px; border-radius: 999px; cursor: pointer; font-weight: 600; font-size: 13px; }
+  .tab.active { color: var(--text); border-color: var(--blue); background: var(--panel2); }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+  .panel h2 { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 10px; }
+  .panel h3 { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .spread { justify-content: space-between; }
+  .hint { color: var(--dim); font-size: 12px; line-height: 1.5; }
+  .stat { min-width: 120px; }
+  .stat .label { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+  .stat .value { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 10px 0 12px; }
+  .green { color: var(--green); } .red { color: var(--red); } .amber { color: var(--amber); } .blue { color: var(--blue); } .dim { color: var(--dim); }
+  .pill { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; vertical-align: middle; }
+  .pill.on { background: #12351f; color: var(--green); }
+  .pill.off { background: #3d1d1d; color: var(--red); }
+  .pill.wait { background: #3b2e1a; color: var(--amber); }
+  .pill.idle { background: #262c36; color: var(--dim); }
+  .pill.buy { background: #12351f; color: var(--green); }
+  .pill.sell { background: #3d1d1d; color: var(--red); }
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-  th { text-align: left; color: var(--dim); font-size: 11px; font-weight: 500; padding: 4px 8px; border-bottom: 1px solid var(--border); }
-  td { padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  th { text-align: left; color: var(--dim); font-size: 11px; font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 8px; border-bottom: 1px solid var(--border); font-size: 13px; white-space: nowrap; }
   tr:last-child td { border-bottom: none; }
-  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
-  .pill.momentum { background: #1f3a5f; color: var(--blue); }
-  .pill.dip { background: #3b2e1a; color: var(--amber); }
-  .pill.crypto { background: #2a1f3f; color: #bc8cff; }
-  .pill.legacy { background: #3d1d1d; color: var(--amber); }
-  .pill.BULL { background: #12351f; color: var(--green); }
-  .pill.CHOP { background: #3b2e1a; color: var(--amber); }
-  .pill.BEAR { background: #3d1d1d; color: var(--red); }
-  .pill.defensive { background: #1f3a2f; color: #56d364; }
-  .empty { color: var(--dim); font-size: 13px; padding: 8px; }
-  #err {
-    background: #3d1d1d; color: var(--red); padding: 10px 14px; border-radius: 8px;
-    margin-bottom: 16px; display: none;
-    width: 100%; max-width: 960px; margin-left: auto; margin-right: auto;
-  }
-
-  /* overlays */
-  .overlay {
-    position: fixed; inset: 0; background: rgba(1, 4, 9, .72); z-index: 100;
-    display: none; align-items: flex-start; justify-content: center; padding: 24px 16px;
-    overflow-y: auto;
-  }
+  .num { text-align: right; }
+  th.num { text-align: right; }
+  .table-scroll { overflow-x: auto; }
+  .rungs { display: inline-flex; gap: 2px; vertical-align: middle; margin-right: 6px; }
+  .rung { width: 8px; height: 14px; border-radius: 2px; background: var(--border); }
+  .rung.filled { background: var(--blue); }
+  .empty { color: var(--dim); padding: 14px 4px; text-align: center; font-size: 13px; }
+  .btn { border: 1px solid var(--border); background: var(--panel2); color: var(--text); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px; }
+  .btn:hover { border-color: #30363d; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn-primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  .btn-danger { background: #3d1d1d; border-color: #5a2424; color: #ffb3ad; }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+  .input { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 9px 11px; border-radius: 8px; font-size: 14px; margin: 4px 0 10px; }
+  .input.short { width: 120px; margin: 0; }
+  .field-label { color: var(--dim); font-size: 12px; display: block; margin-top: 6px; }
+  .msg { min-height: 1.2em; font-size: 13px; margin-top: 8px; }
+  .msg.ok { color: var(--green); } .msg.err { color: var(--red); }
+  .err-banner { display: none; background: #3d1d1d; color: #ffb3ad; padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
+  .err-banner.show { display: block; }
+  .status-row { display: flex; align-items: center; gap: 10px; margin: 8px 0 12px; }
+  .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--dim); flex-shrink: 0; }
+  .status-dot.ok { background: var(--green); } .status-dot.err { background: var(--red); }
+  .status-text small { display: block; color: var(--dim); font-size: 12px; }
+  .activity { list-style: none; padding: 0; }
+  .activity li { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; display: flex; gap: 10px; }
+  .activity li:last-child { border-bottom: none; }
+  .activity time { color: var(--dim); font-size: 12px; white-space: nowrap; }
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.65); display: none; align-items: center; justify-content: center; padding: 20px; z-index: 50; }
   .overlay.open { display: flex; }
-  .modal {
-    width: min(520px, 100%); background: var(--panel); border: 1px solid var(--border);
-    border-radius: 14px; padding: 20px 22px; margin-top: 40px; max-height: calc(100vh - 80px);
-    overflow-y: auto; box-shadow: 0 16px 48px rgba(0,0,0,.45);
-  }
-  .modal.wide { width: min(560px, 100%); }
-  .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-  .modal-head h2 { font-size: 16px; font-weight: 700; }
-  .modal-close {
-    width: 32px; height: 32px; border: none; border-radius: 8px; background: transparent;
-    color: var(--dim); cursor: pointer; display: flex; align-items: center; justify-content: center;
-  }
-  .modal-close svg { width: 20px; height: 20px; }
-  .modal-close:hover { background: #21262d; color: var(--text); }
-  .briefing .headline { font-size: 13px; color: var(--blue); margin-bottom: 14px; font-weight: 600; }
-  .briefing-section { margin-bottom: 12px; }
-  .briefing-section h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin-bottom: 6px; }
-  .briefing-section ul { list-style: none; padding: 0; }
-  .briefing-section li { font-size: 13px; line-height: 1.55; color: var(--text); padding: 2px 0; }
-  .briefing-section li::before { content: "· "; color: var(--dim); }
-  .briefing-section li.with-icon { display: flex; align-items: flex-start; gap: 6px; }
-  .briefing-section li.with-icon::before { content: none; }
-  .briefing-section li.with-icon .hero-icon { margin-top: 2px; color: var(--blue); }
-
-  /* settings */
-  .status-row {
-    display: flex; align-items: center; gap: 10px; padding: 12px 14px;
-    border-radius: 10px; border: 1px solid var(--border); margin-bottom: 18px; background: #0d1117;
-  }
-  .status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; background: var(--dim); }
-  .status-dot.ok { background: var(--green); box-shadow: 0 0 8px rgba(63,185,80,.5); }
-  .status-dot.err { background: var(--red); }
-  .status-text { font-size: 13px; }
-  .status-text small { display: block; color: var(--dim); font-size: 12px; margin-top: 2px; }
-  .field-label {
-    font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--dim);
-    margin-bottom: 8px; display: block;
-  }
-  .field-hint { font-size: 12px; color: var(--dim); margin: -4px 0 10px; line-height: 1.45; }
-  .input {
-    display: block; width: 100%; margin: 6px 0 12px; padding: 10px 12px;
-    border-radius: 8px; border: 1px solid var(--border); background: #0d1117; color: var(--text);
-    font-size: 14px;
-  }
-  .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
-  .btn {
-    padding: 10px 16px; border-radius: 8px; border: none; font-size: 13px; font-weight: 600;
-    cursor: pointer;
-  }
-  .btn-primary { background: var(--green); color: #0d1117; }
-  .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
-  .btn-danger { background: transparent; border: 1px solid var(--red); color: var(--red); }
-  .btn-danger-fill { background: var(--red); color: #fff; }
-  .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
-  #overlay-confirm { z-index: 200; align-items: center; }
-  #overlay-confirm .modal { width: min(420px, 100%); margin-top: 0; }
-  #overlay-token { z-index: 300; align-items: center; }
-  #overlay-token .modal { width: min(420px, 100%); margin-top: 0; }
-  .confirm-copy { color: var(--dim); font-size: 13px; line-height: 1.6; margin-bottom: 18px; }
-  .confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
-  .msg { font-size: 13px; margin: 8px 0; }
-  .msg.ok { color: var(--green); }
-  .msg.err { color: var(--red); }
-  #tg-msg { display: block !important; min-height: 1.4em; }
-  .acct-list { list-style: none; padding: 0; margin: 10px 0 0; font-size: 13px; line-height: 1.7; color: var(--dim); }
-  .acct-list strong { color: var(--text); }
-  .keys-locked { font-size: 12px; color: var(--dim); line-height: 1.5; margin-top: 8px; }
-  a.link { color: var(--blue); text-decoration: none; }
-  a.link:hover { text-decoration: underline; }
-
-  /* crypto advisor */
-  .crypto-market {
-    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
-    border: 1px solid var(--border); border-radius: 10px; background: #0d1117;
-    margin: 14px 0; font-size: 13px; line-height: 1.5;
-  }
-  .crypto-order {
-    display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 14px;
-    border: 1px solid var(--border); border-radius: 10px; background: #0d1117;
-    margin-bottom: 8px; font-size: 14px;
-  }
-  .crypto-order .side {
-    flex-shrink: 0; padding: 3px 10px; border-radius: 8px;
-    font-size: 12px; font-weight: 700;
-  }
-  .crypto-order .side.buy { background: #12351f; color: var(--green); }
-  .crypto-order .side.sell { background: #3d1d1d; color: var(--red); }
-  .crypto-order .amt { font-weight: 700; font-variant-numeric: tabular-nums; }
-  .crypto-order .why { color: var(--dim); font-size: 12px; margin-left: auto; text-align: right; }
-  .crypto-order .fill {
-    display: flex; align-items: center; gap: 8px; width: 100%;
-    margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
-  }
-  .crypto-order .fill label { font-size: 12px; color: var(--dim); white-space: nowrap; }
-  .crypto-order .fill input {
-    width: 88px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border);
-    background: var(--panel); color: var(--text); font-size: 13px; font-variant-numeric: tabular-nums;
-  }
-  .crypto-order .done { font-size: 12px; color: var(--green); }
-  .crypto-order .done.denied { color: var(--amber); }
-  .crypto-recovery .principal-edit {
-    display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap;
-  }
-  .crypto-recovery .principal-edit input {
-    width: 96px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border);
-    background: var(--panel); color: var(--text); font-size: 13px; font-weight: 700;
-    font-variant-numeric: tabular-nums;
-  }
-  .crypto-summary b { color: var(--text); }
-  .crypto-recovery {
-    margin: 0 0 12px; padding: 10px 12px; border-radius: 8px;
-    border: 1px solid var(--border); background: #0d1117; font-size: 13px;
-  }
-  .crypto-recovery .bar {
-    height: 6px; border-radius: 99px; background: #21262d; margin-top: 8px; overflow: hidden;
-  }
-  .crypto-recovery .bar > span {
-    display: block; height: 100%; background: var(--green); border-radius: 99px;
-  }
-  .holding-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
-  .holding-row input, .holding-row select {
-    padding: 7px 8px; border-radius: 6px; border: 1px solid var(--border);
-    background: #0d1117; color: var(--text); font-size: 13px; min-width: 0;
-  }
-  .holding-row select { width: 84px; flex-shrink: 0; }
-  .holding-row input { flex: 1; }
-  .holding-row .rm {
-    width: 30px; height: 30px; flex-shrink: 0; border: none; border-radius: 6px;
-    background: transparent; color: var(--dim); cursor: pointer; font-size: 16px;
-  }
-  .holding-row .rm:hover { color: var(--red); }
-
-  /* v3 tabs */
-  .main-tabs {
-    display: flex; gap: 6px; margin-top: 10px;
-    overflow-x: auto; flex-wrap: nowrap;
-    -webkit-overflow-scrolling: touch;
-    max-width: 100%; scrollbar-width: none;
-  }
-  .main-tabs::-webkit-scrollbar { display: none; }
-  .main-tab {
-    padding: 8px 18px; border-radius: 8px; border: 1px solid var(--border);
-    background: transparent; color: var(--dim); cursor: pointer;
-    font-size: 13px; font-weight: 700;
-    white-space: nowrap; flex-shrink: 0;
-  }
-  .main-tab.active { background: var(--panel); color: var(--text); border-color: #30363d; }
-  .main-tab:hover:not(.active) { border-color: #30363d; color: var(--text); }
-  .tab-panel { display: none; flex: 1; overflow-y: auto; padding: 16px 24px 32px; }
-  .tab-panel.active { display: block; }
-  .upload-zone {
-    border: 2px dashed var(--border); border-radius: 10px; padding: 14px 16px;
-    text-align: center; color: var(--dim); cursor: pointer; transition: border-color .15s, background .15s;
-    font-size: 13px; max-width: 360px;
-  }
-  .upload-zone .upload-icon { margin-bottom: 6px; opacity: .6; }
-  .upload-zone .upload-hint { font-size: 11px; margin-top: 2px; color: var(--dim); }
-  .upload-zone.drag { border-color: var(--blue); background: #0d1117; color: var(--text); }
-  .upload-preview { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 2px; max-width: 360px; }
-  .upload-preview img {
-    width: 64px; height: 64px; object-fit: cover; border-radius: 6px;
-    border: 1px solid var(--border);
-  }
-  .upload-thumb { position: relative; }
-  .upload-thumb button {
-    position: absolute; top: -6px; right: -6px; width: 20px; height: 20px;
-    border-radius: 50%; border: 1px solid var(--border); background: var(--panel);
-    color: var(--dim); cursor: pointer; font-size: 14px; line-height: 1;
-  }
-  .upload-thumb button:hover { color: var(--red); border-color: var(--red); }
-  .parsed-note {
-    margin: 0 0 12px; padding: 10px 12px; border-radius: 8px;
-    border: 1px solid var(--border); background: #0d1117; font-size: 13px; color: var(--dim);
-  }
-  .section-head {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 12px; margin-bottom: 8px;
-  }
-  .section-head h3 { margin: 0; }
-  .btn-sm { padding: 6px 12px; font-size: 12px; }
-  .settings-section { margin-bottom: 4px; }
-  .settings-section h3 { font-size: 14px; margin: 0 0 8px; font-weight: 700; }
-  .rh-status { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 13px; }
-  .rh-keys { display: grid; gap: 8px; max-width: 420px; margin-top: 10px; }
-  .rh-keys .input { width: 100%; }
-  .crypto-toolbar { padding: 0 0 8px; }
-  .settings-page-title { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
-  #tab-settings .upload-zone,
-  #tab-settings .upload-preview { max-width: 480px; }
-  #tab-settings .rh-keys { max-width: 480px; }
-
-  /* Shared dashboard width: stocks, crypto, and settings use the same centered rail. */
-  .crypto-toolbar,
-  #crypto-body,
-  .rh-wrap,
-  .stocks-wrap,
-  .settings-wrap {
-    width: 100%;
-    max-width: 960px;
-    margin-left: auto;
-    margin-right: auto;
-  }
-
-  /* Robinhood-style portfolio (dark theme) */
-  .rh-portfolio { padding: 4px 0 18px; }
-  .rh-total {
-    font-size: 40px; font-weight: 700; letter-spacing: -.02em;
-    font-variant-numeric: tabular-nums; line-height: 1.08;
-  }
-  .rh-day { font-size: 15px; font-weight: 600; margin-top: 6px; font-variant-numeric: tabular-nums; }
-  .rh-live {
-    font-size: 12px; color: var(--dim); margin-top: 8px;
-    display: flex; align-items: center; gap: 6px;
-  }
-  .rh-scope { font-size: 11px; color: var(--dim); margin-top: 4px; line-height: 1.4; }
-  .rh-live-dot {
-    width: 7px; height: 7px; border-radius: 50%; background: var(--green);
-    box-shadow: 0 0 6px rgba(63,185,80,.55);
-  }
-  .rh-row {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 14px 0; border-bottom: 1px solid var(--border); font-size: 15px;
-  }
-  .rh-row .rh-row-val { font-variant-numeric: tabular-nums; font-weight: 600; }
-  .rh-hint { font-size: 12px; color: var(--dim); font-weight: 400; }
-  .rh-warn {
-    margin-top: 10px; padding: 10px 12px; border-radius: 8px;
-    background: rgba(210,153,34,.12); color: var(--amber); font-size: 12px; line-height: 1.4;
-  }
-  .rh-tag { font-size: 11px; font-weight: 500; color: var(--dim); }
-  .rh-sync {
-    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
-    margin: 12px 0 4px; padding: 12px; border-radius: 10px;
-    background: rgba(88,166,255,.08); border: 1px solid rgba(88,166,255,.2);
-  }
-  .rh-sync label { font-size: 12px; color: var(--dim); margin-right: 4px; }
-  .rh-sync input {
-    width: 120px; padding: 6px 8px; border-radius: 6px;
-    border: 1px solid var(--border); background: var(--panel); color: var(--text);
-    font-variant-numeric: tabular-nums;
-  }
-  .rh-section { margin-top: 22px; }
-  .rh-section-head h3 { font-size: 20px; font-weight: 700; margin: 0 0 4px; }
-  .rh-section-sub { font-size: 12px; color: var(--dim); margin-bottom: 10px; }
-  .rh-holding {
-    display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
-    align-items: center; gap: 10px; padding: 13px 0;
-    border-bottom: 1px solid var(--border);
-  }
-  .rh-sym { font-size: 16px; font-weight: 700; }
-  .rh-qty { font-size: 13px; color: var(--dim); margin-top: 2px; font-variant-numeric: tabular-nums; }
-  .rh-spark { display: block; flex-shrink: 0; }
-  .rh-price-pill {
-    padding: 8px 14px; border-radius: 999px; font-size: 15px; font-weight: 700;
-    font-variant-numeric: tabular-nums; min-width: 76px; text-align: center;
-  }
-  .rh-price-pill.up { background: rgba(63,185,80,.2); color: var(--green); }
-  .rh-price-pill.down { background: rgba(248,81,73,.2); color: var(--red); }
-  .rh-advisor {
-    margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--border);
-  }
-  .rh-advisor h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin-bottom: 10px; }
-  .rh-orders-note {
-    font-size: 12px; color: var(--dim); margin: -4px 0 10px; line-height: 1.45;
-  }
-
-  /* scrollable / card tables */
-  .table-scroll {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    margin: 0 -2px;
-  }
-  .table-scroll table { min-width: 100%; }
-
-  /* stocks · Alpaca */
-  #tab-stocks .card .value {
-    display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px;
-  }
-  #tab-stocks .chart-panel { padding-bottom: 12px; }
-  #chart {
-    display: block; width: 100%; height: 220px;
-    max-height: 42vw; min-height: 160px;
-  }
-
+  .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px; width: 100%; max-width: 420px; }
+  .modal h2 { font-size: 16px; margin-bottom: 8px; }
+  .tab-panel { display: none; } .tab-panel.active { display: block; }
+  .link { color: var(--blue); text-decoration: none; }
   @media (max-width: 640px) {
-    .topbar {
-      flex-wrap: wrap; gap: 10px;
-      padding: 12px 16px 0;
-      padding-left: max(16px, env(safe-area-inset-left));
-      padding-right: max(16px, env(safe-area-inset-right));
-    }
-    h1 { font-size: 18px; }
-    .topbar-main { flex: 1 1 100%; min-width: 0; }
-    .main-tab { padding: 7px 12px; font-size: 12px; }
-    .tab-panel {
-      padding: 12px 16px 28px;
-      padding-bottom: max(28px, env(safe-area-inset-bottom));
-    }
-    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-    .card { padding: 12px 14px; }
-    .card .label { font-size: 10px; }
-    .card .value { font-size: 18px; }
-    .panel { padding: 14px; margin-bottom: 12px; }
-    .panel h2 { font-size: 12px; margin-bottom: 8px; }
-    .crypto-toolbar { flex-direction: column; align-items: stretch !important; gap: 8px; }
-    .crypto-toolbar .field-hint { line-height: 1.4; }
-    .rh-total { font-size: 34px; }
-    .rh-holding { gap: 8px; padding: 12px 0; }
-    .rh-price-pill { min-width: 68px; padding: 7px 10px; font-size: 14px; }
-
-    /* card-style tables on narrow screens */
-    .table-cards table { min-width: 0; border-collapse: separate; border-spacing: 0; }
-    .table-cards thead { display: none; }
-    .table-cards tbody tr {
-      display: block; margin-bottom: 10px; padding: 10px 12px;
-      border: 1px solid var(--border); border-radius: 10px; background: #0d1117;
-    }
-    .table-cards tbody tr:last-child { margin-bottom: 0; }
-    .table-cards td {
-      display: flex; justify-content: space-between; align-items: flex-start;
-      gap: 12px; padding: 5px 0; border-bottom: none; font-size: 13px;
-    }
-    .table-cards td::before {
-      content: attr(data-label); color: var(--dim); font-size: 11px;
-      font-weight: 500; flex-shrink: 0; padding-top: 1px;
-    }
-    .table-cards td > * { text-align: right; }
-    .table-cards td:last-child { padding-bottom: 0; }
-    .table-cards td:first-child { padding-top: 0; }
+    .topbar { flex-direction: column; align-items: flex-start; }
+    .stat .value { font-size: 16px; }
   }
-
-  .trade-toggle { appearance:none; width:42px; height:24px; border:1px solid #64748b; border-radius:20px; background:#475569; position:relative; cursor:pointer; flex-shrink:0; }
-  .trade-toggle::before { content:""; position:absolute; width:18px; height:18px; top:2px; left:2px; border-radius:50%; background:white; transition:transform .15s; }
-  .trade-toggle:checked { background:#16834b; border-color:#16834b; }
-  .trade-toggle:checked::before { transform:translateX(18px); }
-  .trade-toggle:focus-visible { outline:2px solid #60a5fa; outline-offset:3px; }
-  .trade-toggle:disabled { opacity:.5; cursor:wait; }
 </style>
 </head>
 <body>
-
-<div class="topbar">
-  <div class="topbar-main">
-    <h1>TradeSense <span class="blue">v3</span></h1>
-    <nav class="main-tabs" role="tablist" aria-label="메인 탭">
-      <button type="button" class="main-tab active" data-tab="crypto" role="tab" aria-selected="true">크립토 · 로빈후드</button>
-      <button type="button" class="main-tab" data-tab="stocks" role="tab" aria-selected="false">주식 · Alpaca 자동</button>
-    </nav>
+<div class="wrap">
+  <div class="topbar">
+    <div>
+      <h1>TradeSense <span class="blue">v4</span> <span class="hint">· 그리드</span></h1>
+      <div class="hint">x% 내리면 1칸 매수, x% 오르면 1칸 매도. 크립토 Robinhood · 주식 Alpaca · 전부 자동</div>
+    </div>
+    <div class="row">
+      <nav class="tabs" role="tablist">
+        <button type="button" class="tab active" data-tab="grid" role="tab">그리드</button>
+        <button type="button" class="tab" data-tab="settings" role="tab">설정</button>
+      </nav>
+      <button type="button" class="btn btn-sm" id="btn-refresh">새로고침</button>
+    </div>
   </div>
-  <div class="icon-bar">
-    <button type="button" class="icon-btn" id="btn-activity" title="오늘의 액티비티" aria-label="오늘의 액티비티">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022 23.848 23.848 0 0 0 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"/>
-      </svg>
-      <span class="badge" id="activity-badge">0</span>
-    </button>
-    <button type="button" class="icon-btn" id="btn-settings" title="설정" aria-label="설정">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247c.275.476.183 1.079-.23 1.442l-.977.86c-.284.25-.415.624-.408 1.002a6.759 6.759 0 0 1 0 .255c-.007.378.124.753.408 1.003l.977.86c.413.363.505.966.23 1.442l-1.296 2.247a1.125 1.125 0 0 1-1.37.49l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.542-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.37-.49l-1.296-2.247a1.125 1.125 0 0 1 .23-1.442l.977-.86c.284-.25.415-.624.408-1.002a6.932 6.932 0 0 1 0-.255c.007-.378-.124-.753-.408-1.003l-.977-.86a1.125 1.125 0 0 1-.23-1.442L5.34 6.252a1.125 1.125 0 0 1 1.37-.49l1.217.456c.355.133.75.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.213-1.281Z"/>
-        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>
-      </svg>
-    </button>
-  </div>
-</div>
 
-<div class="err" id="err"></div>
+  <div class="err-banner" id="err"></div>
 
-<section id="tab-crypto" class="tab-panel active" role="tabpanel">
-  <div class="crypto-toolbar btn-row" style="justify-content:space-between;align-items:center">
-    <span class="field-hint" style="margin:0">Robinhood 잔액 · 설정에서 실행 모드(수동/반자동/자동)</span>
-    <button type="button" class="btn btn-ghost btn-sm" id="btn-refresh-crypto">새로고침</button>
-  </div>
-  <div id="crypto-body"><div class="empty">설정에서 Robinhood 동기화 후 가이드를 확인하세요.</div></div>
-</section>
-
-<section id="tab-stocks" class="tab-panel" role="tabpanel">
-  <div class="stocks-wrap">
-  <div class="sub" id="subtitle" style="margin-bottom:16px;color:var(--dim);font-size:12px;line-height:1.45">buy low, sell high — momentum · dip · macro trend <span id="mode"></span></div>
-
-<div class="grid">
-  <div class="card"><div class="label">Equity</div><div class="value" id="equity">—</div></div>
-  <div class="card"><div class="label">Cash</div><div class="value" id="cash">—</div></div>
-  <div class="card"><div class="label">Regime</div><div class="value" id="regime">—</div></div>
-  <div class="card"><div class="label">Drawdown</div><div class="value" id="dd">—</div></div>
-  <div class="card"><div class="label">News tilt</div><div class="value" id="tilt">—</div></div>
-</div>
-
-<div class="panel chart-panel"><h2>Equity curve</h2><canvas id="chart"></canvas></div>
-<div class="panel"><h2>Positions</h2><div id="positions"></div></div>
-<div class="panel"><h2>Queued for next open</h2><div id="pending"></div></div>
-<div class="panel"><h2>Recent trades</h2><div id="trades"></div></div>
-  </div>
-</section>
-
-<section id="tab-settings" class="tab-panel" role="tabpanel" aria-labelledby="settings-title">
-  <div class="settings-wrap">
-  <h2 class="settings-page-title" id="settings-title">설정</h2>
-  <p class="field-hint" style="margin-bottom:18px">
-    주식(Alpaca)과 크립토(Robinhood) 연동, 알림, 상태 관리.
-  </p>
-
-  <div class="panel settings-section">
-    <h3>주식 · Alpaca</h3>
-    <p class="field-hint" style="margin-bottom:10px">
-      실거래 전용. 라이브 API 키(AK…)를 연결하세요.
-      <a class="link" href="https://app.alpaca.markets/dashboard/overview" target="_blank" rel="noreferrer">Alpaca Live 대시보드</a>
-    </p>
-
-    <div class="status-row" id="conn-status">
-      <span class="status-dot" id="conn-dot"></span>
-      <div class="status-text">
-        <span id="conn-label">연결 확인 중…</span>
-        <small id="conn-detail"></small>
+  <section id="tab-grid" class="tab-panel active" role="tabpanel">
+    <div class="panel">
+      <div class="row spread">
+        <div>
+          <h3>자동매매 <span class="pill idle" id="grid-state">불러오는 중…</span></h3>
+          <div class="hint" id="grid-tick">마지막 점검 —</div>
+        </div>
+        <div class="row">
+          <label class="hint" for="step-input">간격</label>
+          <input class="input short" id="step-input" type="number" min="1" max="25" step="0.5" inputmode="decimal" aria-label="그리드 간격 %">
+          <span class="hint">%</span>
+          <button type="button" class="btn btn-sm" id="btn-save-step">저장</button>
+        </div>
       </div>
+      <div class="row" style="margin-top:12px">
+        <button type="button" class="btn btn-primary" id="btn-start">시작 — 현금화 후 새로 구성</button>
+        <button type="button" class="btn" id="btn-toggle">자동매매 OFF</button>
+        <button type="button" class="btn" id="btn-tick">지금 점검</button>
+      </div>
+      <p class="hint" style="margin-top:10px">
+        간격은 매수·매도 공용입니다. 시작을 누르면 API로 팔 수 있는 보유를 모두 현금화하고, 종목별로 현금을 5칸으로 나눠 3칸을 먼저 삽니다.
+        앱에서만 거래되는 코인(예: XRP)은 건드리지 않고 아래 “수동 보유”에 표시합니다.
+      </p>
+      <p class="msg" id="grid-msg"></p>
     </div>
 
-    <div id="keys-form-wrap">
+    <div id="venues"></div>
+
+    <div class="panel">
+      <h2>체결 내역</h2>
+      <div id="trades"><div class="empty">아직 체결이 없습니다.</div></div>
+    </div>
+
+    <div class="panel">
+      <h2>활동 로그</h2>
+      <ul class="activity" id="activity"><li class="dim">—</li></ul>
+    </div>
+  </section>
+
+  <section id="tab-settings" class="tab-panel" role="tabpanel">
+    <div class="panel">
+      <h3>주식 · Alpaca</h3>
+      <p class="hint">실거래 전용. 라이브 API 키(AK…)를 연결하세요.
+        <a class="link" href="https://app.alpaca.markets/dashboard/overview" target="_blank" rel="noreferrer">Alpaca 대시보드</a></p>
+      <div class="status-row">
+        <span class="status-dot" id="conn-dot"></span>
+        <div class="status-text"><span id="conn-label">연결 확인 중…</span><small id="conn-detail"></small></div>
+      </div>
       <span class="field-label">API Key ID</span>
-      <input type="password" class="input" id="api-key" autocomplete="off" placeholder="AK… (라이브 키)">
+      <input type="password" class="input" id="api-key" autocomplete="off" placeholder="AK…">
       <span class="field-label">Secret Key</span>
       <input type="password" class="input" id="api-secret" autocomplete="off" placeholder="Secret">
-      <div class="btn-row">
-        <button type="button" class="btn btn-primary" id="btn-save-keys">키 저장</button>
-        <button type="button" class="btn btn-danger" id="btn-delete-keys" style="display:none">키 삭제</button>
+      <div class="row">
+        <button type="button" class="btn btn-primary btn-sm" id="btn-save-keys">키 저장</button>
+        <button type="button" class="btn btn-danger btn-sm" id="btn-delete-keys" style="display:none">키 삭제</button>
       </div>
-      <p class="keys-locked" id="keys-locked" style="display:none"></p>
+      <p class="msg" id="settings-msg"></p>
     </div>
 
-    <ul class="acct-list" id="acct-summary" style="display:none"></ul>
-    <p class="msg" id="settings-msg"></p>
-  </div>
-
-  <div class="panel settings-section">
-    <h3>크립토 · Robinhood API</h3>
-    <p class="field-hint" style="margin-bottom:8px">
-      보유·현금 동기화 + (선택) API로 크립토 주문.
-      <a class="link" href="https://robinhood.com/us/en/support/articles/crypto-api/" target="_blank" rel="noreferrer">키 발급 안내</a>
-      · 반자동/자동은 키 만들 때 <b>Place orders</b> 권한 필요
-    </p>
-    <div class="rh-status">
-      <span class="status-dot" id="rh-dot"></span>
-      <div class="status-text">
-        <span id="rh-label">연결 확인 중…</span>
-        <small id="rh-detail"></small>
+    <div class="panel">
+      <h3>크립토 · Robinhood API</h3>
+      <p class="hint">키 발급 시 <b>Place orders</b> 권한이 필요합니다.
+        <a class="link" href="https://robinhood.com/us/en/support/articles/crypto-api/" target="_blank" rel="noreferrer">발급 안내</a></p>
+      <div class="status-row">
+        <span class="status-dot" id="rh-dot"></span>
+        <div class="status-text"><span id="rh-label">연결 확인 중…</span><small id="rh-detail"></small></div>
       </div>
-    </div>
-    <div class="rh-keys" id="rh-keys-wrap">
       <span class="field-label">API Key</span>
       <input type="password" class="input" id="rh-api-key" autocomplete="off" placeholder="rh-api-…">
       <span class="field-label">Private Key (Base64)</span>
       <input type="password" class="input" id="rh-private-key" autocomplete="off" placeholder="Ed25519 private key">
-      <label style="display:flex;align-items:center;gap:12px;margin:14px 0;cursor:pointer">
-        <input type="checkbox" role="switch" id="rh-auto-mode" aria-label="Robinhood 자동 거래" class="trade-toggle">
-        <span>자동 거래 <b id="rh-auto-label">OFF · 수동</b></span>
-      </label>
-      <p class="field-hint">ON: 다음 스케줄러 점검부터 API 자동 주문 · OFF: 신규 자동 주문 중지. 이미 접수된 주문은 취소되지 않습니다.</p>
-      <span class="field-label">실행 모드 (반자동 포함)</span>
-      <select class="input" id="rh-exec-mode" aria-label="크립토 실행 모드">
-        <option value="manual">수동 — 앱에서 직접 거래 후 확인</option>
-        <option value="semi">반자동 — 확인 누르면 API 주문</option>
-        <option value="auto">완전자동 — 스케줄이 주문까지 실행</option>
-      </select>
-      <p class="field-hint" id="rh-exec-hint" style="margin:4px 0 8px">반자동: 승인 필요할 때 텔레그램 → 앱에서 [API 주문]. 자동: 24시간 15분 간격으로 매도 우선 실행. 키에 Place orders 권한이 필요합니다.</p>
-      <div class="btn-row">
+      <div class="row">
         <button type="button" class="btn btn-primary btn-sm" id="btn-save-rh-keys">키 저장</button>
-        <button type="button" class="btn btn-ghost btn-sm" id="btn-save-rh-mode">모드 저장</button>
-        <button type="button" class="btn btn-ghost btn-sm" id="btn-delete-rh-keys" style="display:none">키 삭제</button>
-        <button type="button" class="btn btn-primary btn-sm" id="btn-robinhood-sync">동기화 · 가이드 생성</button>
+        <button type="button" class="btn btn-danger btn-sm" id="btn-delete-rh-keys" style="display:none">키 삭제</button>
       </div>
+      <p class="msg" id="rh-msg"></p>
     </div>
-    <p class="msg" id="rh-msg"></p>
-  </div>
 
-  <div class="panel settings-section">
-    <h3>평단 확인용 스크린샷 (선택)</h3>
-    <p class="field-hint" style="margin-bottom:12px">
-      잔액은 API가 보여 줍니다. 평단가가 필요할 때만 보유 화면을 올리세요.
-    </p>
-    <div class="upload-zone" id="upload-zone">
-      <input type="file" id="screenshot-input" accept="image/*" multiple hidden>
-      <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l3.182 3.182m-18.75 0V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18v-4.5M12 2.25v13.5"/>
-      </svg>
-      <div>탭하거나 드래그해서 스크린샷 추가</div>
-      <div class="upload-hint">여러 장 올려도 됩니다 (총액 + 각 코인 보유)</div>
+    <div class="panel">
+      <h3>텔레그램 알림</h3>
+      <p class="hint">서버 환경변수 <b>TELEGRAM_BOT_TOKEN</b> / <b>TELEGRAM_CHAT_ID</b>. 체결·시작·오류 때 알립니다.</p>
+      <p class="hint" id="tg-status">서버 설정 확인 중…</p>
+      <button type="button" class="btn btn-sm" id="btn-tg-test">테스트 발송</button>
+      <p class="msg" id="tg-msg"></p>
     </div>
-    <div id="upload-preview" class="upload-preview"></div>
-    <div class="btn-row" style="margin-top:12px">
-      <button type="button" class="btn btn-primary btn-sm" id="btn-analyze-screenshots">분석 · 가이드 생성</button>
-    </div>
-    <p class="msg" id="upload-msg"></p>
-  </div>
 
-  <div class="panel settings-section">
-    <span class="field-label">텔레그램 알림</span>
-    <p class="field-hint">Vercel 환경변수 <b>TELEGRAM_BOT_TOKEN</b> / <b>TELEGRAM_CHAT_ID</b>를 사용합니다.
-      올바른 chat ID: <b>8788110870</b> · 봇: <b>@TradeSenseDigtreeBot</b><br>
-      알림이 안 오면 텔레그램에서 봇을 연 뒤 <b>Start /start</b>를 한 번 눌러주세요.</p>
-    <p class="field-hint" id="tg-status">서버 설정 확인 중…</p>
-    <button type="button" class="btn btn-ghost" id="btn-tg-test"
-      onclick="testTelegram(this)">텔레그램 테스트 발송</button>
-    <p class="msg" id="tg-msg" style="min-height:1.4em;font-size:14px;margin-top:10px"></p>
-  </div>
-
-  <div class="panel settings-section">
-    <span class="field-label">상태 리셋</span>
-    <p class="field-hint">계좌를 바꾼 뒤 이전 드로다운 기준점 때문에 거래가 중단되면 여기서 초기화하세요.
-      드로다운·레짐·포지션 메타·예약 주문·에쿼티 곡선·거래 기록이 지워지고, Alpaca 키는 유지됩니다.</p>
-    <button type="button" class="btn btn-ghost" id="btn-reset-state">드로다운·상태 리셋</button>
-  </div>
-  </div>
-</section>
-
-<!-- Activity overlay -->
-<div class="overlay" id="overlay-activity" role="dialog" aria-modal="true" aria-labelledby="activity-title">
-  <div class="modal wide">
-    <div class="modal-head">
-      <h2 id="activity-title">오늘의 액티비티</h2>
-      <button type="button" class="modal-close" data-close="overlay-activity" aria-label="닫기">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/>
-        </svg>
-      </button>
+    <div class="panel">
+      <h3>접속 토큰</h3>
+      <p class="hint">브라우저에 저장된 관리자 토큰을 바꿉니다.</p>
+      <button type="button" class="btn btn-sm" id="btn-change-token">토큰 다시 입력</button>
     </div>
-    <div class="briefing">
-      <div class="headline" id="brief-headline">불러오는 중…</div>
-      <div id="brief-sections"></div>
-    </div>
-  </div>
+  </section>
 </div>
 
-<!-- Confirmation overlay -->
-<div class="overlay" id="overlay-confirm" role="alertdialog" aria-modal="true"
-     aria-labelledby="confirm-title" aria-describedby="confirm-copy">
+<div class="overlay" id="overlay-confirm" role="dialog" aria-modal="true">
   <div class="modal">
-    <div class="modal-head">
-      <h2 id="confirm-title"></h2>
-      <button type="button" class="modal-close" id="btn-confirm-close" aria-label="닫기">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/>
-        </svg>
-      </button>
-    </div>
-    <p class="confirm-copy" id="confirm-copy"></p>
-    <div class="confirm-actions">
-      <button type="button" class="btn btn-ghost" id="btn-confirm-cancel">취소</button>
-      <button type="button" class="btn btn-danger-fill" id="btn-confirm-action">확인</button>
+    <h2 id="confirm-title"></h2>
+    <p class="hint" id="confirm-copy"></p>
+    <div class="row" style="margin-top:16px;justify-content:flex-end">
+      <button type="button" class="btn" id="btn-confirm-cancel">취소</button>
+      <button type="button" class="btn btn-primary" id="btn-confirm-action">확인</button>
     </div>
   </div>
 </div>
 
-<!-- Crypto order history overlay -->
-<div class="overlay" id="overlay-crypto-history" role="dialog" aria-modal="true" aria-labelledby="crypto-history-title">
-  <div class="modal wide">
-    <div class="modal-head">
-      <h2 id="crypto-history-title">주문 History</h2>
-      <button type="button" class="modal-close" data-close="overlay-crypto-history" aria-label="닫기">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/>
-        </svg>
-      </button>
-    </div>
-    <p class="field-hint" style="margin-bottom:12px">로빈후드에서 실행·거부한 추천 기록입니다.</p>
-    <div id="crypto-history-body"><div class="empty">기록 없음</div></div>
-  </div>
-</div>
-
-<!-- Admin token gate: shown when the API returns 401 -->
-<div class="overlay" id="overlay-token" role="dialog" aria-modal="true" aria-labelledby="token-title">
+<div class="overlay" id="overlay-token" role="dialog" aria-modal="true">
   <div class="modal">
-    <div class="modal-head">
-      <h2 id="token-title">접속 토큰 입력</h2>
-    </div>
-    <p class="confirm-copy">이 대시보드는 보호되어 있습니다.
-      Vercel 환경변수 <b>ADMIN_TOKEN</b> 값을 입력하세요. 이 브라우저에 저장됩니다.</p>
+    <h2>접속 토큰 입력</h2>
+    <p class="hint">ADMIN_TOKEN(또는 CRON_SECRET) 값을 입력하세요.</p>
     <input type="password" class="input" id="token-input" autocomplete="off" placeholder="토큰">
-    <p class="msg" id="token-msg"></p>
-    <div class="confirm-actions" style="margin-top:12px">
-      <button type="button" class="btn btn-primary" id="btn-token-save">확인</button>
+    <p class="msg err" id="token-msg"></p>
+    <div class="row" style="justify-content:flex-end">
+      <button type="button" class="btn btn-primary" id="btn-token-save">저장</button>
     </div>
   </div>
 </div>
 
 <script>
 const $ = id => document.getElementById(id);
-const usd = v => '$' + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
-const pct = v => (v * 100).toFixed(1) + '%';
-
-let lastBriefing = null;
-let pendingConfirmAction = null;
-let lastCryptoHistory = [];
-
-function table(rows, cols) {
-  if (!rows || !rows.length) return '<div class="empty">비어 있음</div>';
-  const head = cols.map(c => `<th>${c.h}</th>`).join('');
-  const body = rows.map(r => '<tr>' + cols.map(c =>
-    `<td data-label="${escapeHtml(c.h)}">${c.f(r)}</td>`
-  ).join('') + '</tr>').join('');
-  return `<div class="table-scroll table-cards"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
-}
-const sleevePill = s => {
-  const cls = s.includes('청산') ? 'legacy' : s.replace(/[^a-z]/gi, '').toLowerCase() || s;
-  return `<span class="pill ${cls}">${s}</span>`;
-};
-const plClass = v => v >= 0 ? 'green' : 'red';
-const heroChartBar = `
-  <svg class="hero-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-    <path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"/>
-  </svg>`;
-const heroExclamationTriangle = `
-  <svg class="hero-icon inline-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9.303 3.376c.866 1.5-.217 3.374-1.948 3.374H4.645c-1.73 0-2.813-1.874-1.948-3.374L10.052 3.38c.865-1.5 3.03-1.5 3.896 0l7.355 12.746ZM12 15.75h.008v.008H12v-.008Z"/>
-  </svg>`;
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
-}
-
-function briefingLine(line) {
-  const raw = String(line);
-  const icon = raw.includes('📊') || raw.includes('[decision]') ? heroChartBar : '';
-  const clean = raw.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]\uFE0F?/gu, '').trim();
-  return `<li${icon ? ' class="with-icon"' : ''}>${icon}<span>${escapeHtml(clean)}</span></li>`;
-}
-
-function openOverlay(id) {
-  $(id).classList.add('open');
-  document.body.style.overflow = 'hidden';
-}
-function closeOverlay(id) {
-  $(id).classList.remove('open');
-  if (!document.querySelector('.overlay.open')) document.body.style.overflow = '';
-}
-function closeAllOverlays() {
-  document.querySelectorAll('.overlay.open').forEach(el => el.classList.remove('open'));
-  document.body.style.overflow = '';
-}
-
-// ── Admin token: all API calls carry X-Admin-Token; 401 opens the gate ──
 const TOKEN_KEY = 'adminToken';
+let pendingConfirm = null;
+let lastStatus = null;
 
-function showTokenGate(msg) {
-  if (msg) { const m = $('token-msg'); m.textContent = msg; m.className = 'msg err'; }
-  if (!$('overlay-token').classList.contains('open')) {
-    openOverlay('overlay-token');
-    $('token-input').focus();
-  }
+function esc(v) {
+  return String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+}
+function money(v, cents = true) {
+  if (v === null || v === undefined || Number.isNaN(Number(v))) return '—';
+  const n = Number(v);
+  const s = Math.abs(n).toLocaleString(undefined, {minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: cents ? 2 : 0});
+  return (n < 0 ? '-$' : '$') + s;
+}
+function signed(v) {
+  if (v === null || v === undefined) return '<span class="dim">—</span>';
+  const n = Number(v);
+  const cls = n > 0 ? 'green' : n < 0 ? 'red' : 'dim';
+  return `<span class="${cls}">${n >= 0 ? '+' : ''}${money(n)}</span>`;
+}
+function px(v) {
+  if (v === null || v === undefined) return '—';
+  const n = Number(v);
+  if (n >= 1000) return n.toLocaleString(undefined, {maximumFractionDigits: 2});
+  if (n >= 1) return n.toFixed(2);
+  return n.toPrecision(4);
+}
+function qty(v) {
+  if (v === null || v === undefined) return '—';
+  const n = Number(v);
+  return n >= 100 ? n.toFixed(2) : n.toPrecision(5);
+}
+function when(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, {month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'});
+}
+function showErr(msg) {
+  const el = $('err');
+  if (!msg) { el.classList.remove('show'); el.textContent = ''; return; }
+  el.textContent = msg; el.classList.add('show');
+}
+function setMsg(id, text, ok) {
+  const el = $(id);
+  el.textContent = text || '';
+  el.className = 'msg' + (text ? (ok ? ' ok' : ' err') : '');
 }
 
+// ── auth ────────────────────────────────────────────────────────────────
+function showTokenGate(msg) {
+  $('token-msg').textContent = msg || '';
+  $('overlay-token').classList.add('open');
+  $('token-input').focus();
+}
 async function api(path, opts = {}) {
   const t = localStorage.getItem(TOKEN_KEY) || '';
   opts.headers = Object.assign({}, opts.headers, t ? {'X-Admin-Token': t} : {});
@@ -746,1168 +288,352 @@ async function api(path, opts = {}) {
   }
   return r;
 }
-
-function openConfirm(title, copy, actionLabel, action) {
-  $('confirm-title').textContent = title;
-  $('confirm-copy').textContent = copy;
-  $('btn-confirm-action').textContent = actionLabel;
-  pendingConfirmAction = action;
-  openOverlay('overlay-confirm');
-}
-
-function closeConfirm() {
-  pendingConfirmAction = null;
-  closeOverlay('overlay-confirm');
-}
-
-// Unread badge: shows only items added since the bell was last opened.
-// Last-seen count is kept per-day in localStorage.
-const SEEN_KEY = 'activitySeen';
-
-function seenCount(date) {
-  try {
-    const s = JSON.parse(localStorage.getItem(SEEN_KEY) || '{}');
-    return s.date === date ? (s.count || 0) : 0;
-  } catch { return 0; }
-}
-
-function markSeen() {
-  if (!lastBriefing) return;
-  const total = (lastBriefing.activities_today || 0) + (lastBriefing.trades_today || 0);
-  localStorage.setItem(SEEN_KEY, JSON.stringify({date: lastBriefing.date, count: total}));
-  updateBadge();
-}
-
-function updateBadge() {
-  const badge = $('activity-badge');
-  if (!lastBriefing) { badge.classList.remove('show'); return; }
-  const total = (lastBriefing.activities_today || 0) + (lastBriefing.trades_today || 0);
-  const unread = total - seenCount(lastBriefing.date);
-  if (unread > 0) {
-    badge.textContent = unread > 99 ? '99+' : String(unread);
-    badge.classList.add('show');
-  } else {
-    badge.classList.remove('show');
-  }
-}
-
-function renderBriefing(b) {
-  if (!b) return;
-  $('brief-headline').textContent = b.headline || '';
-  const html = (b.sections || []).map(s =>
-    `<div class="briefing-section"><h3>${s.title}</h3><ul>` +
-    s.lines.map(briefingLine).join('') + '</ul></div>'
-  ).join('');
-  $('brief-sections').innerHTML = html;
-  updateBadge();
-}
-
-function renderConnection(st) {
-  const conn = st?.connection || {};
-  const dot = $('conn-dot');
-  const label = $('conn-label');
-  const detail = $('conn-detail');
-  dot.className = 'status-dot';
-  const selectedMode = $('rh-exec-mode');
-  if (selectedMode) selectedMode.value = st?.execution_mode || 'manual';
-  const autoSwitch = $('rh-auto-mode');
-  if (autoSwitch) autoSwitch.checked = st?.execution_mode === 'auto';
-  const autoLabel = $('rh-auto-label');
-  if (autoLabel) autoLabel.textContent = st?.execution_mode === 'auto' ? 'ON · 자동' : st?.execution_mode === 'semi' ? 'OFF · 반자동' : 'OFF · 수동';
-  const readinessHint = $('rh-exec-hint');
-  if (readinessHint) {
-    const last = st?.last_auto_run;
-    readinessHint.textContent = (st?.readiness?.reason || '계좌 연결 확인됨. 키에 Place orders 권한이 필요합니다.')
-      + ' · 자동 모드는 24시간 15분 간격 점검'
-      + (last?.checked_at ? ` · 마지막 점검: ${new Date(last.checked_at).toLocaleString()} (${last.result || ''})` : ' · 스케줄러 점검 기록 없음');
-  }
-  if (!st?.configured) {
-    label.textContent = 'Alpaca 키 미설정';
-    detail.textContent = '라이브 API 키(AK…)를 저장하거나 Vercel 환경변수를 설정하세요.';
-    dot.classList.add('err');
-  } else if (st.paper_key_detected) {
-    label.textContent = '페이퍼 키가 설정되어 있습니다';
-    detail.textContent = `키 ${st.key_hint} — 실거래 전용입니다. 라이브 키(AK…)로 교체하세요.`;
-    dot.classList.add('err');
-  } else if (conn.connected) {
-    label.textContent = 'Alpaca Live 연결됨';
-    const acc = conn.account || {};
-    detail.textContent = `키 ${st.key_hint} · 상태 ${acc.status || '—'}`;
-    dot.classList.add('ok');
-  } else {
-    label.textContent = 'Alpaca 연결 실패';
-    detail.textContent = conn.error || '키를 확인하세요.';
-    dot.classList.add('err');
-  }
-
-  // Key inputs stay editable so a new live key pair can always be saved.
-  $('btn-delete-keys').style.display = st?.keys_source === 'dashboard' ? 'inline-block' : 'none';
-  $('keys-locked').style.display = st?.configured ? 'block' : 'none';
-  if (st?.configured) {
-    const src = st.keys_source === 'env' ? 'Vercel 환경변수' : '대시보드에 저장됨';
-    $('keys-locked').textContent = `현재 키: ${st.key_hint} (${src}). `
-      + `새 키를 저장하면 덮어씁니다. 라이브 키(AK…)만 사용할 수 있습니다.`;
-  }
-
-  const acct = $('acct-summary');
-  if (conn.connected && conn.account) {
-    const a = conn.account;
-    acct.style.display = 'block';
-    acct.innerHTML = `
-      <li><strong>Equity</strong> ${usd(a.equity)}</li>
-      <li><strong>Cash</strong> ${usd(a.cash)}</li>
-      <li><strong>Buying power</strong> ${usd(a.buying_power)}</li>
-      <li><strong>Portfolio</strong> ${usd(a.portfolio_value)}</li>`;
-  } else {
-    acct.style.display = 'none';
-    acct.innerHTML = '';
-  }
-
-  const tg = st?.telegram || {};
-  const tgEl = $('tg-status');
-  if (!tgEl) return;
-  if (!tg.token_set && !tg.chat_id_set) {
-    tgEl.textContent = '서버: TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID 둘 다 없음';
-    tgEl.style.color = 'var(--red)';
-  } else if (!tg.token_set) {
-    tgEl.textContent = '서버: TELEGRAM_BOT_TOKEN 없음';
-    tgEl.style.color = 'var(--red)';
-  } else if (!tg.chat_id_set) {
-    tgEl.textContent = '서버: TELEGRAM_CHAT_ID 없음';
-    tgEl.style.color = 'var(--red)';
-  } else {
-    let err = '';
-    if (tg.chat_id_issue === 'placeholder') {
-      err = ' <span style="color:var(--red)">← 변수 이름이 값으로 들어감 — <b>8788110870</b> 숫자만 넣으세요</span>';
-    } else if (tg.chat_id_issue === 'mismatch') {
-      err = ' <span style="color:var(--red)">← chat ID 불일치 (<b>8788110870</b> 이어야 함)</span>';
-    }
-    const okChat = !tg.chat_id_issue;
-    tgEl.innerHTML = `서버: BOT ${escapeHtml(tg.token_hint || '?')} · CHAT ${escapeHtml(tg.chat_id_hint || '?')}` + err;
-    tgEl.style.color = okChat ? 'var(--green)' : 'var(--dim)';
-  }
-}
-
-async function loadSettings() {
-  try {
-    const r = await api('/api/settings');
-    const st = await r.json();
-    renderConnection(st);
-    await loadRobinhoodStatus();
-  } catch (e) {
-    $('conn-label').textContent = '설정 불러오기 실패';
-    $('conn-detail').textContent = String(e);
-  }
-}
-
-function showCryptoGuide(d) {
-  switchTab('crypto');
-  renderCrypto(d);
-}
-
-function setSettingsMsg(text, ok) {
-  const el = $('settings-msg');
-  el.textContent = text || '';
-  el.className = 'msg' + (text ? (ok ? ' ok' : ' err') : '');
-}
-
-async function saveKeys() {
-  const key = $('api-key').value.trim();
-  const secret = $('api-secret').value.trim();
-  if (!key || !secret) { setSettingsMsg('API Key와 Secret을 모두 입력하세요.', false); return; }
-  setSettingsMsg('저장 중…', true);
-  try {
-    const r = await api('/api/settings/keys', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({api_key: key, secret_key: secret}),
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || '저장 실패');
-    $('api-key').value = '';
-    $('api-secret').value = '';
-    renderConnection(d);
-    setSettingsMsg('Alpaca 키가 저장되었습니다.', true);
-    refresh();
-  } catch (e) {
-    setSettingsMsg(String(e.message || e), false);
-  }
-}
-
-async function deleteKeys() {
-  setSettingsMsg('삭제 중…', true);
-  try {
-    const r = await api('/api/settings/keys', {method: 'DELETE'});
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || '삭제 실패');
-    renderConnection(d);
-    setSettingsMsg('키가 삭제되었습니다.', true);
-    refresh();
-  } catch (e) {
-    setSettingsMsg(String(e.message || e), false);
-  }
-}
-
-async function resetState() {
-  setSettingsMsg('초기화 중…', true);
-  try {
-    const r = await api('/api/settings/reset', {method: 'POST'});
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || '초기화 실패');
-    renderConnection(d);
-    setSettingsMsg('상태를 초기화했습니다. 드로다운이 0%로 리셋됩니다.', true);
-    refresh();
-  } catch (e) {
-    setSettingsMsg(String(e.message || e), false);
-  }
-}
-
-function drawChart(curve) {
-  const c = $('chart'), ctx = c.getContext('2d');
-  const dpr = window.devicePixelRatio || 1;
-  const w = c.clientWidth, h = c.clientHeight || 220;
-  c.width = w * dpr; c.height = h * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, w, h);
-  if (!curve || curve.length < 2) {
-    ctx.fillStyle = '#8b949e'; ctx.fillText('데이터가 쌓이면 표시됩니다', 10, 30); return;
-  }
-  const vals = curve.map(p => p.equity);
-  const min = Math.min(...vals), max = Math.max(...vals), pad = (max - min) * 0.1 || 1;
-  const x = i => i / (vals.length - 1) * (w - 20) + 10;
-  const y = v => h - 20 - (v - min + pad) / (max - min + 2 * pad) * (h - 40);
-  ctx.beginPath();
-  vals.forEach((v, i) => i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v)));
-  ctx.strokeStyle = vals[vals.length-1] >= vals[0] ? '#3fb950' : '#f85149';
-  ctx.lineWidth = 2; ctx.stroke();
-  ctx.fillStyle = '#8b949e'; ctx.font = '11px sans-serif';
-  ctx.fillText(usd(max), 10, 12); ctx.fillText(usd(min), 10, h - 6);
-}
-
-let lastEquityCurve = null;
-let chartResizeTimer = null;
-function scheduleChartRedraw() {
-  if (!lastEquityCurve) return;
-  clearTimeout(chartResizeTimer);
-  chartResizeTimer = setTimeout(() => drawChart(lastEquityCurve), 120);
-}
-window.addEventListener('resize', scheduleChartRedraw);
-if (window.visualViewport) {
-  window.visualViewport.addEventListener('resize', scheduleChartRedraw);
-}
-
-async function refresh() {
-  try {
-    const r = await api('/api/snapshot');
-    const d = await r.json();
-    if (d.error) { $('err').style.display = 'block'; $('err').textContent = d.error; return; }
-    $('err').style.display = 'none';
-    const sleeves = (d.sleeves || []).join(' · ');
-    $('subtitle').innerHTML = sleeves + ' <span id="mode"></span>';
-    $('mode').textContent = '· ' + (d.mode || '').toUpperCase();
-    lastBriefing = d.briefing;
-    renderBriefing(d.briefing);
-    $('equity').textContent = usd(d.equity);
-    $('cash').textContent = usd(d.cash);
-    const reg = d.regime?.regime || '—';
-    $('regime').innerHTML = `<span class="pill ${reg}">${reg}</span> <span style="font-size:13px;color:var(--dim)">${pct(d.regime?.exposure ?? 0)} 노출</span>`;
-    $('dd').textContent = pct(d.drawdown || 0);
-    $('dd').className = 'value ' + (d.halted ? 'red' : (d.drawdown > 0.15 ? 'amber' : ''));
-    if (d.halted) $('dd').innerHTML = `${pct(d.drawdown || 0)}${heroExclamationTriangle}`;
-    $('tilt').textContent = (d.news_overlay?.tilt ?? 1).toFixed(2);
-    lastEquityCurve = d.equity_curve;
-    drawChart(d.equity_curve);
-    $('positions').innerHTML = table(d.positions, [
-      {h: 'Symbol', f: r => `<b>${r.symbol}</b>`},
-      {h: 'Sleeve', f: r => sleevePill(r.sleeve)},
-      {h: 'Value', f: r => usd(r.market_value)},
-      {h: 'Entry', f: r => Number(r.avg_entry).toFixed(2)},
-      {h: 'Now', f: r => Number(r.current_price).toFixed(2)},
-      {h: 'Stop', f: r => r.stop_level ? Number(r.stop_level).toFixed(2) : '—'},
-      {h: 'P/L', f: r => `<span class="${plClass(r.unrealized_pl)}">${r.unrealized_pl >= 0 ? '+' : ''}${Number(r.unrealized_pl).toFixed(2)}</span>`},
-    ]);
-    $('pending').innerHTML = table(d.pending, [
-      {h: 'Side', f: r => `<span class="${r.side === 'buy' ? 'green' : 'red'}">${r.side.toUpperCase()}</span>`},
-      {h: 'Symbol', f: r => `<b>${r.symbol}</b>`},
-      {h: 'Sleeve', f: r => sleevePill(r.sleeve)},
-      {h: 'Reason', f: r => r.reason || '—'},
-    ]);
-    $('trades').innerHTML = table(d.trades, [
-      {h: 'Time', f: r => new Date(r.ts).toLocaleString()},
-      {h: 'Side', f: r => `<span class="${r.side === 'buy' ? 'green' : 'red'}">${r.side.toUpperCase()}</span>`},
-      {h: 'Symbol', f: r => `<b>${r.symbol}</b>`},
-      {h: 'Sleeve', f: r => sleevePill(r.sleeve || '?')},
-      {h: 'Notional', f: r => usd(r.notional)},
-      {h: 'Reason', f: r => r.reason || ''},
-      {h: 'Detail', f: r => r.detail || ''},
-    ]);
-  } catch (e) {
-    $('err').style.display = 'block';
-    $('err').textContent = '서버에 연결할 수 없습니다: ' + e;
-  }
-}
-
-// ── Crypto advisor ──
-const cpx = v => {
-  if (v == null) return '—';
-  if (v >= 1000) return v.toLocaleString(undefined, {maximumFractionDigits: 0});
-  if (v >= 10) return v.toFixed(2);
-  if (v >= 0.1) return v.toFixed(3);
-  return Number(v).toPrecision(3);
-};
-
-function renderCryptoOrder(o, {history = false, mode = 'manual', buyingPower = null} = {}) {
-  const usd2 = v => '$' + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
-  const whenTs = o.confirmed_at || o.denied_at;
-  const when = whenTs
-    ? new Date(whenTs).toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'})
-    : '';
-  const bpMax = (o.side === 'buy' && buyingPower != null && Number(buyingPower) > 0)
-    ? Math.max(1, Math.floor(Number(buyingPower) * 0.98))
-    : null;
-  const maxAttr = bpMax != null ? ` max="${bpMax}"` : '';
-  const bpHint = (bpMax != null && Number(o.dollars) > bpMax)
-    ? ` · BP 최대 $${bpMax.toLocaleString()}`
-    : '';
-  const appOnly = o.api_tradable === false;
-  let fill;
-  if (o.status === 'confirmed') {
-    const via = o.api_executed ? ' · API' : (o.auto_confirmed ? ' · RH 감지' : '');
-    fill = `<div class="fill"><span class="done">확인됨${via} · 실제 ${usd2(o.actual_dollars ?? o.dollars)}${when ? ` · ${when}` : ''}</span></div>`;
-  } else if (o.status === 'denied') {
-    fill = `<div class="fill"><span class="done denied">거부됨 (DENY)${when ? ` · ${when}` : ''}</span></div>`;
-  } else if ((mode === 'semi' || mode === 'auto') && !appOnly) {
-    fill = `<div class="fill">
-        <label>금액 $</label>
-        <input type="number" min="1" step="1" value="${Math.min(Number(o.dollars), bpMax ?? Number(o.dollars))}"${maxAttr} data-oid="${escapeHtml(o.id)}" aria-label="${o.symbol} 금액">
-        <button type="button" class="btn btn-ghost btn-deny-order" data-oid="${escapeHtml(o.id)}">거부</button>
-        <button type="button" class="btn btn-primary btn-confirm-order" data-oid="${escapeHtml(o.id)}">${mode === 'auto' ? '지금 실행' : 'API 주문'}</button>
-      </div>`;
-  } else {
-    const appHint = appOnly ? `<span class="rh-tag">앱만 · 실행 후 확인</span>` : '';
-    fill = `<div class="fill">
-        <label>실제 금액 $</label>
-        <input type="number" min="1" step="1" value="${Number(o.dollars)}" data-oid="${escapeHtml(o.id)}" aria-label="${o.symbol} 실제 금액">
-        <button type="button" class="btn btn-ghost btn-deny-order" data-oid="${escapeHtml(o.id)}">거부</button>
-        <button type="button" class="btn btn-primary btn-confirm-order" data-oid="${escapeHtml(o.id)}">확인</button>
-        ${appHint}
-      </div>`;
-  }
-  return `
-  <div class="crypto-order">
-    <span class="side ${o.side}">${o.side === 'buy' ? '매수' : '매도'}</span>
-    <b>${o.symbol}</b>${appOnly ? ' <span class="rh-tag">앱만</span>' : ''}
-    <span class="amt">추천 ${usd2(o.dollars)}${bpHint}</span>
-    <span style="color:var(--dim);font-size:12px">@$${cpx(o.price)}</span>
-    <span class="why">${escapeHtml(o.reason)}</span>
-    ${fill}
-  </div>`;
-}
-
-function renderCryptoHistory() {
-  const el = $('crypto-history-body');
-  if (!lastCryptoHistory.length) {
-    el.innerHTML = '<div class="empty">아직 확인한 주문이 없습니다.</div>';
-    return;
-  }
-  el.innerHTML = lastCryptoHistory.map(o => renderCryptoOrder(o, {history: true})).join('');
-}
-
-function splitCryptoOrders(d) {
-  const byId = new Map();
-  for (const o of [...(d.orders || []), ...(d.order_history || [])]) {
-    if (o && o.id) byId.set(o.id, o);
-  }
-  const all = [...byId.values()];
-  const history = all.filter(o => o.status === 'confirmed' || o.status === 'denied')
-    .sort((a, b) => {
-      const ta = a.confirmed_at || a.denied_at || '';
-      const tb = b.confirmed_at || b.denied_at || '';
-      return tb.localeCompare(ta);
-    });
-  const active = all.filter(o => o.status !== 'confirmed' && o.status !== 'denied');
-  return {active, history};
-}
-
-function rhMoney(v, {cents = true} = {}) {
-  if (v == null || Number.isNaN(Number(v))) return '—';
-  const n = Number(v);
-  // SHIB etc. — sub-cent prices must not round to $0.00
-  if (n > 0 && n < 0.01) {
-    return '$' + n.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8});
-  }
-  const opts = cents
-    ? {minimumFractionDigits: 2, maximumFractionDigits: 2}
-    : {maximumFractionDigits: 0};
-  return '$' + n.toLocaleString(undefined, opts);
-}
-
-function rhQty(v) {
-  if (v == null) return '—';
-  const n = Number(v);
-  if (n >= 100) return n.toLocaleString(undefined, {maximumFractionDigits: 3});
-  return n.toLocaleString(undefined, {maximumFractionDigits: 5});
-}
-
-function sparklineSvg(closes, {w = 72, h = 28} = {}) {
-  if (!closes || closes.length < 2) return '<span class="rh-spark"></span>';
-  const min = Math.min(...closes);
-  const max = Math.max(...closes);
-  const span = max - min || 1;
-  const pts = closes.map((c, i) => {
-    const x = (i / (closes.length - 1)) * w;
-    const y = h - ((c - min) / span) * (h - 4) - 2;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(' ');
-  const up = closes[closes.length - 1] >= closes[0];
-  const color = up ? '#3fb950' : '#f85149';
-  return `<svg class="rh-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">
-    <polyline fill="none" stroke="${color}" stroke-width="1.5" points="${pts}"/>
-  </svg>`;
-}
-
-function renderRhDayChange(change, pct) {
-  if (change == null || Number.isNaN(Number(change))) return '';
-  const up = change >= 0;
-  const sign = up ? '▲' : '▼';
-  const cls = up ? 'green' : 'red';
-  const absPct = Math.abs(Number(pct) || 0) * 100;
-  return `<div class="rh-day ${cls}">${sign} ${rhMoney(Math.abs(change))} (${absPct.toFixed(2)}%) Today</div>`;
-}
-
-function apiRailNote(rh) {
-  const yes = rh?.api_tradable_symbols || [];
-  const no = rh?.app_only_symbols || [];
-  let line = 'Robinhood Crypto API 실시간 보유';
-  if (yes.length || no.length) {
-    line += `. API 주문 ${yes.length ? yes.join(', ') : '가능한 보유 없음'}`;
-    if (no.length) line += ` · 앱만 ${no.join(', ')}`;
-  }
-  return line;
-}
-
-function renderRhHoldings(positions) {
-  if (!positions?.length) return '<div class="empty">보유 없음</div>';
-  return positions.map(p => {
-    const up = (p.day_change_pct ?? 0) >= 0;
-    const priced = p.priced !== false && Number(p.price) > 0;
-    const pill = priced
-      ? `<div class="rh-price-pill ${up ? 'up' : 'down'}">${rhMoney(p.price)}</div>`
-      : `<div class="rh-price-pill down">시세 없음</div>`;
-    const note = p.supported === false ? ' · 조언 외' : '';
-    const apiTag = p.api_tradable === false
-      ? ' <span class="rh-tag">앱만</span>'
-      : (p.api_tradable === true ? ' <span class="rh-tag">API</span>' : '');
-    return `<div class="rh-holding">
-      <div>
-        <div class="rh-sym">${escapeHtml(p.symbol)}${apiTag}${note ? `<span class="rh-tag">${note}</span>` : ''}</div>
-        <div class="rh-qty">${rhQty(p.qty)}${priced && p.value != null ? ` · ${rhMoney(p.value)}` : ''}</div>
-      </div>
-      ${sparklineSvg(p.sparkline)}
-      ${pill}
-    </div>`;
-  }).join('');
-}
-
-let lastCryptoData = null;
-let cryptoRefreshTimer = null;
-
-function scheduleCryptoRefresh(d) {
-  if (cryptoRefreshTimer) clearInterval(cryptoRefreshTimer);
-  cryptoRefreshTimer = null;
-  if (d?.robinhood_live && $('tab-crypto').classList.contains('active')) {
-    cryptoRefreshTimer = setInterval(() => loadCrypto({quiet: true}), 45000);
-  }
-}
-
-function bindCryptoEvents(d) {
-  $('crypto-body').querySelectorAll('.btn-confirm-order').forEach(btn => {
-    btn.addEventListener('click', () => confirmCryptoOrder(btn.dataset.oid));
+async function post(path, body) {
+  const r = await api(path, {
+    method: 'POST',
+    headers: body ? {'Content-Type': 'application/json'} : {},
+    body: body ? JSON.stringify(body) : undefined,
   });
-  $('crypto-body').querySelectorAll('.btn-deny-order').forEach(btn => {
-    btn.addEventListener('click', () => denyCryptoOrder(btn.dataset.oid));
-  });
-  const histBtn = $('btn-crypto-history');
-  if (histBtn) {
-    histBtn.addEventListener('click', () => {
-      renderCryptoHistory();
-      openOverlay('overlay-crypto-history');
-    });
-  }
-  const principalBtn = $('btn-crypto-principal');
-  if (principalBtn) {
-    principalBtn.addEventListener('click', () => saveCryptoPrincipal());
-    $('crypto-principal-input')?.addEventListener('keydown', e => {
-      if (e.key === 'Enter') saveCryptoPrincipal();
-    });
-  }
-  const resetBtn = $('btn-crypto-reset');
-  if (resetBtn) {
-    resetBtn.addEventListener('click', () => openConfirm(
-      '크립토 장부를 리셋할까요?',
-      '보유 내역, 주문 기록, 손익이 지워집니다. 로빈후드 실계좌에는 영향이 없습니다. 다음 스크린샷 업로드로 다시 동기화하세요.',
-      '리셋',
-      async () => {
-        $('crypto-body').innerHTML = '<div class="empty">리셋 중…</div>';
-        try {
-          const r = await api('/api/crypto/reset', {method: 'POST'});
-          renderCrypto(await r.json());
-        } catch (e) {
-          $('crypto-body').innerHTML = `<div class="empty">리셋 실패: ${escapeHtml(String(e.message || e))}</div>`;
-        }
-      },
-    ));
-  }
-  const manualBtn = $('btn-crypto-manual-now');
-  if (manualBtn) {
-    manualBtn.addEventListener('click', async () => {
-      const r = await api('/api/crypto/execution-mode', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({mode: 'manual'}),
-      });
-      if (r.ok) loadCrypto();
-    });
-  }
-  scheduleCryptoRefresh(d);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || d.ok === false) throw new Error(d.error || `HTTP ${r.status}`);
+  return d;
 }
-
-function cryptoRunStatus(d, now = Date.now()) {
-  const mode = d.execution_mode || 'manual';
-  const run = d.last_auto_run || {};
-  const checked = Date.parse(run.checked_at || '');
-  const age = now - checked;
-  const stamp = Number.isFinite(checked)
-    ? ` · 마지막 확인 ${new Date(checked).toLocaleString([], {month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit'})}` : '';
-  const status = (text, tone = '') => ({text: text + stamp, tone});
-  if (mode !== 'auto') {
-    if (run.result === 'failed_locked_manual') return status('자동매매 중지 · 주문 오류로 수동 전환', 'red');
-    return status(mode === 'semi' ? '반자동 · 주문 승인 대기' : '자동매매 OFF · 수동 모드');
-  }
-  if (!Number.isFinite(checked)) return status('자동매매 ON · 첫 자동 점검 대기');
-  if (age < -60000) return status('자동매매 확인 필요 · 점검 시각 불일치', 'red');
-  if (age > 30 * 60 * 1000) return status('자동매매 확인 필요 · 30분 이상 점검 기록 없음', 'red');
-  if (run.error || ['failed', 'failed_locked_manual'].includes(run.result)) return status('자동매매 오류 · 확인 필요', 'red');
-  if (run.mode !== 'auto') return status('자동매매 ON · 첫 자동 점검 대기');
-  if (run.result === 'retry_transient') return status('자동매매 정상 · 일시 오류, 다음 점검에서 재시도');
-  const active = (d.orders || []).filter(o => !['confirmed', 'denied'].includes(o.status));
-  if (active.some(o => o.api_tradable === false)) return status('자동매매 점검 완료 · API 주문 제한 종목 있음', 'red');
-  if (run.result === 'orders_pending') return status('자동매매 정상 · 주문 체결 확인 중', 'green');
-  if (active.length) return status('자동매매 점검 완료 · 다음 주문 처리 대기');
-  if (run.result === 'orders_succeeded') return status('자동매매 정상 · 최근 주문 체결 완료', 'green');
-  if (run.result === 'no_signal') return status('자동매매 정상 · 관망 중', 'green');
-  return status('자동매매 확인 필요 · 점검 결과 미확인');
-}
-
-function updateCryptoRunStatus() {
-  const el = $('crypto-run-status');
-  if (!el || !lastCryptoData) return;
-  const status = cryptoRunStatus(lastCryptoData);
-  el.textContent = status.text;
-  el.className = `rh-section-sub ${status.tone}`;
-}
-
-// Keep the stale indicator honest even when a refresh fails or quotes stop.
-setInterval(updateCryptoRunStatus, 30000);
-
-function renderCrypto(d, {quiet = false} = {}) {
-  if (!d.ok) {
-    $('crypto-body').innerHTML = `<div class="empty">${escapeHtml(d.error || '분석 실패')}</div>`;
-    return;
-  }
-  lastCryptoData = d;
-  const m = d.market || {}, s = d.summary || {}, rh = d.robinhood_live;
-  const total = rh?.crypto_total ?? rh?.total ?? s.crypto_total ?? s.total;
-  const cash = rh?.buying_power ?? s.buying_power ?? s.cash;
-  const holdings = rh ? (rh.positions || []) : (s.positions || []);
-  const {active, history} = splitCryptoOrders(d);
-  lastCryptoHistory = history;
-  const execMode = d.execution_mode || 'manual';
-  const modeLabel = {auto: '자동 거래 ON', semi: '반자동', manual: '수동 거래'}[execMode] || '수동 거래';
-  const marketLabel = {BULL: '좋음 · 강세', CHOP: '보통 · 혼조', BEAR: '나쁨 · 약세'}[m.label] || '시장 확인 중';
-  const marketClass = ['BULL', 'CHOP', 'BEAR'].includes(m.label) ? m.label : '';
-  let html = `<div class="rh-wrap">
-    <div class="rh-portfolio">
-      <div class="section-head"><span>${rh?.account_total != null ? '전체 잔고 · 추정' : '크립토 잔고'}</span><span class="rh-tag">${modeLabel}</span></div>
-      <div id="crypto-run-status" role="status" aria-live="polite"></div>
-      <div class="rh-total">${rhMoney(rh?.account_total ?? total)}</div>
-      <div class="rh-section-sub">매수 가능 ${rhMoney(cash)} · ${rh ? '크립토 시세 갱신 ' + escapeHtml(new Date(rh.updated_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})) : '저장된 잔고'}</div>
-      <div class="rh-hint">${rh?.account_total != null ? '주식·기타 금액은 대조 시점 기준이며 자동 갱신되지 않습니다.' : '크립토 평가액 + 매수 가능 금액 · 주식 제외'}</div>
-    </div>
-    <div class="crypto-market" style="margin:16px 0 24px">
-      <span class="pill ${marketClass}">${marketLabel}</span><span>${escapeHtml(m.comment || '')}</span>
-    </div>
-    <section class="rh-section"><h3>보유 종목 · 결과</h3>
-      <div style="overflow-x:auto">${holdings.length ? table(holdings, [
-        {h: '종목', f: p => `<b>${escapeHtml(p.symbol)}</b>`},
-        {h: '평가액', f: p => p.value != null ? rhMoney(p.value) : '—'},
-        {h: '오늘 변동', f: p => p.day_change != null ? `<span class="${Number(p.day_change) >= 0 ? 'green' : 'red'}">${Number(p.day_change) > 0 ? '+' : ''}${rhMoney(p.day_change)}</span>` : '—'},
-        {h: '평가손익', f: p => {
-          const meta = (s.positions || []).find(x => x.symbol === p.symbol) || p;
-          if (!(Number(meta.avg_cost) > 0) || !(Number(p.price) > 0)) return '평단 미확인';
-          const pnl = (Number(p.price) - Number(meta.avg_cost)) * Number(p.qty || 0);
-          return `<span class="${pnl >= 0 ? 'green' : 'red'}">${pnl > 0 ? '+' : ''}${rhMoney(pnl)}</span>`;
-        }}
-      ]) : '<div class="empty">보유 종목 없음</div>'}</div>
-    </section>`;
-  if (rh?.unpriced?.length) html += `<p class="rh-warn">시세 미확인: ${rh.unpriced.map(p => escapeHtml(p.symbol)).join(', ')}</p>`;
-  if (d.last_auto_run?.error) html += `<p class="rh-warn">거래 오류: ${escapeHtml(d.last_auto_run.error)}</p>`;
-  else if (execMode === 'auto' && d.last_auto_run?.transient_error) html += `<p class="rh-hint">재시도 예정: ${escapeHtml(d.last_auto_run.transient_error)}</p>`;
-  if (active.length) {
-    html += `<section class="rh-section"><h3>${execMode === 'auto' ? '진행 중 주문' : '거래 요청'}</h3>` +
-      active.map(o => renderCryptoOrder(o, {mode: execMode, buyingPower: cash})).join('') + '</section>';
-  }
-  html += `<section class="rh-section"><h3>거래 History</h3><div id="crypto-activity-orders"><div class="empty">최근 거래 조회 중…</div></div></section>`;
-  if (rh) html += `    <details style="margin:18px 0"><summary style="cursor:pointer">전체 잔고 대조 설정</summary>
-      <p class="field-hint">같은 시점의 Individual 전체 잔고, TradeSense 크립토 운용 합계(Crypto + Buying power), 주식 평가액을 입력하세요. 차액은 표시용으로만 저장하며 매매 자금은 바뀌지 않습니다.</p>
-      <label>Individual 전체 잔고 $<input class="input" type="number" min="0" step="0.01" id="rh-reference-total" value="${rh.reconciliation?.reference_total ?? ''}"></label>
-      <label>동일 시점 크립토 운용 합계 $<input class="input" type="number" min="0" step="0.01" id="rh-reference-crypto" value="${Number(total).toFixed(2)}"></label>
-      <label>주식 평가액 $<input class="input" type="number" min="0" step="0.01" id="rh-reference-stocks" value="${Number(rh.reconciliation?.stocks_value ?? rh.stocks_value ?? 0).toFixed(2)}"></label>
-      <button type="button" class="btn btn-ghost" id="btn-balance-reference">잔고 대조 저장</button><p id="balance-reference-message" role="status"></p>
-    </details>`;
-  html += '</div>';
-  $('crypto-body').innerHTML = html;
-  updateCryptoRunStatus();
-  bindCryptoEvents(d);
-  $('btn-balance-reference')?.addEventListener('click', saveBalanceReference);
-  loadCryptoActivity();
-}
-
-async function saveBalanceReference() {
-  const message = $('balance-reference-message');
-  const total = $('rh-reference-total').value;
-  if (!total) { message.textContent = 'Individual 전체 잔고를 입력하세요.'; return; }
-  try {
-    const r = await api('/api/crypto/balance-reference', {method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({total: Number(total), crypto_total: Number($('rh-reference-crypto').value), stocks_value: Number($('rh-reference-stocks').value)})});
-    const data = await r.json();
-    if (!r.ok || !data.ok) throw new Error(data.error || '저장 실패');
-    await loadCrypto({quiet: true});
-  } catch (e) { message.textContent = String(e.message || e); }
-}
-
-let cryptoHistoryLimit = 10;
-
-function renderRecentCryptoHistory(el, data) {
-  const states = {filled: '체결', confirmed: '체결 확인', denied: '추천 거부', canceled: '취소', cancelled: '취소', rejected: '주문 거절', failed: '실패', open: '대기', pending: '대기', partially_filled: '부분 체결'};
-  const orders = data.orders || [];
-  const visible = orders.slice(0, cryptoHistoryLimit);
-  el.innerHTML = (data.warning ? `<p class="rh-warn">${escapeHtml(data.warning)}</p>` : '') +
-    (visible.length ? `<div style="overflow-x:auto">${table(visible, [
-      {h: '시각', f: o => o.ts ? escapeHtml(new Date(o.ts).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', year:'numeric'})) : '—'},
-      {h: '종목', f: o => escapeHtml(o.symbol || '')},
-      {h: '매수/매도', f: o => o.side === 'buy' ? '매수' : o.side === 'sell' ? '매도' : '—'},
-      {h: '결과', f: o => escapeHtml(states[o.status] || o.status || '확인 중')},
-      {h: '체결 단가', f: o => Number(o.price) > 0 ? rhMoney(o.price) : '—'},
-      {h: '체결 금액', f: o => o.filled_dollars != null ? rhMoney(o.filled_dollars) : '—'},
-    ])}</div>` : '<div class="empty">아직 거래 내역이 없습니다.</div>') +
-    (orders.length > visible.length ? '<button type="button" class="btn btn-ghost" data-history-more>See more</button>' : '');
-  el.querySelector('[data-history-more]')?.addEventListener('click', () => {
-    cryptoHistoryLimit += 10;
-    renderRecentCryptoHistory(el, data);
-  });
-}
-
-async function loadCryptoActivity() {
-  const el = $('crypto-activity-orders');
-  if (!el) return;
-  try {
-    const r = await api('/api/crypto/activity');
-    const data = await r.json();
-    if (!r.ok || !data.ok) throw new Error(data.error || '거래 내역 조회 실패');
-    if (!el.isConnected) return;
-    renderRecentCryptoHistory(el, data);
-  } catch (e) { if (el.isConnected) el.innerHTML = `<p class="rh-warn">${escapeHtml(String(e.message || e))}</p>`; }
-}
-
-async function confirmCryptoOrder(id) {
-  const input = $('crypto-body').querySelector(`input[data-oid="${id}"]`);
-  const raw = input ? Number(input.value) : NaN;
-  if (!Number.isFinite(raw) || raw <= 0) return;
-  $('crypto-body').querySelectorAll('.crypto-order-err').forEach(el => el.remove());
-  try {
-    const r = await api('/api/crypto/confirm', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({id, dollars: raw}),
-    });
-    const d = await r.json();
-    if (!d.ok) {
-      $('crypto-body').insertAdjacentHTML('afterbegin',
-        `<div class="empty crypto-order-err" style="color:var(--red)">${escapeHtml(d.error || '확인 실패')}</div>`);
-      return;
-    }
-    renderCrypto(d);
-  } catch (e) {
-    $('crypto-body').insertAdjacentHTML('afterbegin',
-      `<div class="empty crypto-order-err" style="color:var(--red)">${escapeHtml(String(e.message || e))}</div>`);
-  }
-}
-
-async function denyCryptoOrder(id) {
-  try {
-    const r = await api('/api/crypto/deny', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({id}),
-    });
-    const d = await r.json();
-    if (!d.ok) {
-      $('crypto-body').insertAdjacentHTML('afterbegin',
-        `<div class="empty" style="color:var(--red)">${escapeHtml(d.error || '거부 실패')}</div>`);
-      return;
-    }
-    renderCrypto(d);
-  } catch (e) {
-    $('crypto-body').insertAdjacentHTML('afterbegin',
-      `<div class="empty" style="color:var(--red)">${escapeHtml(String(e.message || e))}</div>`);
-  }
-}
-
-async function saveCryptoPrincipal() {
-  const input = $('crypto-principal-input');
-  const principal = input ? Number(input.value) : NaN;
-  if (!Number.isFinite(principal) || principal <= 0) return;
-  const btn = $('btn-crypto-principal');
-  if (btn) btn.disabled = true;
-  try {
-    const r = await api('/api/crypto/principal', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({principal}),
-    });
-    const d = await r.json();
-    if (!d.ok) {
-      $('crypto-body').insertAdjacentHTML('afterbegin',
-        `<div class="empty" style="color:var(--red)">${escapeHtml(d.error || '저장 실패')}</div>`);
-      return;
-    }
-    renderCrypto(d);
-  } catch (e) {
-    $('crypto-body').insertAdjacentHTML('afterbegin',
-      `<div class="empty" style="color:var(--red)">${escapeHtml(String(e.message || e))}</div>`);
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-
-async function loadCrypto({quiet = false} = {}) {
-  if (!quiet) $('crypto-body').innerHTML = '<div class="empty">불러오는 중…</div>';
-  try {
-    const r = await api('/api/crypto/advice');
-    renderCrypto(await r.json(), {quiet});
-  } catch (e) {
-    if (!quiet) {
-      $('crypto-body').innerHTML = `<div class="empty">불러오기 실패: ${escapeHtml(String(e.message || e))}</div>`;
-    }
-  }
-}
-
-function renderRobinhoodStatus(st) {
-  const dot = $('rh-dot');
-  const label = $('rh-label');
-  const detail = $('rh-detail');
-  const delBtn = $('btn-delete-rh-keys');
-  dot.className = 'status-dot';
-  const selectedMode = $('rh-exec-mode');
-  if (selectedMode) selectedMode.value = st?.execution_mode || 'manual';
-  const autoSwitch = $('rh-auto-mode');
-  if (autoSwitch) autoSwitch.checked = st?.execution_mode === 'auto';
-  const autoLabel = $('rh-auto-label');
-  if (autoLabel) autoLabel.textContent = st?.execution_mode === 'auto' ? 'ON · 자동' : st?.execution_mode === 'semi' ? 'OFF · 반자동' : 'OFF · 수동';
-  const readinessHint = $('rh-exec-hint');
-  if (readinessHint) {
-    const last = st?.last_auto_run;
-    readinessHint.textContent = (st?.readiness?.reason || '계좌 연결 확인됨. 키에 Place orders 권한이 필요합니다.')
-      + ' · 자동 모드는 24시간 15분 간격 점검'
-      + (last?.checked_at ? ` · 마지막 점검: ${new Date(last.checked_at).toLocaleString()} (${last.result || ''})` : ' · 스케줄러 점검 기록 없음');
-  }
-  if (!st?.configured) {
-    label.textContent = 'API 키 미설정';
-    detail.textContent = 'Robinhood 웹(classic) → 크립토 설정에서 API 키를 발급하세요.';
-    dot.classList.add('err');
-    if (delBtn) delBtn.style.display = 'none';
-    return;
-  }
-  label.textContent = `키 저장됨 (${st.key_hint || '••••'})`;
-  const conn = st.connection || {};
-  if (conn.connected) {
-    dot.classList.add('ok');
-    const bp = conn.account?.buying_power;
-    const n = conn.holdings_count ?? 0;
-    const src = st.keys_source === 'env' ? ' · 키=환경변수' : '';
-    const apiTrade = conn.account?.is_api_tradable;
-    const apiNote = apiTrade === false ? ' · API주문 불가' : (apiTrade === true ? ' · API주문 가능' : '');
-    detail.textContent = `연결됨 · 매수가능 $${Number(bp || 0).toLocaleString()} · ${n}종목${apiNote}${src}`;
-  } else {
-    dot.classList.add('err');
-    detail.textContent = conn.error === 'keys_not_configured'
-      ? '키를 저장하세요.'
-      : (conn.error || '연결 실패');
-  }
-  if (delBtn) delBtn.style.display = st.keys_source === 'dashboard' ? '' : 'none';
-  const modeSel = $('rh-exec-mode');
-  if (modeSel && st.execution_mode) modeSel.value = st.execution_mode;
-}
-
-async function saveRobinhoodMode(requestedMode) {
-  const msg = $('rh-msg');
-  const mode = typeof requestedMode === 'string' ? requestedMode : ($('rh-exec-mode')?.value || 'manual').trim();
-  const autoSwitch = $('rh-auto-mode');
-  const saveButton = $('btn-save-rh-mode');
-  if (autoSwitch) autoSwitch.disabled = true;
-  if (saveButton) saveButton.disabled = true;
-  try {
-    const r = await api('/api/crypto/execution-mode', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({mode}),
-    });
-    const d = await r.json();
-    if (!d.ok) {
-      msg.textContent = d.error || '모드 저장 실패';
-      msg.className = 'msg err';
-      await loadRobinhoodStatus();
-      return;
-    }
-    const labels = {manual: '수동', semi: '반자동', auto: '완전자동'};
-    msg.textContent = `실행 모드: ${labels[d.mode] || d.mode}`;
-    msg.className = 'msg ok';
-    await loadRobinhoodStatus();
-    loadCrypto({quiet: true});
-  } catch (e) {
-    msg.textContent = String(e.message || e);
-    msg.className = 'msg err';
-    await loadRobinhoodStatus();
-  } finally {
-    if (autoSwitch) autoSwitch.disabled = false;
-    if (saveButton) saveButton.disabled = false;
-  }
-}
-
-async function loadRobinhoodStatus() {
-  try {
-    const r = await api('/api/robinhood/status');
-    renderRobinhoodStatus(await r.json());
-  } catch {
-    $('rh-label').textContent = '상태 확인 실패';
-  }
-}
-
-async function saveRobinhoodKeys() {
-  const msg = $('rh-msg');
-  const key = ($('rh-api-key').value || '').trim();
-  const priv = ($('rh-private-key').value || '').trim();
-  if (!key || !priv) {
-    msg.textContent = 'API Key와 Private Key를 모두 입력하세요.';
-    msg.className = 'msg err';
-    return;
-  }
-  try {
-    const r = await api('/api/robinhood/keys', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({api_key: key, private_key: priv}),
-    });
-    const d = await r.json();
-    if (!d.ok) {
-      msg.textContent = d.error || '저장 실패';
-      msg.className = 'msg err';
-      return;
-    }
-    $('rh-api-key').value = '';
-    $('rh-private-key').value = '';
-    msg.textContent = '키가 저장되었습니다.';
-    msg.className = 'msg ok';
-    renderRobinhoodStatus(d);
-  } catch (e) {
-    msg.textContent = String(e.message || e);
-    msg.className = 'msg err';
-  }
-}
-
-async function deleteRobinhoodKeys() {
-  const msg = $('rh-msg');
-  try {
-    const r = await api('/api/robinhood/keys', {method: 'DELETE'});
-    const d = await r.json();
-    msg.textContent = '키가 삭제되었습니다.';
-    msg.className = 'msg ok';
-    renderRobinhoodStatus(d);
-  } catch (e) {
-    msg.textContent = String(e.message || e);
-    msg.className = 'msg err';
-  }
-}
-
-async function syncRobinhood() {
-  const msg = $('rh-msg');
-  const btn = $('btn-robinhood-sync');
-  btn.disabled = true;
-  msg.textContent = 'Robinhood에서 보유 내역을 가져오는 중…';
-  msg.className = 'msg';
-  $('crypto-body').innerHTML = '<div class="empty">동기화 중…</div>';
-  try {
-    const r = await api('/api/robinhood/sync', {method: 'POST'});
-    const d = await r.json();
-    if (!d.ok) {
-      msg.textContent = d.error || '동기화 실패';
-      msg.className = 'msg err';
-      $('crypto-body').innerHTML = `<div class="empty">${escapeHtml(d.error || '동기화 실패')}</div>`;
-      return;
-    }
-    msg.textContent = '동기화 완료 — 아래 가이드를 확인하세요.';
-    msg.className = 'msg ok';
-    showCryptoGuide(d);
-    loadRobinhoodStatus();
-  } catch (e) {
-    msg.textContent = String(e.message || e);
-    msg.className = 'msg err';
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-function switchTab(name) {
-  document.querySelectorAll('.main-tab').forEach(btn => {
-    const on = btn.dataset.tab === name;
-    btn.classList.toggle('active', on);
-    btn.setAttribute('aria-selected', on ? 'true' : 'false');
-  });
-  document.querySelectorAll('.tab-panel').forEach(panel => {
-    panel.classList.toggle('active', panel.id === `tab-${name}`);
-  });
-  $('btn-settings').classList.toggle('active', name === 'settings');
-  if (name === 'settings') loadSettings();
-  if (name === 'crypto' && lastCryptoData) scheduleCryptoRefresh(lastCryptoData);
-  else if (cryptoRefreshTimer) { clearInterval(cryptoRefreshTimer); cryptoRefreshTimer = null; }
-  if (name === 'stocks') scheduleChartRedraw();
-}
-document.querySelectorAll('.main-tab').forEach(btn => {
-  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
-});
-
-let pendingScreenshots = [];
-let previewObjectUrls = [];
-
-function resetScreenshotUpload() {
-  previewObjectUrls.forEach(u => URL.revokeObjectURL(u));
-  previewObjectUrls = [];
-  pendingScreenshots = [];
-  $('upload-preview').innerHTML = '';
-  $('screenshot-input').value = '';
-  $('upload-zone').classList.remove('drag');
-}
-
-function renderUploadPreview() {
-  previewObjectUrls.forEach(u => URL.revokeObjectURL(u));
-  previewObjectUrls = [];
-  const el = $('upload-preview');
-  el.innerHTML = pendingScreenshots.map((f, i) => {
-    const url = URL.createObjectURL(f);
-    previewObjectUrls.push(url);
-    return `
-    <div class="upload-thumb">
-      <img src="${url}" alt="${escapeHtml(f.name)}">
-      <button type="button" data-idx="${i}" aria-label="제거">&times;</button>
-    </div>`;
-  }).join('');
-  el.querySelectorAll('button[data-idx]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      pendingScreenshots.splice(Number(btn.dataset.idx), 1);
-      renderUploadPreview();
-    });
-  });
-}
-
-function addScreenshotFiles(fileList) {
-  for (const f of fileList) {
-    if (f.type.startsWith('image/')) pendingScreenshots.push(f);
-  }
-  renderUploadPreview();
-}
-
-async function analyzeScreenshots() {
-  const msg = $('upload-msg');
-  if (!pendingScreenshots.length) {
-    msg.textContent = '스크린샷을 먼저 추가하세요.';
-    msg.className = 'msg err';
-    return;
-  }
-  const btn = $('btn-analyze-screenshots');
-  btn.disabled = true;
-  msg.textContent = '분석 중…';
-  msg.className = 'msg';
-  $('crypto-body').innerHTML = '<div class="empty">AI가 스크린샷을 읽는 중…</div>';
-  try {
-    const fd = new FormData();
-    pendingScreenshots.forEach(f => fd.append('files', f));
-    const t = localStorage.getItem(TOKEN_KEY) || '';
-    const r = await fetch('/api/crypto/screenshots', {
-      method: 'POST',
-      headers: t ? {'X-Admin-Token': t} : {},
-      body: fd,
-    });
-    const d = await r.json();
-    if (r.status === 401) {
-      showTokenGate('');
-      return;
-    }
-    if (!d.ok) {
-      msg.textContent = d.error || '분석 실패';
-      msg.className = 'msg err';
-      $('crypto-body').innerHTML = `<div class="empty">${escapeHtml(d.error || '분석 실패')}</div>`;
-      return;
-    }
-    msg.textContent = '분석 완료 — 아래 가이드를 확인하세요.';
-    msg.className = 'msg ok';
-    resetScreenshotUpload();
-    showCryptoGuide(d);
-  } catch (e) {
-    msg.textContent = String(e.message || e);
-    msg.className = 'msg err';
-  }
-  btn.disabled = false;
-}
-
-const uploadZone = $('upload-zone');
-const screenshotInput = $('screenshot-input');
-uploadZone.addEventListener('click', () => screenshotInput.click());
-uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag'); });
-uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag'));
-uploadZone.addEventListener('drop', e => {
-  e.preventDefault();
-  uploadZone.classList.remove('drag');
-  addScreenshotFiles(e.dataTransfer.files);
-});
-screenshotInput.addEventListener('change', () => {
-  addScreenshotFiles(screenshotInput.files);
-  screenshotInput.value = '';
-});
-$('btn-analyze-screenshots').addEventListener('click', analyzeScreenshots);
-$('btn-refresh-crypto').addEventListener('click', loadCrypto);
-$('btn-save-rh-keys').addEventListener('click', saveRobinhoodKeys);
-$('btn-save-rh-mode')?.addEventListener('click', saveRobinhoodMode);
-$('rh-auto-mode')?.addEventListener('change', e => saveRobinhoodMode(e.target.checked ? 'auto' : 'manual'));
-$('btn-delete-rh-keys').addEventListener('click', deleteRobinhoodKeys);
-$('btn-robinhood-sync').addEventListener('click', syncRobinhood);
-
-$('btn-activity').addEventListener('click', () => {
-  if (lastBriefing) renderBriefing(lastBriefing);
-  openOverlay('overlay-activity');
-  markSeen();
-});
-$('btn-settings').addEventListener('click', () => {
-  if ($('tab-settings').classList.contains('active')) {
-    switchTab('crypto');
-  } else {
-    switchTab('settings');
-  }
-});
-document.querySelectorAll('.modal-close[data-close]').forEach(btn => {
-  btn.addEventListener('click', () => closeOverlay(btn.dataset.close));
-});
-document.querySelectorAll('.overlay').forEach(ov => {
-  ov.addEventListener('click', e => {
-    if (e.target !== ov) return;
-    if (ov.id === 'overlay-token') return; // token gate must not be dismissed
-    if (ov.id === 'overlay-confirm') closeConfirm();
-    else closeOverlay(ov.id);
-  });
-});
-document.addEventListener('keydown', e => {
-  if (e.key !== 'Escape') return;
-  if ($('overlay-token').classList.contains('open')) return;
-  if ($('overlay-confirm').classList.contains('open')) closeConfirm();
-  else closeAllOverlays();
-});
-
 async function submitToken() {
   const t = $('token-input').value.trim();
   if (!t) return;
   localStorage.setItem(TOKEN_KEY, t);
+  const r = await fetch('/api/settings', {headers: {'X-Admin-Token': t}});
+  if (r.status === 401) { showTokenGate('토큰이 올바르지 않습니다.'); return; }
+  $('overlay-token').classList.remove('open');
+  $('token-input').value = '';
+  loadAll();
+}
+
+// ── confirm modal ───────────────────────────────────────────────────────
+function confirmThen(title, copy, label, action) {
+  $('confirm-title').textContent = title;
+  $('confirm-copy').textContent = copy;
+  $('btn-confirm-action').textContent = label;
+  pendingConfirm = action;
+  $('overlay-confirm').classList.add('open');
+}
+function closeConfirm() { pendingConfirm = null; $('overlay-confirm').classList.remove('open'); }
+
+// ── grid ────────────────────────────────────────────────────────────────
+const PHASE = {
+  idle: ['idle', '시작 전'],
+  liquidating: ['wait', '청산 중'],
+  running: ['on', '운영 중'],
+};
+
+function rungs(n, max) {
+  let h = '<span class="rungs" aria-hidden="true">';
+  for (let i = 0; i < max; i++) h += `<span class="rung${i < n ? ' filled' : ''}"></span>`;
+  return h + '</span>';
+}
+
+function renderVenue(key, v, step) {
+  const [cls, text] = PHASE[v.phase] || ['idle', v.phase];
+  const rows = v.ladders || [];
+  let body;
+  if (!v.configured) {
+    body = `<div class="empty">설정에서 API 키를 저장하세요.</div>`;
+  } else if (!rows.length) {
+    body = `<div class="empty">${esc(v.note || (v.phase === 'idle' ? '“시작”을 누르면 사다리를 구성합니다.' : '사다리 구성 대기 중'))}</div>`;
+  } else {
+    body = `<div class="table-scroll"><table>
+      <thead><tr>
+        <th>종목</th><th>칸</th><th class="num">현재가</th><th class="num">다음 매수</th><th class="num">다음 매도</th>
+        <th class="num">보유 평가</th><th class="num">미실현</th><th class="num">실현</th><th class="num">거래</th><th>상태</th>
+      </tr></thead><tbody>` +
+      rows.map(r => {
+        const avg = r.qty > 0 ? r.cost_basis / r.qty : null;
+        const status = r.last_error
+          ? `<span class="red" title="${esc(r.last_error)}">오류</span>`
+          : (r.seeded ? `<span class="dim">${r.last_fill_at ? '체결 ' + when(r.last_fill_at) : '대기'}</span>` : '<span class="amber">시딩 대기</span>');
+        return `<tr>
+          <td><b>${esc(r.symbol)}</b>${avg ? `<div class="hint">평단 ${px(avg)}</div>` : ''}</td>
+          <td>${rungs(r.units, r.max_units)}${r.units}/${r.max_units}</td>
+          <td class="num">${px(r.price)}</td>
+          <td class="num ${r.buy_at ? 'green' : 'dim'}">${r.buy_at ? px(r.buy_at) : '가득 참'}</td>
+          <td class="num ${r.sell_at ? 'red' : 'dim'}">${r.sell_at ? px(r.sell_at) : '보유 없음'}</td>
+          <td class="num">${money(r.value)}</td>
+          <td class="num">${signed(r.unrealized_pl)}</td>
+          <td class="num">${signed(r.realized_pl)}</td>
+          <td class="num">${r.trades}</td>
+          <td>${status}</td>
+        </tr>`;
+      }).join('') + '</tbody></table></div>';
+  }
+  const manual = (v.manual || []).length
+    ? `<p class="hint" style="margin-top:8px">수동 보유(API 불가, 그리드 제외): <b>${v.manual.map(esc).join(', ')}</b></p>` : '';
+  const note = v.note && rows.length ? `<p class="hint amber" style="margin-top:8px">${esc(v.note)}</p>` : '';
+  const total = (v.cash ?? 0) + (v.grid_value ?? 0);
+  return `<div class="panel">
+    <div class="row spread">
+      <h3>${esc(v.label)} <span class="pill ${cls}">${text}</span></h3>
+      <span class="hint">${v.unit_dollars ? `칸당 ${money(v.unit_dollars)} · 간격 ${(step * 100).toFixed(1)}%` : ''}${v.updated_at ? ` · ${when(v.updated_at)}` : ''}</span>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="label">그리드 자산</div><div class="value">${v.cash === null || v.cash === undefined ? '—' : money(total, false)}</div></div>
+      <div class="stat"><div class="label">현금</div><div class="value">${money(v.cash, false)}</div></div>
+      <div class="stat"><div class="label">보유 평가</div><div class="value">${money(v.grid_value, false)}</div></div>
+      <div class="stat"><div class="label">실현 손익</div><div class="value">${signed(v.realized_pl)}</div></div>
+      <div class="stat"><div class="label">미실현</div><div class="value">${signed(v.unrealized_pl)}</div></div>
+    </div>
+    ${body}${manual}${note}
+  </div>`;
+}
+
+function renderTrades(trades) {
+  if (!trades || !trades.length) { $('trades').innerHTML = '<div class="empty">아직 체결이 없습니다.</div>'; return; }
+  $('trades').innerHTML = `<div class="table-scroll"><table>
+    <thead><tr><th>시간</th><th>시장</th><th>종목</th><th></th><th class="num">수량</th><th class="num">단가</th><th class="num">금액</th><th class="num">실현</th><th>사유</th></tr></thead>
+    <tbody>` + trades.map(t => `<tr>
+      <td class="dim">${when(t.at)}</td>
+      <td class="dim">${t.venue === 'alpaca' ? '주식' : '크립토'}</td>
+      <td><b>${esc(t.symbol)}</b></td>
+      <td><span class="pill ${t.side}">${t.side === 'buy' ? '매수' : '매도'}</span></td>
+      <td class="num">${qty(t.qty)}</td>
+      <td class="num">${px(t.price)}</td>
+      <td class="num">${money(t.dollars)}</td>
+      <td class="num">${t.pl === null || t.pl === undefined ? '<span class="dim">—</span>' : signed(t.pl)}</td>
+      <td class="hint">${esc(t.reason || '')}</td>
+    </tr>`).join('') + '</tbody></table></div>';
+}
+
+function renderActivity(items) {
+  if (!items || !items.length) { $('activity').innerHTML = '<li class="dim">—</li>'; return; }
+  $('activity').innerHTML = items.map(a => `<li><time>${when(a.ts)}</time><span>${esc(a.message)}</span></li>`).join('');
+}
+
+function renderStatus(st) {
+  lastStatus = st;
+  const s = st.settings || {};
+  const stateEl = $('grid-state');
+  stateEl.textContent = s.enabled ? 'ON' : 'OFF';
+  stateEl.className = 'pill ' + (s.enabled ? 'on' : 'off');
+  $('btn-toggle').textContent = s.enabled ? '자동매매 OFF' : '자동매매 ON';
+  if (document.activeElement !== $('step-input')) $('step-input').value = (s.step * 100).toFixed(1).replace(/\.0$/, '');
+  const lt = st.last_tick;
+  let tickText = lt?.at ? `마지막 점검 ${when(lt.at)}` : '점검 기록 없음';
+  if (lt?.skipped === 'off') tickText += ' · 자동매매 OFF';
+  else if (lt?.venues) {
+    tickText += ' · ' + Object.entries(lt.venues).map(([k, r]) => {
+      const name = k === 'alpaca' ? '주식' : '크립토';
+      if (r.skipped) return `${name}: ${r.skipped}`;
+      if (r.error) return `${name}: 오류`;
+      if (r.liquidated) return `${name}: 청산 ${r.liquidated.length}건`;
+      if (r.seeded) return `${name}: 사다리 구성`;
+      return `${name}: 체결 ${r.fills ?? 0}건${(r.errors || []).length ? `, 오류 ${r.errors.length}` : ''}`;
+    }).join(' · ');
+  }
+  $('grid-tick').textContent = tickText;
+  const venues = st.venues || {};
+  $('venues').innerHTML = ['robinhood', 'alpaca'].filter(k => venues[k]).map(k => renderVenue(k, venues[k], s.step)).join('');
+  renderTrades(st.trades);
+  renderActivity(st.activity);
+}
+
+async function loadStatus() {
   try {
-    const r = await fetch('/api/settings', {headers: {'X-Admin-Token': t}});
-    if (r.status === 401) {
-      showTokenGate('토큰이 올바르지 않습니다.');
-      return;
-    }
-    closeOverlay('overlay-token');
-    $('token-msg').textContent = '';
-    refresh();
-    loadCrypto();
-    loadSettings();
+    const r = await api('/api/grid/status');
+    renderStatus(await r.json());
+    showErr('');
   } catch (e) {
-    showTokenGate('서버에 연결할 수 없습니다.');
+    if (!String(e.message).includes('토큰')) showErr('상태를 불러오지 못했습니다: ' + e.message);
   }
 }
-$('btn-token-save').addEventListener('click', submitToken);
-$('token-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitToken(); });
 
-async function testTelegram(clickedButton) {
-  const el = $('tg-msg');
-  const btn = clickedButton || $('btn-tg-test');
-  btn.disabled = true;
-  el.style.display = 'block';
-  el.textContent = '발송 중… 텔레그램 API 응답을 기다립니다.';
-  el.className = 'msg';
-  el.style.color = 'var(--dim)';
+async function saveStep() {
+  const v = parseFloat($('step-input').value);
+  if (!(v >= 1 && v <= 25)) { setMsg('grid-msg', '간격은 1%~25% 사이로 입력하세요.', false); return; }
   try {
-    const r = await api('/api/notify/test', {method: 'POST'});
-    const raw = await r.text();
-    let d;
-    try {
-      d = raw ? JSON.parse(raw) : {};
-    } catch (_) {
-      throw new Error(`서버 응답 오류 (HTTP ${r.status}): ${raw.slice(0, 160)}`);
-    }
-    if (r.status === 401) {
-      el.textContent = '인증 실패 — 토큰을 다시 입력하세요.';
-      el.className = 'msg err';
-      el.style.color = '';
-      showTokenGate('');
-    } else if (d.ok) {
-      el.textContent = d.message || '✓ 발송 성공 — 텔레그램을 확인하세요.';
-      el.className = 'msg ok';
-      el.style.color = '';
-    } else {
-      el.textContent = d.error || '발송 실패';
-      el.className = 'msg err';
-      el.style.color = '';
-    }
-  } catch (e) {
-    el.textContent = '네트워크 오류: ' + String(e.message || e);
-    el.className = 'msg err';
-    el.style.color = '';
-  }
+    const d = await post('/api/grid/settings', {step_pct: v});
+    renderStatus(d);
+    setMsg('grid-msg', `간격 ${v}% 저장. 다음 점검부터 새 간격으로 판단합니다.`, true);
+  } catch (e) { setMsg('grid-msg', e.message, false); }
+}
+
+async function startGrid() {
+  const btn = $('btn-start');
+  btn.disabled = true;
+  setMsg('grid-msg', '청산 주문을 내고 사다리를 구성합니다… (최대 1~2분)', true);
+  try {
+    const d = await post('/api/grid/start');
+    renderStatus(d);
+    setMsg('grid-msg', '시작했습니다. 주식은 장중에만, 크립토는 바로 진행됩니다. 청산이 끝난 다음 점검에서 첫 매수가 들어갑니다.', true);
+  } catch (e) { setMsg('grid-msg', e.message, false); }
   btn.disabled = false;
 }
 
-$('btn-save-keys').addEventListener('click', saveKeys);
-$('btn-delete-keys').addEventListener('click', () => openConfirm(
-  '저장된 API 키를 삭제할까요?',
-  '대시보드에 저장된 키만 삭제됩니다. Vercel 환경변수의 키가 있으면 해당 키로 다시 연결됩니다.',
-  '삭제',
-  deleteKeys,
+async function toggleGrid() {
+  const enabled = !!lastStatus?.settings?.enabled;
+  try {
+    const d = await post(enabled ? '/api/grid/stop' : '/api/grid/resume');
+    renderStatus(d);
+    setMsg('grid-msg', enabled ? '자동매매를 멈췼습니다. 보유는 그대로입니다.' : '자동매매를 다시 켰습니다.', true);
+  } catch (e) { setMsg('grid-msg', e.message, false); }
+}
+
+async function tickNow() {
+  const btn = $('btn-tick');
+  btn.disabled = true;
+  setMsg('grid-msg', '점검 중…', true);
+  try {
+    const d = await post('/api/grid/tick');
+    renderStatus(d);
+    setMsg('grid-msg', '점검 완료.', true);
+  } catch (e) { setMsg('grid-msg', e.message, false); }
+  btn.disabled = false;
+}
+
+// ── settings ────────────────────────────────────────────────────────────
+function renderAlpaca(st) {
+  const conn = st?.connection || {};
+  const dot = $('conn-dot'); dot.className = 'status-dot';
+  if (!st?.configured) {
+    $('conn-label').textContent = 'Alpaca 키 미설정';
+    $('conn-detail').textContent = '라이브 API 키(AK…)를 저장하거나 서버 환경변수를 설정하세요.';
+    dot.classList.add('err');
+  } else if (st.paper_key_detected) {
+    $('conn-label').textContent = '페이퍼 키가 설정되어 있습니다';
+    $('conn-detail').textContent = `키 ${st.key_hint} — 실거래 전용입니다. 라이브 키로 교체하세요.`;
+    dot.classList.add('err');
+  } else if (conn.connected) {
+    const a = conn.account || {};
+    $('conn-label').textContent = 'Alpaca 연결됨';
+    $('conn-detail').textContent = `키 ${st.key_hint} · Equity ${money(a.equity, false)} · 현금 ${money(a.cash, false)}`;
+    dot.classList.add('ok');
+  } else {
+    $('conn-label').textContent = 'Alpaca 연결 실패';
+    $('conn-detail').textContent = conn.error || '키를 확인하세요.';
+    dot.classList.add('err');
+  }
+  $('btn-delete-keys').style.display = st?.keys_source === 'dashboard' ? '' : 'none';
+
+  const tg = st?.telegram || {};
+  const tgEl = $('tg-status');
+  if (!tg.token_set || !tg.chat_id_set) {
+    tgEl.textContent = '서버: ' + (!tg.token_set ? 'TELEGRAM_BOT_TOKEN 없음 ' : '') + (!tg.chat_id_set ? 'TELEGRAM_CHAT_ID 없음' : '');
+    tgEl.style.color = 'var(--red)';
+  } else {
+    tgEl.textContent = `서버: BOT ${tg.token_hint || '?'} · CHAT ${tg.chat_id_hint || '?'}` + (tg.chat_id_issue ? ' · chat ID 확인 필요' : '');
+    tgEl.style.color = tg.chat_id_issue ? 'var(--amber)' : 'var(--green)';
+  }
+}
+
+function renderRobinhood(st) {
+  const dot = $('rh-dot'); dot.className = 'status-dot';
+  if (!st?.configured) {
+    $('rh-label').textContent = 'API 키 미설정';
+    $('rh-detail').textContent = 'Robinhood 웹 → 크립토 설정에서 API 키를 발급하세요.';
+    dot.classList.add('err');
+    $('btn-delete-rh-keys').style.display = 'none';
+    return;
+  }
+  $('rh-label').textContent = `키 저장됨 (${st.key_hint || '••••'})`;
+  const conn = st.connection || {};
+  if (conn.connected) {
+    dot.classList.add('ok');
+    const bp = conn.account?.buying_power;
+    const apiTrade = conn.account?.is_api_tradable;
+    $('rh-detail').textContent = `연결됨 · 매수가능 ${money(bp, false)} · ${conn.holdings_count ?? 0}종목`
+      + (apiTrade === false ? ' · 이 계좌는 API 주문 불가' : '');
+  } else {
+    dot.classList.add('err');
+    $('rh-detail').textContent = conn.error === 'keys_not_configured' ? '키를 저장하세요.' : (conn.error || '연결 실패');
+  }
+  $('btn-delete-rh-keys').style.display = st.keys_source === 'dashboard' ? '' : 'none';
+}
+
+async function loadSettings() {
+  try {
+    const [a, r] = await Promise.all([api('/api/settings'), api('/api/robinhood/status')]);
+    renderAlpaca(await a.json());
+    renderRobinhood(await r.json());
+  } catch (e) {
+    $('conn-label').textContent = '설정 불러오기 실패';
+    $('conn-detail').textContent = String(e.message || e);
+  }
+}
+
+async function saveAlpacaKeys() {
+  const key = $('api-key').value.trim(), secret = $('api-secret').value.trim();
+  if (!key || !secret) { setMsg('settings-msg', 'API Key와 Secret을 모두 입력하세요.', false); return; }
+  try {
+    const d = await post('/api/settings/keys', {api_key: key, secret_key: secret});
+    $('api-key').value = ''; $('api-secret').value = '';
+    renderAlpaca(d);
+    setMsg('settings-msg', 'Alpaca 키가 저장되었습니다.', true);
+  } catch (e) { setMsg('settings-msg', e.message, false); }
+}
+async function deleteAlpacaKeys() {
+  try {
+    const r = await api('/api/settings/keys', {method: 'DELETE'});
+    renderAlpaca(await r.json());
+    setMsg('settings-msg', '키가 삭제되었습니다.', true);
+  } catch (e) { setMsg('settings-msg', e.message, false); }
+}
+async function saveRobinhoodKeys() {
+  const key = $('rh-api-key').value.trim(), pk = $('rh-private-key').value.trim();
+  if (!key || !pk) { setMsg('rh-msg', 'API Key와 Private Key를 모두 입력하세요.', false); return; }
+  try {
+    const d = await post('/api/robinhood/keys', {api_key: key, private_key: pk});
+    $('rh-api-key').value = ''; $('rh-private-key').value = '';
+    renderRobinhood(d);
+    setMsg('rh-msg', 'Robinhood 키가 저장되었습니다.', true);
+  } catch (e) { setMsg('rh-msg', e.message, false); }
+}
+async function deleteRobinhoodKeys() {
+  try {
+    const r = await api('/api/robinhood/keys', {method: 'DELETE'});
+    renderRobinhood(await r.json());
+    setMsg('rh-msg', '키가 삭제되었습니다.', true);
+  } catch (e) { setMsg('rh-msg', e.message, false); }
+}
+async function testTelegram() {
+  const btn = $('btn-tg-test'); btn.disabled = true;
+  setMsg('tg-msg', '발송 중…', true);
+  try {
+    const d = await post('/api/notify/test');
+    setMsg('tg-msg', d.message || '발송 성공 — 텔레그램을 확인하세요.', true);
+  } catch (e) { setMsg('tg-msg', e.message, false); }
+  btn.disabled = false;
+}
+
+// ── wiring ──────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
+  if (name === 'settings') loadSettings();
+}
+document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+$('btn-refresh').addEventListener('click', loadAll);
+$('btn-save-step').addEventListener('click', saveStep);
+$('step-input').addEventListener('keydown', e => { if (e.key === 'Enter') saveStep(); });
+$('btn-start').addEventListener('click', () => confirmThen(
+  '그리드를 새로 시작할까요?',
+  'API로 팔 수 있는 모든 보유(주식은 장중, 크립토는 즉시)를 현금화한 뒤, 종목별 현금을 5칸으로 나눠 3칸을 먼저 매수합니다. 이전 사다리와 체결 기록은 지워집니다.',
+  '현금화 후 시작', startGrid,
 ));
-$('btn-reset-state').addEventListener('click', () => openConfirm(
-  '트레이딩 상태를 초기화할까요?',
-  '드로다운 기준점, 레짐, 포지션 메타, 예약 주문, 에쿼티 곡선과 거래 기록이 삭제됩니다. Alpaca 키와 실제 계좌 자산은 변경되지 않습니다.',
-  '초기화',
-  resetState,
-));
-$('btn-confirm-close').addEventListener('click', closeConfirm);
+$('btn-toggle').addEventListener('click', toggleGrid);
+$('btn-tick').addEventListener('click', tickNow);
+$('btn-save-keys').addEventListener('click', saveAlpacaKeys);
+$('btn-delete-keys').addEventListener('click', () => confirmThen('Alpaca 키를 삭제할까요?', '대시보드에 저장된 키만 삭제됩니다.', '삭제', deleteAlpacaKeys));
+$('btn-save-rh-keys').addEventListener('click', saveRobinhoodKeys);
+$('btn-delete-rh-keys').addEventListener('click', () => confirmThen('Robinhood 키를 삭제할까요?', '대시보드에 저장된 키만 삭제됩니다.', '삭제', deleteRobinhoodKeys));
+$('btn-tg-test').addEventListener('click', testTelegram);
+$('btn-change-token').addEventListener('click', () => showTokenGate(''));
 $('btn-confirm-cancel').addEventListener('click', closeConfirm);
-$('btn-confirm-action').addEventListener('click', async () => {
-  const action = pendingConfirmAction;
-  closeConfirm();
-  if (action) await action();
-});
-refresh();
-loadCrypto();
-loadSettings();
-setInterval(refresh, 30000);
-setInterval(() => {
-  if ($('tab-settings').classList.contains('active')) loadSettings();
-}, 15000);
+$('btn-confirm-action').addEventListener('click', async () => { const a = pendingConfirm; closeConfirm(); if (a) await a(); });
+$('btn-token-save').addEventListener('click', submitToken);
+$('token-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitToken(); });
+document.querySelectorAll('.overlay').forEach(o => o.addEventListener('click', e => { if (e.target === o && o.id !== 'overlay-token') o.classList.remove('open'); }));
+
+function loadAll() { loadStatus(); if ($('tab-settings').classList.contains('active')) loadSettings(); }
+loadAll();
+setInterval(loadStatus, 30000);
 </script>
 </body>
 </html>

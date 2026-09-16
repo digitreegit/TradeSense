@@ -1112,9 +1112,10 @@ def test_entry_quality_rejects_losing_relative_winner_and_live_trend_break():
     assert not _entry_quality({**good, 'rsi14': 90})
 
 
-def test_crypto_guard_runs_overnight_without_enabling_execution():
-    from app.main import GUARDS
-    weekdays_only, window, daily = GUARDS['crypto_advise']
+def test_v4_scheduler_only_runs_the_grid_tick_around_the_clock():
+    from app.main import GUARDS, JOBS
+    assert list(JOBS) == ['grid']
+    weekdays_only, window, daily = GUARDS['grid']
     assert not weekdays_only
     assert not daily
     assert all(window(hour, 15) for hour in range(24))
