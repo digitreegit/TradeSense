@@ -659,6 +659,18 @@ def status() -> dict:
             configured = v.configured()
         except Exception:
             pass
+        # Account total and cash come straight from the broker on every
+        # status read; the tick-time copies are only a fallback.
+        account_total = vb.get("account_total")
+        cash = vb.get("cash")
+        if configured:
+            live_total = _account_total(v)
+            if live_total is not None:
+                account_total = live_total
+            try:
+                cash = round(float(v.cash()), 2)
+            except Exception as exc:
+                log.warning("%s cash failed: %s", v.name, exc)
         out_venues[v.name] = {
             "label": v.label,
             "configured": configured,
@@ -667,8 +679,8 @@ def status() -> dict:
             "errors": vb.get("errors") or [],
             "manual": vb.get("manual") or [],
             "unit_dollars": vb.get("unit_dollars"),
-            "account_total": vb.get("account_total"),
-            "cash": vb.get("cash"),
+            "account_total": account_total,
+            "cash": cash,
             "grid_value": vb.get("grid_value"),
             "realized_pl": realized,
             "unrealized_pl": round(sum(unreal), 2) if unreal else None,
