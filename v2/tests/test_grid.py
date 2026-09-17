@@ -362,6 +362,73 @@ def test_one_venue_failure_does_not_block_the_other(env):
     assert env.kv[grid_engine.BOOK_KEY]["alpaca"]["phase"] == "running"
 
 
+def test_new_cash_grows_rungs_and_tops_up_held_units_without_selling(env):
+    v = FakeVenue("robinhood", ["BTC/USD", "ETH/USD"], prices={"BTC/USD": 100.0, "ETH/USD": 10.0}, cash=1000.0)
+    vb = _running_book(env, v)
+    unit_old = vb["unit_dollars"]
+    assert unit_old == pytest.approx(grid.unit_size(1000.0, 2))
+    # Small drift does not resize.
+    v._cash += 50.0
+    grid_engine.tick(NOW)
+    assert env.kv[grid_engine.BOOK_KEY]["robinhood"]["unit_dollars"] == pytest.approx(unit_old)
+    # User sells XRP in the app → +$2000 buying power.
+    v._cash += 2000.0
+    v.orders.clear()
+    r = grid_engine.tick(NOW)["venues"]["robinhood"]
+    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
+    capital = 3050.0 - 6 * unit_old + 6 * unit_old  # cash + basis = 3050
+    unit_new = grid.unit_size(capital, 2)
+    assert vb["unit_dollars"] == pytest.approx(unit_new)
+    assert r["fills"] == 2 and all(o[0] == "buy" for o in v.orders)
+    for l in vb["ladders"].values():
+        assert len(l["units"]) == grid.START_UNITS            # rung count unchanged
+        assert grid.cost_basis(l) == pytest.approx(3 * unit_new, rel=1e-6)
+        assert not l.get("top_up")
+    trades = env.kv[grid_engine.TRADES_KEY]
+    assert trades[-1]["reason"] == "칸 크기 보충"
+    # Losing cash never shrinks the plan.
+    v._cash -= 1500.0
+    grid_engine.tick(NOW)
+    assert env.kv[grid_engine.BOOK_KEY]["robinhood"]["unit_dollars"] == pytest.approx(unit_new)
+
+
+def test_liquidation_errors_are_kept_for_the_dashboard(env):
+    v = FakeVenue("robinhood", ["BTC/USD"], prices={"BTC/USD": 100.0, "SHIB/USD": 0.00001},
+                  positions={"SHIB/USD": 1000.0}, cash=500.0, tradable=["BTC/USD", "SHIB/USD"])
+    v.fail_next = {"ok": False, "error": "SHIB 매도 가능 수량이 없습니다.", "transient": True}
+    grid_engine.set_venues([v])
+    grid_engine.start(run_now=False)
+    grid_engine.tick(NOW)
+    st = grid_engine.status()["venues"]["robinhood"]
+    assert st["phase"] == "liquidating"
+    assert st["errors"] == ["SHIB/USD: SHIB 매도 가능 수량이 없습니다."]
+
+
+def test_status_reports_account_total_when_venue_has_equity(env):
+    v = FakeVenue("alpaca", ["AMD"], prices={"AMD": 100.0}, cash=1000.0)
+    v.equity = lambda: 1234.5
+    _running_book(env, v)
+    assert grid_engine.status()["venues"]["alpaca"]["account_total"] == 1234.5
+
+
+def test_alpaca_cash_uses_buying_power_not_settled_only():
+    class Acct:
+        cash = "504.83"
+        buying_power = "504.83"
+        non_marginable_buying_power = "170.00"
+
+    class Trading:
+        def get_account(self):
+            return Acct()
+
+    class Broker:
+        trading = Trading()
+
+    venue = grid_engine.AlpacaVenue()
+    venue._broker = Broker()
+    assert venue.cash() == pytest.approx(504.83)
+
+
 def test_status_exposes_levels_and_pl(env):
     v = FakeVenue("alpaca", ["AMD"], prices={"AMD": 100.0}, cash=1000.0)
     _running_book(env, v)

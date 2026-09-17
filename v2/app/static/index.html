@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>TradeSense v4 — Grid</title>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="icon" type="image/png" href="/favicon.png?v=4">
+<link rel="apple-touch-icon" href="/favicon.png?v=4">
 <style>
   :root {
     --bg: #0d1117; --panel: #161b22; --panel2: #1c2128; --border: #21262d;
@@ -368,20 +368,25 @@ function renderVenue(key, v, step) {
   const manual = (v.manual || []).length
     ? `<p class="hint" style="margin-top:8px">수동 보유(API 불가, 그리드 제외): <b>${v.manual.map(esc).join(', ')}</b></p>` : '';
   const note = v.note && rows.length ? `<p class="hint amber" style="margin-top:8px">${esc(v.note)}</p>` : '';
-  const total = (v.cash ?? 0) + (v.grid_value ?? 0);
+  const errors = (v.errors || []).length
+    ? `<ul class="hint red" style="margin:8px 0 0 18px">${v.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul>` : '';
+  const gridTotal = (v.cash ?? 0) + (v.grid_value ?? 0);
+  const hasGrid = v.cash !== null && v.cash !== undefined;
+  const outside = v.account_total != null && hasGrid ? v.account_total - gridTotal : null;
   return `<div class="panel">
     <div class="row spread">
       <h3>${esc(v.label)} <span class="pill ${cls}">${text}</span></h3>
       <span class="hint">${v.unit_dollars ? `칸당 ${money(v.unit_dollars)} · 간격 ${(step * 100).toFixed(1)}%` : ''}${v.updated_at ? ` · ${when(v.updated_at)}` : ''}</span>
     </div>
     <div class="stats">
-      <div class="stat"><div class="label">그리드 자산</div><div class="value">${v.cash === null || v.cash === undefined ? '—' : money(total, false)}</div></div>
+      <div class="stat"><div class="label">계좌 총액</div><div class="value">${money(v.account_total, false)}</div>${outside && Math.abs(outside) >= 1 ? `<div class="hint">그리드 밖 ${money(outside, false)}</div>` : ''}</div>
+      <div class="stat"><div class="label">그리드 자산</div><div class="value">${hasGrid ? money(gridTotal, false) : '—'}</div></div>
       <div class="stat"><div class="label">현금</div><div class="value">${money(v.cash, false)}</div></div>
       <div class="stat"><div class="label">보유 평가</div><div class="value">${money(v.grid_value, false)}</div></div>
       <div class="stat"><div class="label">실현 손익</div><div class="value">${signed(v.realized_pl)}</div></div>
       <div class="stat"><div class="label">미실현</div><div class="value">${signed(v.unrealized_pl)}</div></div>
     </div>
-    ${body}${manual}${note}
+    ${body}${manual}${note}${errors}
   </div>`;
 }
 

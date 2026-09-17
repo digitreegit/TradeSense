@@ -221,6 +221,43 @@ def apply_fill(ladder: dict, *, side: str, qty: float, price: float, dollars: fl
     }
 
 
+def top_up_deficit(ladder: dict) -> float:
+    """Dollars needed to bring every held unit up to the current unit size.
+    Used after the ladder is resized upward (new cash arrived)."""
+    units = ladder.get("units") or []
+    if not units:
+        return 0.0
+    target = len(units) * float(ladder.get("unit_dollars") or 0)
+    return max(0.0, round(target - cost_basis(ladder), 2))
+
+
+def apply_top_up(ladder: dict, *, qty: float, price: float, dollars: float,
+                 at: datetime | None = None) -> dict:
+    """Spread a top-up buy across the held units so the rung count stays the
+    same and each rung ends up ~unit-sized. Re-anchors at the fill price."""
+    at = at or datetime.now(timezone.utc)
+    units: list[dict] = ladder.get("units") or []
+    if not units:
+        return apply_fill(ladder, side="buy", qty=qty, price=price, dollars=dollars, at=at)
+    n = len(units)
+    for u in units:
+        u["qty"] = float(u["qty"]) + float(qty) / n
+        u["dollars"] = float(u["dollars"]) + float(dollars) / n
+        u["price"] = u["dollars"] / u["qty"] if u["qty"] > 0 else float(price)
+    ladder["anchor"] = float(price)
+    ladder["hwm"] = None
+    ladder["trades"] = int(ladder.get("trades") or 0) + 1
+    ladder["last_fill_at"] = at.isoformat()
+    ladder["last_error"] = None
+    ladder["last_price"] = float(price)
+    ladder.pop("top_up", None)
+    return {
+        "at": at.isoformat(), "venue": ladder.get("venue"), "symbol": ladder.get("symbol"),
+        "side": "buy", "qty": float(qty), "price": float(price), "dollars": round(float(dollars), 2),
+        "pl": None, "units_after": n,
+    }
+
+
 def top_unit_bought_on(ladder: dict, day, tz) -> bool:
     """True when the unit a sell would pop was bought on calendar day `day`
     in timezone `tz`. Used to avoid same-day round trips (PDT) on stocks."""

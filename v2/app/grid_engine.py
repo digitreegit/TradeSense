@@ -32,6 +32,9 @@ TRADES_KEY = "grid_trades"
 TICK_KEY = "grid_last_tick"
 MAX_TRADES_KEPT = 500
 ORDER_WAIT_SECONDS = 20.0
+# Resize the ladders upward when cash + cost basis exceeds the planned
+# allocation by this factor (new deposits, app sales moved into the grid).
+RESIZE_TRIGGER = 1.15
 
 
 # --------------------------------------------------------------------------
@@ -126,15 +129,26 @@ class AlpacaVenue:
 
     def cash(self) -> float:
         acct = self.broker.trading.get_account()
-        # Cash accounts: non_marginable BP excludes unsettled sale proceeds.
+        # Spendable cash. Alpaca margin-type accounts (the default, also under
+        # $2k) can reuse same-day sale proceeds, so buying_power == cash right
+        # after a liquidation; the min() only matters when BP is below cash.
+        # (non_marginable_buying_power excluded unsettled proceeds and sized
+        # the first ladders on 1/3 of the account — 2026-09-17.)
         cash = float(acct.cash or 0)
-        nm = getattr(acct, "non_marginable_buying_power", None)
-        if nm is not None:
+        bp = getattr(acct, "buying_power", None)
+        if bp is not None:
             try:
-                cash = min(cash, float(nm))
+                cash = min(cash, float(bp))
             except (TypeError, ValueError):
                 pass
         return max(cash, 0.0)
+
+    def equity(self) -> float | None:
+        try:
+            return float(self.broker.trading.get_account().equity)
+        except Exception as exc:
+            log.warning("alpaca equity failed: %s", exc)
+            return None
 
     def prices(self, symbols: list[str]) -> dict[str, float]:
         out: dict[str, float] = {}
@@ -247,6 +261,16 @@ class RobinhoodVenue:
     def cash(self) -> float:
         return float(self.client.get_account().get("buying_power") or 0)
 
+    def equity(self) -> float | None:
+        """Buying power + every crypto holding at live mid (manual coins too)."""
+        try:
+            positions = self.positions()
+            prices = self.prices(list(positions)) if positions else {}
+            return self.cash() + sum(q * prices.get(s, 0.0) for s, q in positions.items())
+        except Exception as exc:
+            log.warning("robinhood equity failed: %s", exc)
+            return None
+
     def prices(self, symbols: list[str]) -> dict[str, float]:
         from .robinhood_live import _mid_from_quote
         if not symbols:
@@ -322,8 +346,20 @@ def set_venues(items: list | None) -> None:
 # --------------------------------------------------------------------------
 def _empty_venue_book() -> dict:
     return {"phase": "idle", "ladders": {}, "manual": [], "unit_dollars": None,
-            "note": None, "started_at": None, "updated_at": None,
-            "cash": None, "grid_value": None}
+            "note": None, "errors": [], "started_at": None, "updated_at": None,
+            "cash": None, "grid_value": None, "account_total": None}
+
+
+def _account_total(venue) -> float | None:
+    fn = getattr(venue, "equity", None)
+    if fn is None:
+        return None
+    try:
+        v = fn()
+        return round(float(v), 2) if v is not None else None
+    except Exception as exc:
+        log.warning("%s equity failed: %s", venue.name, exc)
+        return None
 
 
 def get_book() -> dict:
@@ -460,9 +496,12 @@ def _liquidate(venue, vb: dict, now: datetime) -> dict:
             log_activity("grid", f"{venue.label} {sym} 청산 ${r['dollars']:,.2f}")
         else:
             errors.append(f"{sym}: {r.get('error')}")
+            log_activity("grid", f"{venue.label} {sym} 청산 실패: {r.get('error')}")
     vb["manual"] = sorted(manual)
+    vb["errors"] = errors
+    vb["account_total"] = _account_total(venue)
     if sold or errors:
-        vb["note"] = "청산 진행 중" + (f" · 오류 {len(errors)}건" if errors else "")
+        vb["note"] = "청산 진행 중" + (f" · 오류 {len(errors)}건 — 다음 점검에서 재시도" if errors else "")
         return {"liquidated": sold, "errors": errors, "manual": manual}
 
     cash = venue.cash()
@@ -495,6 +534,7 @@ def _run(venue, vb: dict, step: float, now: datetime) -> dict:
     prices = venue.prices(syms)
     positions = venue.positions()
     cash = venue.cash()
+    _maybe_resize(venue, vb, ladders, cash)
     actions: list[tuple[str, dict, float]] = []
     for sym, ladder in ladders.items():
         px = prices.get(sym)
@@ -506,6 +546,14 @@ def _run(venue, vb: dict, step: float, now: datetime) -> dict:
             if note:
                 log_activity("grid", note)
         grid.observe(ladder, px)
+        if ladder.get("top_up"):
+            deficit = grid.top_up_deficit(ladder)
+            if deficit < grid.MIN_ORDER_DOLLARS:
+                ladder.pop("top_up", None)
+            else:
+                actions.append((sym, {"side": "buy", "dollars": deficit, "n_units": 0,
+                                      "top_up": True, "reason": "칸 크기 보충"}, px))
+                continue
         action = grid.decide(ladder, px, step, cash)
         if not action:
             continue
@@ -535,10 +583,14 @@ def _run(venue, vb: dict, step: float, now: datetime) -> dict:
             errors.append(f"{sym}: {r.get('error')}")
             log_activity("grid", f"{venue.label} {sym} {action['side']} 실패: {r.get('error')}")
             continue
-        trade = grid.apply_fill(
-            ladder, side=action["side"], qty=r["qty"], price=r["price"],
-            dollars=r["dollars"], n_units=int(action.get("n_units") or 1), at=now,
-        )
+        if action.get("top_up"):
+            trade = grid.apply_top_up(ladder, qty=r["qty"], price=r["price"],
+                                      dollars=r["dollars"], at=now)
+        else:
+            trade = grid.apply_fill(
+                ladder, side=action["side"], qty=r["qty"], price=r["price"],
+                dollars=r["dollars"], n_units=int(action.get("n_units") or 1), at=now,
+            )
         trade["reason"] = action.get("reason")
         _record_trade(trade)
         cash += r["dollars"] if action["side"] == "sell" else -r["dollars"]
@@ -554,8 +606,39 @@ def _run(venue, vb: dict, step: float, now: datetime) -> dict:
     vb["grid_value"] = round(sum(
         grid.held_qty(l) * prices.get(s, l.get("last_price") or 0) for s, l in ladders.items()
     ), 2)
+    vb["errors"] = errors
+    vb["account_total"] = _account_total(venue)
     vb["note"] = None if not errors else f"주문 오류 {len(errors)}건 — 다음 점검에서 재시도"
     return {"fills": len(fills), "errors": errors, "cash": vb["cash"]}
+
+
+def _maybe_resize(venue, vb: dict, ladders: dict[str, dict], cash: float) -> str | None:
+    """Grow the rungs when the venue holds materially more capital than the
+    ladders were sized for (deposit, or an app sale moved into buying power).
+    Never shrinks: losses must not quietly reduce the plan. Held units are
+    topped up on the next tick so the rung count stays the same."""
+    if not ladders:
+        return None
+    n = len(ladders)
+    unit_old = float(vb.get("unit_dollars") or 0)
+    basis = sum(grid.cost_basis(l) for l in ladders.values())
+    capital = cash + basis
+    planned = unit_old * grid.MAX_UNITS * n
+    if unit_old <= 0 or capital < planned * RESIZE_TRIGGER:
+        return None
+    unit_new = grid.unit_size(capital, n)
+    if unit_new <= unit_old:
+        return None
+    for l in ladders.values():
+        l["unit_dollars"] = unit_new
+        if l.get("units"):
+            l["top_up"] = True
+    vb["unit_dollars"] = unit_new
+    msg = (f"{venue.label} 자본 ${capital:,.2f} 감지 — 칸당 ${unit_old:,.2f} → ${unit_new:,.2f}, "
+           f"보유 칸 보충 매수")
+    log_activity("grid", msg)
+    _notify(f"[v4 그리드] {msg}")
+    return msg
 
 
 # --------------------------------------------------------------------------
@@ -581,8 +664,10 @@ def status() -> dict:
             "configured": configured,
             "phase": vb.get("phase") or "idle",
             "note": vb.get("note"),
+            "errors": vb.get("errors") or [],
             "manual": vb.get("manual") or [],
             "unit_dollars": vb.get("unit_dollars"),
+            "account_total": vb.get("account_total"),
             "cash": vb.get("cash"),
             "grid_value": vb.get("grid_value"),
             "realized_pl": realized,
