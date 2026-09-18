@@ -201,6 +201,7 @@ def health():
 # ── Grid ────────────────────────────────────────────────────────────────────
 class GridSettingsBody(BaseModel):
     step_pct: float  # percent, e.g. 5 for 5%
+    venue: str | None = None  # "alpaca" | "robinhood"; None applies to every venue
 
 
 @app.get("/api/grid/status")
@@ -223,7 +224,10 @@ def grid_settings(body: GridSettingsBody, request: Request):
             "ok": False,
             "error": f"간격은 {grid_engine.grid.MIN_STEP:.0%}~{grid_engine.grid.MAX_STEP:.0%} 사이여야 합니다.",
         }, status_code=400)
-    grid_engine.set_step(step)
+    try:
+        grid_engine.set_step(step, venue=body.venue)
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "알 수 없는 시장입니다."}, status_code=400)
     return JSONResponse({"ok": True, **grid_engine.status()})
 
 

@@ -1,7 +1,7 @@
 """v4 grid: pure ladder logic + engine lifecycle with fake venues."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -438,3 +438,40 @@ def test_status_exposes_levels_and_pl(env):
     assert row["sell_at"] == pytest.approx(105.0)
     assert row["buy_at"] == pytest.approx(95.0)
     assert st["settings"]["step"] == 0.05 and st["version"] == "v4"
+
+
+def test_step_is_set_per_venue_and_legacy_single_step_is_the_fallback(env):
+    rh = FakeVenue("robinhood", ["BTC/USD"], prices={"BTC/USD": 100.0}, cash=1000.0)
+    al = FakeVenue("alpaca", ["AMD"], prices={"AMD": 100.0}, cash=1000.0)
+    grid_engine.set_venues([rh, al])
+    # A pre-v4.1 settings blob only carries one step: both venues inherit it.
+    env.kv[grid_engine.SETTINGS_KEY] = {"step": 0.03, "enabled": True}
+    s = grid_engine.get_settings()
+    assert s["steps"] == {"robinhood": 0.03, "alpaca": 0.03}
+
+    grid_engine.set_step(0.08, venue="robinhood")
+    s = grid_engine.get_settings()
+    assert s["steps"] == {"robinhood": 0.08, "alpaca": 0.03}
+    assert grid_engine.step_for(s, "robinhood") == 0.08
+    assert grid_engine.step_for(s, "alpaca") == 0.03
+    with pytest.raises(ValueError):
+        grid_engine.set_step(0.05, venue="nasdaq")
+
+    # Each venue's ladders are judged with its own step.
+    grid_engine.start(run_now=False)
+    grid_engine.tick(NOW)
+    st = grid_engine.status()
+    assert st["venues"]["robinhood"]["step"] == 0.08
+    assert st["venues"]["robinhood"]["ladders"][0]["sell_at"] == pytest.approx(108.0)
+    assert st["venues"]["alpaca"]["step"] == 0.03
+    assert st["venues"]["alpaca"]["ladders"][0]["sell_at"] == pytest.approx(103.0)
+
+    rh._prices["BTC/USD"] = 104.0   # +4%: below crypto's 8%, nothing sells
+    al._prices["AMD"] = 104.0       # +4%: above stocks' 3%, one rung sells
+    grid_engine.tick(NOW + timedelta(days=1))
+    assert not [o for o in rh.orders if o[0] == "sell"]
+    assert len([o for o in al.orders if o[0] == "sell"]) == 1
+
+    # venue=None sets every venue at once (the old single-step behaviour).
+    grid_engine.set_step(0.05)
+    assert grid_engine.get_settings()["steps"] == {"robinhood": 0.05, "alpaca": 0.05}

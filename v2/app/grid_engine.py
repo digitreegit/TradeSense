@@ -41,12 +41,22 @@ RESIZE_TRIGGER = 1.15
 # Settings
 # --------------------------------------------------------------------------
 def get_settings() -> dict:
+    """`step` is the legacy single value and the fallback; `steps` holds one
+    step per venue (stocks and crypto carry very different spread costs)."""
     raw = store.get(SETTINGS_KEY) or {}
+    base = grid.clamp_step(raw.get("step", grid.DEFAULT_STEP))
+    raw_steps = raw.get("steps") or {}
+    steps = {v.name: grid.clamp_step(raw_steps.get(v.name, base)) for v in venues()}
     return {
-        "step": grid.clamp_step(raw.get("step", grid.DEFAULT_STEP)),
+        "step": base,
+        "steps": steps,
         "enabled": bool(raw.get("enabled", False)),
         "updated_at": raw.get("updated_at"),
     }
+
+
+def step_for(s: dict, venue_name: str) -> float:
+    return float((s.get("steps") or {}).get(venue_name, s["step"]))
 
 
 def _save_settings(**changes) -> dict:
@@ -57,10 +67,22 @@ def _save_settings(**changes) -> dict:
     return cur
 
 
-def set_step(step: float) -> dict:
+def set_step(step: float, venue: str | None = None) -> dict:
+    """Set the grid step for one venue, or for every venue when `venue` is None."""
     s = grid.clamp_step(step)
-    out = _save_settings(step=s)
-    log_activity("grid", f"그리드 간격을 {s:.1%}로 변경")
+    cur = get_settings()
+    steps = dict(cur["steps"])
+    if venue is None:
+        steps = {k: s for k in steps}
+        out = _save_settings(step=s, steps=steps)
+        log_activity("grid", f"그리드 간격을 {s:.1%}로 변경 (전체)")
+        return out
+    if venue not in steps:
+        raise ValueError(f"unknown venue {venue!r}")
+    steps[venue] = s
+    out = _save_settings(steps=steps)
+    label = next((v.label for v in venues() if v.name == venue), venue)
+    log_activity("grid", f"{label} 간격을 {s:.1%}로 변경")
     return out
 
 
@@ -436,7 +458,8 @@ def resume() -> dict:
 def tick(now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     s = get_settings()
-    out: dict = {"at": now.isoformat(), "enabled": s["enabled"], "step": s["step"], "venues": {}}
+    out: dict = {"at": now.isoformat(), "enabled": s["enabled"], "step": s["step"],
+                 "steps": s["steps"], "venues": {}}
     if not s["enabled"]:
         out["skipped"] = "off"
         store.set(TICK_KEY, out)
@@ -445,7 +468,7 @@ def tick(now: datetime | None = None) -> dict:
     for v in venues():
         vb = book.setdefault(v.name, _empty_venue_book())
         try:
-            out["venues"][v.name] = _tick_venue(v, vb, s["step"], now)
+            out["venues"][v.name] = _tick_venue(v, vb, step_for(s, v.name), now)
         except Exception as exc:
             log.exception("grid tick %s failed", v.name)
             vb["note"] = f"오류: {exc}"
@@ -651,7 +674,8 @@ def status() -> dict:
     for v in venues():
         vb = book.get(v.name) or _empty_venue_book()
         ladders = vb.get("ladders") or {}
-        rows = [grid.summary(l, s["step"]) for l in ladders.values()]
+        step = step_for(s, v.name)
+        rows = [grid.summary(l, step) for l in ladders.values()]
         realized = round(sum(r["realized_pl"] for r in rows), 2)
         unreal = [r["unrealized_pl"] for r in rows if r["unrealized_pl"] is not None]
         configured = False
@@ -674,6 +698,7 @@ def status() -> dict:
         out_venues[v.name] = {
             "label": v.label,
             "configured": configured,
+            "step": step,
             "phase": vb.get("phase") or "idle",
             "note": vb.get("note"),
             "errors": vb.get("errors") or [],
