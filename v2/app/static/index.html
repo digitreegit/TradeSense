@@ -121,13 +121,12 @@
         </div>
       </div>
       <div class="row" style="margin-top:12px">
-        <button type="button" class="btn btn-primary" id="btn-start">시작 — 현금화 후 새로 구성</button>
         <button type="button" class="btn" id="btn-toggle">자동매매 OFF</button>
         <button type="button" class="btn" id="btn-tick">지금 점검</button>
       </div>
       <p class="hint" style="margin-top:10px">
-        간격은 매수·매도 공용입니다. 시작을 누르면 API로 팔 수 있는 보유를 모두 현금화하고, 종목별로 현금을 5칸으로 나눠 3칸을 먼저 삽니다.
-        앱에서만 거래되는 코인(예: XRP)은 건드리지 않고 아래 “수동 보유”에 표시합니다.
+        간격은 매수·매도 공용입니다. 마지막 체결가에서 간격만큼 내리면 1칸 매수(최대 5칸), 간격만큼 오르면 1칸 매도.
+        앱에서만 거래되는 코인(예: XRP)은 건드리지 않고 아래 “수동 보유”에 표시합니다. 처음부터 다시 구성하려면 설정 탭의 “그리드 초기화”를 쓰세요.
       </p>
       <p class="msg" id="grid-msg"></p>
     </div>
@@ -190,6 +189,14 @@
       <p class="hint" id="tg-status">서버 설정 확인 중…</p>
       <button type="button" class="btn btn-sm" id="btn-tg-test">테스트 발송</button>
       <p class="msg" id="tg-msg"></p>
+    </div>
+
+    <div class="panel">
+      <h3>그리드 초기화</h3>
+      <p class="hint">API로 팔 수 있는 보유를 모두 현금화한 뒤, 현재 자금으로 사다리를 처음부터 다시 구성합니다(종목별 5칸 중 3칸 매수).
+        이전 사다리와 체결 기록은 지워집니다. 자금이 늘어나면 자동으로 칸을 키우므로 평소에는 필요 없습니다.</p>
+      <button type="button" class="btn btn-danger btn-sm" id="btn-start">현금화 후 새로 구성</button>
+      <p class="msg" id="reset-msg"></p>
     </div>
 
     <div class="panel">
@@ -463,12 +470,12 @@ async function saveStep() {
 async function startGrid() {
   const btn = $('btn-start');
   btn.disabled = true;
-  setMsg('grid-msg', '청산 주문을 내고 사다리를 구성합니다… (최대 1~2분)', true);
+  setMsg('reset-msg', '청산 주문을 내고 사다리를 구성합니다… (최대 1~2분)', true);
   try {
     const d = await post('/api/grid/start');
     renderStatus(d);
-    setMsg('grid-msg', '시작했습니다. 주식은 장중에만, 크립토는 바로 진행됩니다. 청산이 끝난 다음 점검에서 첫 매수가 들어갑니다.', true);
-  } catch (e) { setMsg('grid-msg', e.message, false); }
+    setMsg('reset-msg', '초기화했습니다. 주식은 장중에만, 크립토는 바로 진행됩니다. 청산이 끝난 다음 점검에서 첫 매수가 들어갑니다. 그리드 탭에서 진행 상황을 확인하세요.', true);
+  } catch (e) { setMsg('reset-msg', e.message, false); }
   btn.disabled = false;
 }
 
@@ -618,9 +625,9 @@ $('btn-refresh').addEventListener('click', loadAll);
 $('btn-save-step').addEventListener('click', saveStep);
 $('step-input').addEventListener('keydown', e => { if (e.key === 'Enter') saveStep(); });
 $('btn-start').addEventListener('click', () => confirmThen(
-  '그리드를 새로 시작할까요?',
+  '그리드를 초기화할까요?',
   'API로 팔 수 있는 모든 보유(주식은 장중, 크립토는 즉시)를 현금화한 뒤, 종목별 현금을 5칸으로 나눠 3칸을 먼저 매수합니다. 이전 사다리와 체결 기록은 지워집니다.',
-  '현금화 후 시작', startGrid,
+  '현금화 후 새로 구성', startGrid,
 ));
 $('btn-toggle').addEventListener('click', toggleGrid);
 $('btn-tick').addEventListener('click', tickNow);
