@@ -30,7 +30,9 @@ SETTINGS_KEY = "grid_settings"
 BOOK_KEY = "grid_book"
 TRADES_KEY = "grid_trades"
 TICK_KEY = "grid_last_tick"
+HISTORY_KEY = "grid_equity_history"
 MAX_TRADES_KEPT = 500
+MAX_HISTORY_DAYS = 400
 ORDER_WAIT_SECONDS = 20.0
 # Resize the ladders upward when cash + cost basis exceeds the planned
 # allocation by this factor (new deposits, app sales moved into the grid).
@@ -402,6 +404,33 @@ def recent_trades(limit: int = 100) -> list[dict]:
     return list(reversed(trades[-limit:]))
 
 
+def record_equity(totals: dict[str, float | None], now: datetime | None = None) -> list[dict]:
+    """Keep one point per local calendar day and venue: the latest account
+    total seen that day. A venue that failed to report keeps its previous
+    value for the day so the chart never dips to zero on a broker hiccup."""
+    now = now or datetime.now(timezone.utc)
+    day = now.astimezone(ZoneInfo(settings.timezone)).date().isoformat()
+    history: list[dict] = store.get(HISTORY_KEY) or []
+    if history and history[-1].get("date") == day:
+        point = history[-1]
+    else:
+        point = {"date": day}
+        history.append(point)
+    for name, total in totals.items():
+        if total is not None:
+            point[name] = round(float(total), 2)
+    known = [float(point[k]) for k in totals if point.get(k) is not None]
+    point["total"] = round(sum(known), 2) if known else None
+    point["at"] = now.isoformat()
+    history = history[-MAX_HISTORY_DAYS:]
+    store.set(HISTORY_KEY, history)
+    return history
+
+
+def equity_history() -> list[dict]:
+    return list(store.get(HISTORY_KEY) or [])
+
+
 def _notify(text: str) -> None:
     try:
         from .notify import send
@@ -476,6 +505,10 @@ def tick(now: datetime | None = None) -> dict:
         vb["updated_at"] = now.isoformat()
         store.set(BOOK_KEY, book)  # persist per venue so one failure loses nothing
     store.set(TICK_KEY, out)
+    try:
+        record_equity({v.name: (book.get(v.name) or {}).get("account_total") for v in venues()}, now)
+    except Exception:
+        log.exception("equity history update failed")
     return out
 
 
@@ -714,10 +747,17 @@ def status() -> dict:
             "ladders": rows,
             "universe": list(v.universe),
         }
+    live_totals = {k: o["account_total"] for k, o in out_venues.items() if o["configured"]}
+    history: list[dict] = []
+    try:
+        history = record_equity(live_totals) if live_totals else equity_history()
+    except Exception:
+        log.exception("equity history update failed")
     return {
         "version": "v4",
         "settings": s,
         "venues": out_venues,
+        "history": history,
         "trades": recent_trades(60),
         "last_tick": store.get(TICK_KEY),
         "activity": list(reversed((store.get("activity_log") or [])[-40:])),

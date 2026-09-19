@@ -81,6 +81,22 @@
   .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px; width: 100%; max-width: 420px; }
   .modal h2 { font-size: 16px; margin-bottom: 8px; }
   .tab-panel { display: none; } .tab-panel.active { display: block; }
+  details.acc { padding: 0; }
+  details.acc summary { list-style: none; cursor: pointer; padding: 14px 16px; font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  details.acc summary::-webkit-details-marker { display: none; }
+  details.acc summary::before { content: '▸'; font-size: 12px; transition: transform .15s; }
+  details.acc[open] summary::before { transform: rotate(90deg); }
+  details.acc summary .hint { text-transform: none; letter-spacing: 0; font-weight: 500; }
+  details.acc > :not(summary) { padding: 0 16px 16px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 10px 0 6px; }
+  .leg { display: flex; align-items: center; gap: 7px; font-size: 13px; background: none; border: 1px solid transparent; color: var(--text); padding: 3px 8px; border-radius: 8px; cursor: pointer; font: inherit; opacity: .6; }
+  .leg:hover { opacity: .9; }
+  .leg.on { opacity: 1; border-color: var(--border); background: var(--panel2); }
+  .leg .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .leg b { font-variant-numeric: tabular-nums; }
+  svg.chart { display: block; width: 100%; height: auto; overflow: visible; }
+  svg.chart .ax { fill: var(--dim); font-size: 11px; font-family: inherit; }
+  svg.chart .grid { stroke: var(--border); stroke-width: 1; }
   .link { color: var(--blue); text-decoration: none; }
   @media (max-width: 640px) {
     .topbar { flex-direction: column; align-items: flex-start; }
@@ -109,9 +125,32 @@
   <section id="tab-grid" class="tab-panel active" role="tabpanel">
     <div class="panel">
       <div class="row spread">
+        <h2 style="margin:0">총액 추이 <span class="pill idle" id="grid-state">불러오는 중…</span></h2>
+        <span class="hint" id="grid-tick">마지막 점검 —</span>
+      </div>
+      <div class="legend" id="chart-legend"></div>
+      <div id="chart"><div class="empty">불러오는 중…</div></div>
+    </div>
+
+    <div id="venues"></div>
+
+    <details class="panel acc">
+      <summary>체결 내역 <span class="hint" id="trades-count"></span></summary>
+      <div id="trades"><div class="empty">아직 체결이 없습니다.</div></div>
+    </details>
+
+    <details class="panel acc">
+      <summary>활동 로그</summary>
+      <ul class="activity" id="activity"><li class="dim">—</li></ul>
+    </details>
+  </section>
+
+  <section id="tab-settings" class="tab-panel" role="tabpanel">
+    <div class="panel">
+      <div class="row spread">
         <div>
-          <h3>자동매매 <span class="pill idle" id="grid-state">불러오는 중…</span></h3>
-          <div class="hint" id="grid-tick">마지막 점검 —</div>
+          <h3>자동매매 <span class="pill idle" id="grid-state-2">불러오는 중…</span></h3>
+          <div class="hint" id="grid-tick-2">마지막 점검 —</div>
         </div>
         <div class="row">
           <button type="button" class="btn" id="btn-toggle">자동매매 OFF</button>
@@ -119,27 +158,13 @@
         </div>
       </div>
       <p class="hint" style="margin-top:10px">
-        간격은 시장별로 각 카드 오른쪽에서 정합니다(매수·매도 공용). 마지막 체결가에서 간격만큼 내리면 1칸 매수(최대 5칸), 간격만큼 오르면 1칸 매도.
-        크립토는 스프레드 비용(왕복 약 1%)이 있어 주식보다 넓게 잡는 편이 유리합니다.
-        앱에서만 거래되는 코인(예: XRP)은 건드리지 않고 “수동 보유”에 표시합니다. 처음부터 다시 구성하려면 설정 탭의 “그리드 초기화”를 쓰세요.
+        OFF로 두면 15분 점검을 건너뛰고 보유는 그대로 둡니다. 간격은 그리드 탭의 각 시장 카드에서 정합니다(매수·매도 공용).
+        마지막 체결가에서 간격만큼 내리면 1칸 매수(최대 5칸), 간격만큼 오르면 1칸 매도. 크립토는 스프레드 비용(왕복 약 1%)이 있어 주식보다 넓게 잡는 편이 유리합니다.
+        앱에서만 거래되는 코인(예: XRP)은 건드리지 않고 “수동 보유”에 표시합니다.
       </p>
       <p class="msg" id="grid-msg"></p>
     </div>
 
-    <div id="venues"></div>
-
-    <div class="panel">
-      <h2>체결 내역</h2>
-      <div id="trades"><div class="empty">아직 체결이 없습니다.</div></div>
-    </div>
-
-    <div class="panel">
-      <h2>활동 로그</h2>
-      <ul class="activity" id="activity"><li class="dim">—</li></ul>
-    </div>
-  </section>
-
-  <section id="tab-settings" class="tab-panel" role="tabpanel">
     <div class="panel">
       <h3>주식 · Alpaca</h3>
       <p class="hint">실거래 전용. 라이브 API 키(AK…)를 연결하세요.
@@ -341,7 +366,7 @@ function renderVenue(key, v, step) {
   if (!v.configured) {
     body = `<div class="empty">설정에서 API 키를 저장하세요.</div>`;
   } else if (!rows.length) {
-    body = `<div class="empty">${esc(v.note || (v.phase === 'idle' ? '“시작”을 누르면 사다리를 구성합니다.' : '사다리 구성 대기 중'))}</div>`;
+    body = `<div class="empty">${esc(v.note || (v.phase === 'idle' ? '설정 탭의 “그리드 초기화”로 사다리를 구성합니다.' : '사다리 구성 대기 중'))}</div>`;
   } else {
     body = `<div class="table-scroll"><table>
       <thead><tr>
@@ -401,6 +426,7 @@ function renderVenue(key, v, step) {
 }
 
 function renderTrades(trades) {
+  $('trades-count').textContent = trades && trades.length ? `${trades.length}건` : '';
   if (!trades || !trades.length) { $('trades').innerHTML = '<div class="empty">아직 체결이 없습니다.</div>'; return; }
   $('trades').innerHTML = `<div class="table-scroll"><table>
     <thead><tr><th>시간</th><th>시장</th><th>종목</th><th></th><th class="num">수량</th><th class="num">단가</th><th class="num">금액</th><th class="num">실현</th><th>사유</th></tr></thead>
@@ -422,12 +448,68 @@ function renderActivity(items) {
   $('activity').innerHTML = items.map(a => `<li><time>${when(a.ts)}</time><span>${esc(a.message)}</span></li>`).join('');
 }
 
+const SERIES = [
+  {key: 'total', label: '합계', color: '#58a6ff', width: 2.5},
+  {key: 'robinhood', label: '크립토', color: '#d29922', width: 1.5},
+  {key: 'alpaca', label: '주식', color: '#3fb950', width: 1.5},
+];
+function fmtDate(iso) {
+  const [y, m, d] = String(iso).split('-').map(Number);
+  return `${m}/${d}`;
+}
+// Which series is drawn; the legend toggles it. Crypto dwarfs stocks in
+// dollars, so drawing them on one axis would flatten the stock line.
+let chartKey = 'total';
+function renderChart(history) {
+  const pts = (history || []).filter(p => p && p.total != null);
+  const first = pts[0] || {}, last = pts[pts.length - 1] || {};
+  $('chart-legend').innerHTML = SERIES.map(s => {
+    const v = last[s.key];
+    if (v == null) return '';
+    const base = first[s.key];
+    const d = pts.length > 1 && base != null ? v - base : null;
+    const delta = d === null ? '' :
+      `<span class="hint ${d >= 0 ? 'green' : 'red'}">${d >= 0 ? '+' : ''}${money(d, false)}${base ? ` (${(d / base * 100).toFixed(1)}%)` : ''}</span>`;
+    return `<button type="button" class="leg ${s.key === chartKey ? 'on' : ''}" data-series="${s.key}" title="이 선만 그리기"><span class="dot" style="background:${s.color}"></span><span class="hint">${s.label}</span><b>${money(v, false)}</b>${delta}</button>`;
+  }).join('');
+  if (pts.length < 2) {
+    $('chart').innerHTML = `<div class="empty">${pts.length ? '오늘 첫 기록입니다. 내일부터 날짜별 선이 그려집니다.' : '총액 기록이 아직 없습니다.'}</div>`;
+    return;
+  }
+  const drawn = SERIES.filter(s => s.key === chartKey && pts.some(p => p[s.key] != null));
+  if (!drawn.length) { chartKey = 'total'; return renderChart(history); }
+  const W = 960, H = 230, L = 70, R = 14, T = 14, B = 30;
+  const vals = [];
+  pts.forEach(p => drawn.forEach(s => { if (p[s.key] != null) vals.push(Number(p[s.key])); }));
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const pad = Math.max((hi - lo) * 0.08, hi * 0.005, 1);
+  lo -= pad; hi += pad;
+  const x = i => L + (W - L - R) * i / (pts.length - 1);
+  const y = v => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+  const gridY = [lo + pad, (lo + hi) / 2, hi - pad];
+  const grid = gridY.map(v => `<line x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" class="grid"/>` +
+    `<text x="${L - 8}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end" class="ax">${money(v, false)}</text>`).join('');
+  const lines = drawn.map(s => {
+    const d = pts.map((p, i) => p[s.key] == null ? null : `${x(i).toFixed(1)},${y(Number(p[s.key])).toFixed(1)}`).filter(Boolean);
+    if (!d.length) return '';
+    const li = pts.map((p, i) => p[s.key] == null ? null : i).filter(i => i !== null).pop();
+    return `<polyline fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linejoin="round" stroke-linecap="round" points="${d.join(' ')}"/>` +
+      `<circle cx="${x(li).toFixed(1)}" cy="${y(Number(pts[li][s.key])).toFixed(1)}" r="3.5" fill="${s.color}"/>`;
+  }).join('');
+  const xi = [...new Set([0, Math.floor((pts.length - 1) / 2), pts.length - 1])];
+  const xl = xi.map(i => `<text x="${x(i).toFixed(1)}" y="${H - 8}" class="ax" text-anchor="${i === 0 ? 'start' : i === pts.length - 1 ? 'end' : 'middle'}">${fmtDate(pts[i].date)}</text>`).join('');
+  const title = pts.map(p => `${p.date}: ${money(p[chartKey], false)}`).join('\n');
+  $('chart').innerHTML = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="날짜별 계좌 총액"><title>${esc(title)}</title>${grid}${lines}${xl}</svg>`;
+}
+
 function renderStatus(st) {
   lastStatus = st;
   const s = st.settings || {};
-  const stateEl = $('grid-state');
-  stateEl.textContent = s.enabled ? 'ON' : 'OFF';
-  stateEl.className = 'pill ' + (s.enabled ? 'on' : 'off');
+  for (const id of ['grid-state', 'grid-state-2']) {
+    const stateEl = $(id);
+    stateEl.textContent = s.enabled ? '자동매매 ON' : '자동매매 OFF';
+    stateEl.className = 'pill ' + (s.enabled ? 'on' : 'off');
+  }
   $('btn-toggle').textContent = s.enabled ? '자동매매 OFF' : '자동매매 ON';
   const lt = st.last_tick;
   let tickText = lt?.at ? `마지막 점검 ${when(lt.at)}` : '점검 기록 없음';
@@ -443,6 +525,8 @@ function renderStatus(st) {
     }).join(' · ');
   }
   $('grid-tick').textContent = tickText;
+  $('grid-tick-2').textContent = tickText;
+  renderChart(st.history);
   const venues = st.venues || {};
   // Don't wipe a step value the user is typing when the 30s refresh lands.
   const typing = document.activeElement && $('venues').contains(document.activeElement)
@@ -633,6 +717,10 @@ function switchTab(name) {
 }
 document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
 $('btn-refresh').addEventListener('click', loadAll);
+$('chart-legend').addEventListener('click', e => {
+  const b = e.target.closest('[data-series]');
+  if (b) { chartKey = b.dataset.series; renderChart(lastStatus?.history); }
+});
 $('venues').addEventListener('click', e => {
   const btn = e.target.closest('.btn-save-step');
   if (btn) saveStep(btn.dataset.venue);

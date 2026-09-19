@@ -440,6 +440,33 @@ def test_status_exposes_levels_and_pl(env):
     assert st["settings"]["step"] == 0.05 and st["version"] == "v4"
 
 
+def test_equity_history_keeps_one_point_per_day_and_carries_missing_venues(env):
+    day1 = datetime(2026, 9, 18, 14, 0, tzinfo=timezone.utc)   # 10:00 ET
+    grid_engine.record_equity({"robinhood": 8000.0, "alpaca": 500.0}, day1)
+    grid_engine.record_equity({"robinhood": 8100.0, "alpaca": None}, day1 + timedelta(hours=5))
+    h = grid_engine.equity_history()
+    assert len(h) == 1
+    assert h[0]["date"] == "2026-09-18"
+    assert h[0]["robinhood"] == 8100.0 and h[0]["alpaca"] == 500.0 and h[0]["total"] == 8600.0
+
+    # 23:30 ET on the 18th is still the 18th locally even though it is the 19th in UTC.
+    grid_engine.record_equity({"robinhood": 8200.0, "alpaca": 510.0},
+                              datetime(2026, 9, 19, 3, 30, tzinfo=timezone.utc))
+    assert len(grid_engine.equity_history()) == 1
+    grid_engine.record_equity({"robinhood": 8300.0, "alpaca": 520.0}, day1 + timedelta(days=1))
+    h = grid_engine.equity_history()
+    assert [p["date"] for p in h] == ["2026-09-18", "2026-09-19"]
+    assert h[-1]["total"] == 8820.0
+
+    # status() records the live totals of configured venues and returns the series.
+    v = FakeVenue("alpaca", ["AMD"], prices={"AMD": 100.0}, cash=1000.0)
+    v.equity = lambda: 1234.5
+    grid_engine.set_venues([v])
+    st = grid_engine.status()
+    assert st["history"][-1]["alpaca"] == 1234.5
+    assert st["venues"]["alpaca"]["account_total"] == 1234.5
+
+
 def test_step_is_set_per_venue_and_legacy_single_step_is_the_fallback(env):
     rh = FakeVenue("robinhood", ["BTC/USD"], prices={"BTC/USD": 100.0}, cash=1000.0)
     al = FakeVenue("alpaca", ["AMD"], prices={"AMD": 100.0}, cash=1000.0)
