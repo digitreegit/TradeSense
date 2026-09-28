@@ -544,7 +544,7 @@ def place_resting_limit(
     client = RobinhoodCryptoClient(api_key, private_key)
     rh_symbol = _pair_to_rh_symbol(pair)
     asset = rh_symbol.replace("-USD", "")
-    cid = client_order_id or f"g4r-{uuid.uuid4().hex[:20]}"
+    cid = client_order_id or str(uuid.uuid4())
 
     try:
         if not client.is_symbol_api_tradable(rh_symbol, side=side):
