@@ -92,15 +92,21 @@ def _quote(client: RobinhoodCryptoClient, rh_symbol: str) -> tuple[float, float,
 
 
 def _limit_price_str(
-    price: float, *, side: str, increment: str | float | None = None
+    price: float, *, side: str, increment: str | float | None = None,
+    passive: bool = False,
 ) -> str:
+    """Format a limit price. Marketable buys round up (cross the ask);
+    passive/resting buys round down so the order sits on the book."""
     if price <= 0:
         raise ValueError("지정가는 0보다 커야 합니다.")
     try:
         tick = Decimal(str(increment or ("0.01" if price >= 1 else "0.000001")))
         if tick <= 0:
             raise InvalidOperation
-        rounding = ROUND_UP if side == "buy" else ROUND_DOWN
+        if passive:
+            rounding = ROUND_DOWN if side == "buy" else ROUND_UP
+        else:
+            rounding = ROUND_UP if side == "buy" else ROUND_DOWN
         value = (
             Decimal(str(price)) / tick
         ).to_integral_value(rounding=rounding) * tick
@@ -509,3 +515,186 @@ def place_market_dollars(
         "rh_api_version": api_version,
         "state": final.get("state"),
     }
+
+
+def place_resting_limit(
+    *,
+    side: str,
+    pair: str,
+    limit_price: float,
+    qty: float | None = None,
+    dollars: float | None = None,
+    client_order_id: str | None = None,
+) -> dict[str, Any]:
+    """Place a passive GTC limit that sits on the book until filled or canceled.
+
+    Unlike `place_market_dollars`, this does not poll or auto-cancel: the grid
+    engine owns the order id and harvests fills on later ticks.
+    """
+    side = side.lower().strip()
+    if side not in ("buy", "sell"):
+        return {"ok": False, "error": "side는 buy 또는 sell이어야 합니다."}
+    if float(limit_price) <= 0:
+        return {"ok": False, "error": "지정가는 0보다 커야 합니다."}
+
+    api_key, private_key = get_credentials()
+    if not api_key or not private_key:
+        return {"ok": False, "error": "Robinhood API 키가 없습니다."}
+
+    client = RobinhoodCryptoClient(api_key, private_key)
+    rh_symbol = _pair_to_rh_symbol(pair)
+    asset = rh_symbol.replace("-USD", "")
+    cid = client_order_id or f"g4r-{uuid.uuid4().hex[:20]}"
+
+    try:
+        if not client.is_symbol_api_tradable(rh_symbol, side=side):
+            return {
+                "ok": False,
+                "error": f"{rh_symbol}는 Robinhood API로 주문할 수 없습니다.",
+                "client_order_id": cid,
+            }
+    except Exception as exc:
+        return {
+            "ok": False, "error": f"주문 사전 점검 실패: {exc}",
+            "transient": is_transient_error(exc), "client_order_id": cid,
+        }
+
+    try:
+        pair_meta = client.get_trading_pair(rh_symbol) or {}
+    except Exception:
+        pair_meta = {}
+    increment = pair_meta.get("quote_increment") if isinstance(pair_meta, dict) else None
+    asset_increment = pair_meta.get("asset_increment") if isinstance(pair_meta, dict) else None
+
+    try:
+        limit_s = _limit_price_str(float(limit_price), side=side, increment=increment, passive=True)
+        limit_px = float(limit_s)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc), "client_order_id": cid}
+
+    if side == "buy":
+        if dollars is None or float(dollars) <= 0:
+            return {"ok": False, "error": "매수 금액이 필요합니다.", "client_order_id": cid}
+        try:
+            bp = _buying_power(client)
+        except Exception as exc:
+            return {
+                "ok": False, "error": f"Buying power 조회 실패: {exc}",
+                "transient": is_transient_error(exc), "client_order_id": cid,
+            }
+        dollars = round(float(dollars), 2)
+        if bp < dollars * 0.999:
+            return {
+                "ok": False,
+                "error": f"매수 리밋 ${dollars:,.2f}이(가) Buying power ${bp:,.2f}보다 큽니다.",
+                "client_order_id": cid, "buying_power": bp,
+            }
+        raw_qty = dollars / limit_px
+    else:
+        if qty is None or float(qty) <= 0:
+            return {"ok": False, "error": "매도 수량이 필요합니다.", "client_order_id": cid}
+        avail, held = _holding_qtys(client, asset)
+        if avail <= 0:
+            return _no_sellable_qty_result(asset, total=held, client_order_id=cid)
+        raw_qty = min(float(qty), avail)
+
+    try:
+        qty_s = _qty_str(raw_qty, asset_increment)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc), "client_order_id": cid}
+
+    body = {
+        "client_order_id": cid,
+        "side": side,
+        "type": "limit",
+        "symbol": rh_symbol,
+        "limit_order_config": {
+            "asset_quantity": qty_s,
+            "limit_price": limit_s,
+            "time_in_force": "gtc",
+        },
+    }
+    try:
+        placed = client.place_order(body)
+    except Exception as exc:
+        log.exception("robinhood resting place_order failed")
+        return {
+            "ok": False, "error": str(exc), "client_order_id": cid,
+            "transient": is_transient_error(exc),
+        }
+
+    order_id = placed.get("id")
+    api_version = str(placed.get("_api_version") or "v1")
+    state = str(placed.get("state") or "").lower()
+    notional = round(float(qty_s) * limit_px, 2)
+    return {
+        "ok": True,
+        "resting": True,
+        "order": placed,
+        "qty": float(qty_s),
+        "price": limit_px,
+        "limit_price": limit_px,
+        "dollars": notional,
+        "client_order_id": cid,
+        "rh_order_id": order_id,
+        "rh_api_version": api_version,
+        "state": state,
+    }
+
+
+def get_order_status(order_id: str, *, api_version: str | None = None) -> dict[str, Any]:
+    api_key, private_key = get_credentials()
+    if not api_key or not private_key:
+        return {"ok": False, "error": "Robinhood API 키가 없습니다."}
+    client = RobinhoodCryptoClient(api_key, private_key)
+    try:
+        order = client.get_order(str(order_id), api_version=api_version)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "transient": is_transient_error(exc)}
+    state = str(order.get("state") or "").lower()
+    qty = float(order.get("filled_asset_quantity") or 0)
+    avg = float(order.get("average_price") or 0)
+    dollars = round(qty * avg, 2) if qty > 0 and avg > 0 else 0.0
+    return {
+        "ok": True,
+        "order": order,
+        "state": state,
+        "filled": state in _FILLED_STATES and qty > 0 and avg > 0,
+        "pending": state in _PENDING_STATES,
+        "terminal": state in _TERMINAL_STATES or state in _FILLED_STATES,
+        "qty": qty,
+        "price": avg,
+        "dollars": dollars,
+        "rh_order_id": order_id,
+        "rh_api_version": str(order.get("_api_version") or api_version or "v1"),
+    }
+
+
+def cancel_resting_order(order_id: str, *, api_version: str = "v1") -> dict[str, Any]:
+    api_key, private_key = get_credentials()
+    if not api_key or not private_key:
+        return {"ok": False, "error": "Robinhood API 키가 없습니다."}
+    client = RobinhoodCryptoClient(api_key, private_key)
+    try:
+        canceled = client.cancel_order(str(order_id), api_version=api_version)
+        state = str(canceled.get("state") or "").lower()
+        if not state:
+            try:
+                canceled = client.get_order(str(order_id), api_version=api_version) or canceled
+                state = str(canceled.get("state") or "").lower()
+            except Exception:
+                pass
+        return {
+            "ok": state in _TERMINAL_STATES | _FILLED_STATES or not state,
+            "order": canceled,
+            "state": state,
+            "rh_order_id": order_id,
+            "rh_api_version": api_version,
+        }
+    except Exception as exc:
+        # Already-canceled / already-filled are fine — treat as success.
+        msg = str(exc).lower()
+        if any(w in msg for w in ("cancel", "filled", "404", "not found", "already")):
+            return {"ok": True, "state": "canceled", "rh_order_id": order_id,
+                    "rh_api_version": api_version}
+        return {"ok": False, "error": str(exc), "transient": is_transient_error(exc)}

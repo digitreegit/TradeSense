@@ -208,6 +208,79 @@ class FakeVenue:
         return {"ok": True, "qty": qty, "price": ref_price, "dollars": qty * ref_price}
 
 
+class RestingFakeVenue(FakeVenue):
+    """Crypto-style venue: seed is marketable, then GTC limits sit until filled."""
+
+    resting_limits = True
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self._resting: dict[str, dict] = {}  # id -> order
+        self._id = 0
+
+    def place_resting(self, side, symbol, *, limit_price, qty=None, dollars=None):
+        self._id += 1
+        oid = f"r{self._id}"
+        if side == "buy":
+            q = float(dollars) / float(limit_price)
+            d = float(dollars)
+            self._cash -= d  # lock buying power
+        else:
+            q = float(qty)
+            d = q * float(limit_price)
+            # lock qty by reducing available — simplify: leave total, track reserved
+            if self._positions.get(symbol, 0) < q * 0.999:
+                return {"ok": False, "error": "수량 부족"}
+        order = {
+            "id": oid, "side": side, "symbol": symbol,
+            "limit_price": float(limit_price), "qty": q, "dollars": d,
+            "state": "open", "filled_qty": 0.0, "avg": 0.0,
+        }
+        self._resting[oid] = order
+        self.orders.append(("resting", side, symbol, float(limit_price), q))
+        return {
+            "ok": True, "resting": True, "qty": q, "price": float(limit_price),
+            "limit_price": float(limit_price), "dollars": d,
+            "rh_order_id": oid, "rh_api_version": "v1", "state": "open",
+        }
+
+    def resting_status(self, meta):
+        o = self._resting.get(meta["id"])
+        if not o:
+            return {"ok": True, "state": "canceled", "terminal": True, "pending": False,
+                    "filled": False, "qty": 0, "price": 0, "dollars": 0}
+        return {
+            "ok": True, "state": o["state"],
+            "filled": o["state"] == "filled",
+            "pending": o["state"] == "open",
+            "terminal": o["state"] in ("filled", "canceled"),
+            "qty": o["filled_qty"], "price": o["avg"],
+            "dollars": round(o["filled_qty"] * o["avg"], 2) if o["avg"] else 0,
+        }
+
+    def cancel_resting(self, meta):
+        o = self._resting.pop(meta["id"], None)
+        if o and o["state"] == "open" and o["side"] == "buy":
+            self._cash += o["dollars"]  # unlock
+        if o:
+            o["state"] = "canceled"
+        return {"ok": True, "state": "canceled"}
+
+    def fill_resting(self, order_id, *, price=None):
+        o = self._resting[order_id]
+        px = float(price if price is not None else o["limit_price"])
+        o["state"] = "filled"
+        o["filled_qty"] = o["qty"]
+        o["avg"] = px
+        if o["side"] == "buy":
+            self._positions[o["symbol"]] = self._positions.get(o["symbol"], 0.0) + o["qty"]
+            # cash already deducted when placed
+        else:
+            self._positions[o["symbol"]] = self._positions.get(o["symbol"], 0.0) - o["qty"]
+            self._cash += o["qty"] * px
+        return o
+
+
 @pytest.fixture
 def env(monkeypatch):
     st = FakeStore()
@@ -502,3 +575,49 @@ def test_step_is_set_per_venue_and_legacy_single_step_is_the_fallback(env):
     # venue=None sets every venue at once (the old single-step behaviour).
     grid_engine.set_step(0.05)
     assert grid_engine.get_settings()["steps"] == {"robinhood": 0.05, "alpaca": 0.05}
+
+
+def test_crypto_resting_limits_sit_until_filled_then_reanchor(env):
+    v = RestingFakeVenue("robinhood", ["BTC/USD"], prices={"BTC/USD": 100.0}, cash=1000.0)
+    grid_engine.set_venues([v])
+    grid_engine.start(run_now=False)
+    grid_engine.set_step(0.05, venue="robinhood")
+    r = grid_engine.tick(NOW)["venues"]["robinhood"]
+    assert r.get("seeded") or r.get("fills", 0) >= 0
+    # Second tick: seed completes on first liquidate→seed path; ensure running.
+    if env.kv[grid_engine.BOOK_KEY]["robinhood"]["phase"] != "running":
+        grid_engine.tick(NOW)
+    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
+    assert vb["phase"] == "running"
+    ladder = vb["ladders"]["BTC/USD"]
+    assert ladder["seeded"] and len(ladder["units"]) == 3
+    # Resting buy + sell should now be on the book at ±5%.
+    grid_engine.tick(NOW)
+    ladder = env.kv[grid_engine.BOOK_KEY]["robinhood"]["ladders"]["BTC/USD"]
+    oo = ladder["open_orders"]
+    assert "buy" in oo and "sell" in oo
+    assert oo["sell"]["limit_price"] == pytest.approx(105.0, rel=1e-4)
+    assert oo["buy"]["limit_price"] == pytest.approx(95.0, rel=1e-4)
+    pending = env.kv[grid_engine.BOOK_KEY]["robinhood"]["pending_buy"]
+    assert pending == pytest.approx(oo["buy"]["dollars"])
+    # Price moving to 104 must NOT market-fill; only the resting sell does.
+    before_units = len(ladder["units"])
+    v._prices["BTC/USD"] = 104.0
+    grid_engine.tick(NOW + timedelta(minutes=15))
+    assert len(env.kv[grid_engine.BOOK_KEY]["robinhood"]["ladders"]["BTC/USD"]["units"]) == before_units
+    # Fill the resting sell → one rung gone, orders cleared then replaced.
+    sell_id = oo["sell"]["id"]
+    v.fill_resting(sell_id, price=105.0)
+    grid_engine.tick(NOW + timedelta(minutes=30))
+    ladder = env.kv[grid_engine.BOOK_KEY]["robinhood"]["ladders"]["BTC/USD"]
+    assert len(ladder["units"]) == before_units - 1
+    assert ladder["anchor"] == pytest.approx(105.0)
+    assert "buy" in ladder["open_orders"] and "sell" in ladder["open_orders"]
+    # New sell level is 5% above the new anchor.
+    assert ladder["open_orders"]["sell"]["limit_price"] == pytest.approx(110.25, rel=1e-3)
+    # OFF cancels resting limits and unlocks the buy reservation.
+    cash_before_stop = v._cash
+    locked = ladder["open_orders"]["buy"]["dollars"]
+    grid_engine.stop()
+    assert not env.kv[grid_engine.BOOK_KEY]["robinhood"]["ladders"]["BTC/USD"]["open_orders"]
+    assert v._cash == pytest.approx(cash_before_stop + locked)

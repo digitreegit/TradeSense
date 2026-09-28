@@ -158,9 +158,8 @@
         </div>
       </div>
       <p class="hint" style="margin-top:10px">
-        OFF로 두면 15분 점검을 건너뛰고 보유는 그대로 둡니다. 간격은 그리드 탭의 각 시장 카드에서 정합니다(매수·매도 공용).
-        마지막 체결가에서 간격만큼 내리면 1칸 매수(최대 5칸), 간격만큼 오르면 1칸 매도. 크립토는 스프레드 비용(왕복 약 1%)이 있어 주식보다 넓게 잡는 편이 유리합니다.
-        앱에서만 거래되는 코인(예: XRP)은 건드리지 않고 “수동 보유”에 표시합니다.
+        OFF로 두면 15분 점검을 건너뛰고, 크립토에 걸려 있던 대기 리밋도 취소합니다(보유는 그대로). 간격은 그리드 탭의 각 시장 카드에서 정합니다.
+        크립토는 다음 매수/매도 가격에 GTC 리밋을 미리 걸어 두고, 주식은 가격이 닿으면 즉시 체결합니다.
       </p>
       <p class="msg" id="grid-msg"></p>
     </div>
@@ -375,6 +374,11 @@ function renderVenue(key, v, step) {
       </tr></thead><tbody>` +
       rows.map(r => {
         const avg = r.qty > 0 ? r.cost_basis / r.qty : null;
+        const oo = r.open_orders || {};
+        const buyCell = !r.buy_at ? '<span class="dim">가득 참</span>'
+          : `${px(r.buy_at)}${oo.buy ? '<div class="hint blue">리밋 대기</div>' : ''}`;
+        const sellCell = !r.sell_at ? '<span class="dim">보유 없음</span>'
+          : `${px(r.sell_at)}${oo.sell ? '<div class="hint blue">리밋 대기</div>' : ''}`;
         const status = r.last_error
           ? `<span class="red" title="${esc(r.last_error)}">오류</span>`
           : (r.seeded ? `<span class="dim">${r.last_fill_at ? '체결 ' + when(r.last_fill_at) : '대기'}</span>` : '<span class="amber">시딩 대기</span>');
@@ -382,8 +386,8 @@ function renderVenue(key, v, step) {
           <td><b>${esc(r.symbol)}</b>${avg ? `<div class="hint">평단 ${px(avg)}</div>` : ''}</td>
           <td>${rungs(r.units, r.max_units)}${r.units}/${r.max_units}</td>
           <td class="num">${px(r.price)}</td>
-          <td class="num ${r.buy_at ? 'green' : 'dim'}">${r.buy_at ? px(r.buy_at) : '가득 참'}</td>
-          <td class="num ${r.sell_at ? 'red' : 'dim'}">${r.sell_at ? px(r.sell_at) : '보유 없음'}</td>
+          <td class="num ${r.buy_at ? 'green' : 'dim'}">${buyCell}</td>
+          <td class="num ${r.sell_at ? 'red' : 'dim'}">${sellCell}</td>
           <td class="num">${money(r.value)}</td>
           <td class="num">${signed(r.unrealized_pl)}</td>
           <td class="num">${signed(r.realized_pl)}</td>
@@ -397,13 +401,14 @@ function renderVenue(key, v, step) {
   const note = v.note && rows.length ? `<p class="hint amber" style="margin-top:8px">${esc(v.note)}</p>` : '';
   const errors = (v.errors || []).length
     ? `<ul class="hint red" style="margin:8px 0 0 18px">${v.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul>` : '';
-  const gridTotal = (v.cash ?? 0) + (v.grid_value ?? 0);
+  const pending = Number(v.pending_buy) || 0;
+  const gridTotal = (v.cash ?? 0) + pending + (v.grid_value ?? 0);
   const hasGrid = v.cash !== null && v.cash !== undefined;
   const outside = v.account_total != null && hasGrid ? v.account_total - gridTotal : null;
   const stepStr = (step * 100).toFixed(1).replace(/\.0$/, '');
   return `<div class="panel">
     <div class="row spread">
-      <h3>${esc(v.label)} <span class="pill ${cls}">${text}</span></h3>
+      <h3>${esc(v.label)} <span class="pill ${cls}">${text}</span>${v.resting_limits ? ' <span class="pill idle">리밋대기</span>' : ''}</h3>
       <div class="row">
         <span class="hint">${v.unit_dollars ? `칸당 ${money(v.unit_dollars)}` : ''}${v.updated_at ? ` · ${when(v.updated_at)}` : ''}</span>
         <label class="hint" for="step-${key}">간격</label>
@@ -416,7 +421,7 @@ function renderVenue(key, v, step) {
     <div class="stats">
       <div class="stat"><div class="label">계좌 총액</div><div class="value">${money(v.account_total, false)}</div>${outside && Math.abs(outside) >= 1 ? `<div class="hint">그리드 밖 ${money(outside, false)}</div>` : ''}</div>
       <div class="stat"><div class="label">그리드 자산</div><div class="value">${hasGrid ? money(gridTotal, false) : '—'}</div></div>
-      <div class="stat"><div class="label">현금</div><div class="value">${money(v.cash, false)}</div></div>
+      <div class="stat"><div class="label">현금</div><div class="value">${money(v.cash, false)}</div>${pending >= 1 ? `<div class="hint">리밋 잠금 ${money(pending, false)}</div>` : ''}</div>
       <div class="stat"><div class="label">보유 평가</div><div class="value">${money(v.grid_value, false)}</div></div>
       <div class="stat"><div class="label">실현 손익</div><div class="value">${signed(v.realized_pl)}</div></div>
       <div class="stat"><div class="label">미실현</div><div class="value">${signed(v.unrealized_pl)}</div></div>

@@ -82,6 +82,7 @@ def new_ladder(symbol: str, venue: str, unit_dollars: float, *,
         "last_fill_at": None,
         "last_error": None,
         "last_price": None,
+        "open_orders": {},  # {"buy"|"sell": {id, api_version, limit_price, qty, dollars}}
     }
 
 
@@ -350,4 +351,12 @@ def summary(ladder: dict, step: float, price: float | None = None) -> dict:
         "seeded": bool(ladder.get("seeded")),
         "last_fill_at": ladder.get("last_fill_at"),
         "last_error": ladder.get("last_error"),
+        "open_orders": {
+            side: {
+                "limit_price": o.get("limit_price"),
+                "qty": o.get("qty"),
+                "dollars": o.get("dollars"),
+            }
+            for side, o in (ladder.get("open_orders") or {}).items() if o
+        },
     }

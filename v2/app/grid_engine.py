@@ -250,6 +250,9 @@ class RobinhoodVenue:
     name = "robinhood"
     label = "크립토 · Robinhood"
     universe = grid.CRYPTO_UNIVERSE
+    # Sit GTC limits at the next buy/sell levels instead of crossing the
+    # spread on every tick. Seed / liquidate / top-up still go marketable.
+    resting_limits = True
 
     def __init__(self) -> None:
         self._client = None
@@ -286,7 +289,11 @@ class RobinhoodVenue:
         return float(self.client.get_account().get("buying_power") or 0)
 
     def equity(self) -> float | None:
-        """Buying power + every crypto holding at live mid (manual coins too)."""
+        """Buying power + every crypto holding at live mid (manual coins too).
+
+        Open buy limits reduce buying_power; callers that know the locked
+        notional should add it back for a true account total.
+        """
         try:
             positions = self.positions()
             prices = self.prices(list(positions)) if positions else {}
@@ -348,6 +355,34 @@ class RobinhoodVenue:
     def sell(self, symbol: str, qty: float, ref_price: float) -> dict:
         return self._place("sell", symbol, float(qty) * float(ref_price), ref_price)
 
+    def place_resting(self, side: str, symbol: str, *, limit_price: float,
+                      qty: float | None = None, dollars: float | None = None) -> dict:
+        from .robinhood_orders import place_resting_limit
+        try:
+            return place_resting_limit(
+                side=side, pair=symbol, limit_price=float(limit_price),
+                qty=qty, dollars=dollars,
+            )
+        except Exception as exc:
+            log.exception("robinhood resting %s %s failed", side, symbol)
+            return _fail(str(exc), transient=True)
+
+    def resting_status(self, meta: dict) -> dict:
+        from .robinhood_orders import get_order_status
+        try:
+            return get_order_status(meta["id"], api_version=meta.get("api_version"))
+        except Exception as exc:
+            log.exception("robinhood order status failed")
+            return _fail(str(exc), transient=True)
+
+    def cancel_resting(self, meta: dict) -> dict:
+        from .robinhood_orders import cancel_resting_order
+        try:
+            return cancel_resting_order(meta["id"], api_version=meta.get("api_version") or "v1")
+        except Exception as exc:
+            log.warning("robinhood cancel %s failed: %s", meta.get("id"), exc)
+            return _fail(str(exc), transient=True)
+
 
 _VENUES: list | None = None
 
@@ -371,7 +406,7 @@ def set_venues(items: list | None) -> None:
 def _empty_venue_book() -> dict:
     return {"phase": "idle", "ladders": {}, "manual": [], "unit_dollars": None,
             "note": None, "errors": [], "started_at": None, "updated_at": None,
-            "cash": None, "grid_value": None, "account_total": None}
+            "cash": None, "grid_value": None, "account_total": None, "pending_buy": None}
 
 
 def _account_total(venue) -> float | None:
@@ -474,6 +509,10 @@ def start(*, run_now: bool = True) -> dict:
 
 def stop() -> dict:
     set_enabled(False)
+    try:
+        _cancel_all_resting("자동매매 OFF — 대기 리밋 취소")
+    except Exception:
+        log.exception("cancel resting on stop failed")
     _notify("[v4 그리드] 자동매매 OFF — 보유는 그대로 둡니다.")
     return status()
 
@@ -482,6 +521,162 @@ def resume() -> dict:
     set_enabled(True)
     _notify("[v4 그리드] 자동매매 ON")
     return status()
+
+
+def _pending_buy_dollars(ladders: dict) -> float:
+    total = 0.0
+    for ladder in (ladders or {}).values():
+        buy = (ladder.get("open_orders") or {}).get("buy")
+        if buy and buy.get("dollars"):
+            total += float(buy["dollars"])
+    return round(total, 2)
+
+
+def _cancel_ladder_orders(venue, ladder: dict) -> None:
+    open_orders = ladder.get("open_orders") or {}
+    for meta in list(open_orders.values()):
+        if meta and meta.get("id") and hasattr(venue, "cancel_resting"):
+            venue.cancel_resting(meta)
+    ladder["open_orders"] = {}
+
+
+def _cancel_all_resting(reason: str) -> None:
+    book = get_book()
+    canceled = 0
+    for v in venues():
+        if not getattr(v, "resting_limits", False) or not v.configured():
+            continue
+        vb = book.get(v.name) or {}
+        for ladder in (vb.get("ladders") or {}).values():
+            before = len(ladder.get("open_orders") or {})
+            _cancel_ladder_orders(v, ladder)
+            canceled += before
+        vb["pending_buy"] = 0.0
+    if canceled:
+        store.set(BOOK_KEY, book)
+        log_activity("grid", f"{reason} ({canceled}건)")
+
+
+_ORDER_PRICE_TOL = 0.0015  # 0.15%: keep resting order if still at the target
+_ORDER_QTY_TOL = 0.02
+
+
+def _orders_match(meta: dict | None, *, limit_price: float, qty: float) -> bool:
+    if not meta or not meta.get("id"):
+        return False
+    try:
+        lp = float(meta["limit_price"])
+        q = float(meta["qty"])
+    except (TypeError, ValueError, KeyError):
+        return False
+    if lp <= 0 or qty <= 0:
+        return False
+    if abs(lp - limit_price) / limit_price > _ORDER_PRICE_TOL:
+        return False
+    if abs(q - qty) / qty > _ORDER_QTY_TOL:
+        return False
+    return True
+
+
+def _harvest_resting(venue, ladder: dict, now: datetime) -> list[dict]:
+    """Apply any filled resting limits; cancel the other side when one fills."""
+    fills: list[dict] = []
+    open_orders = ladder.setdefault("open_orders", {})
+    for side in ("buy", "sell"):
+        meta = open_orders.get(side)
+        if not meta or not meta.get("id"):
+            continue
+        st = venue.resting_status(meta)
+        if not st.get("ok"):
+            if not st.get("transient"):
+                ladder["last_error"] = st.get("error")
+            continue
+        qty = float(st.get("qty") or 0)
+        price = float(st.get("price") or 0)
+        dollars = float(st.get("dollars") or 0)
+        if st.get("filled") or (qty > 0 and price > 0 and st.get("terminal") and not st.get("pending")):
+            trade = grid.apply_fill(
+                ladder, side=side, qty=qty, price=price, dollars=dollars or qty * price,
+                n_units=1, at=now,
+            )
+            trade["reason"] = f"리밋 {'매수' if side == 'buy' else '매도'} 체결"
+            fills.append(trade)
+            other = "sell" if side == "buy" else "buy"
+            if open_orders.get(other):
+                venue.cancel_resting(open_orders[other])
+            open_orders.clear()
+            ladder["last_error"] = None
+            break
+        if st.get("terminal"):
+            open_orders.pop(side, None)
+    return fills
+
+
+def _sync_resting(venue, ladder: dict, step: float, cash: float) -> tuple[float, list[str]]:
+    """Ensure open GTC limits match the current buy_at / sell_at. Returns
+    (dollars newly reserved for buys, errors)."""
+    errors: list[str] = []
+    if not ladder.get("seeded"):
+        return 0.0, errors
+    lv = grid.levels(ladder, step)
+    open_orders = ladder.setdefault("open_orders", {})
+    unit = float(ladder.get("unit_dollars") or 0)
+    units = ladder.get("units") or []
+    spent = 0.0
+    sym = ladder.get("symbol")
+
+    want_sell = None
+    if lv.get("sell_at") and units:
+        top = units[-1]
+        want_sell = {"limit_price": float(lv["sell_at"]), "qty": float(top["qty"])}
+
+    want_buy = None
+    if lv.get("buy_at") and unit >= grid.MIN_ORDER_DOLLARS:
+        already = open_orders.get("buy")
+        if already or cash >= unit * 0.999:
+            want_buy = {
+                "limit_price": float(lv["buy_at"]),
+                "dollars": round(unit, 2),
+                "qty": unit / float(lv["buy_at"]),
+            }
+
+    for side, want in (("sell", want_sell), ("buy", want_buy)):
+        meta = open_orders.get(side)
+        if want is None:
+            if meta:
+                venue.cancel_resting(meta)
+                open_orders.pop(side, None)
+            continue
+        if _orders_match(meta, limit_price=want["limit_price"], qty=want["qty"]):
+            continue
+        if meta:
+            venue.cancel_resting(meta)
+            open_orders.pop(side, None)
+        if side == "buy":
+            r = venue.place_resting(
+                "buy", sym, limit_price=want["limit_price"], dollars=want["dollars"],
+            )
+        else:
+            r = venue.place_resting(
+                "sell", sym, limit_price=want["limit_price"], qty=want["qty"],
+            )
+        if not r.get("ok") or not r.get("rh_order_id"):
+            err = r.get("error") or "리밋 주문 실패"
+            ladder["last_error"] = err
+            errors.append(f"{sym}: {err}")
+            continue
+        open_orders[side] = {
+            "id": r["rh_order_id"],
+            "api_version": r.get("rh_api_version") or "v1",
+            "limit_price": float(r.get("limit_price") or want["limit_price"]),
+            "qty": float(r.get("qty") or want["qty"]),
+            "dollars": float(r.get("dollars") or want.get("dollars") or 0),
+            "client_order_id": r.get("client_order_id"),
+        }
+        if side == "buy":
+            spent += float(open_orders[side]["dollars"])
+        ladder["last_error"] = None
+    return spent, errors
 
 
 def tick(now: datetime | None = None) -> dict:
@@ -529,6 +724,8 @@ def _tick_venue(venue, vb: dict, step: float, now: datetime) -> dict:
 
 
 def _liquidate(venue, vb: dict, now: datetime) -> dict:
+    for ladder in (vb.get("ladders") or {}).values():
+        _cancel_ladder_orders(venue, ladder)
     positions = {s: q for s, q in venue.positions().items() if q > 0}
     tradable = set(venue.tradable(list(positions))) if positions else set()
     prices = venue.prices(list(positions)) if positions else {}
@@ -582,6 +779,12 @@ def _liquidate(venue, vb: dict, now: datetime) -> dict:
 
 
 def _run(venue, vb: dict, step: float, now: datetime) -> dict:
+    if getattr(venue, "resting_limits", False):
+        return _run_resting(venue, vb, step, now)
+    return _run_marketable(venue, vb, step, now)
+
+
+def _run_marketable(venue, vb: dict, step: float, now: datetime) -> dict:
     ladders: dict[str, dict] = vb.get("ladders") or {}
     if not ladders:
         vb["note"] = "사다리가 없습니다. 다시 시작하세요."
@@ -662,11 +865,130 @@ def _run(venue, vb: dict, step: float, now: datetime) -> dict:
     vb["grid_value"] = round(sum(
         grid.held_qty(l) * prices.get(s, l.get("last_price") or 0) for s, l in ladders.items()
     ), 2)
+    vb["pending_buy"] = 0.0
     vb["errors"] = errors
     vb["account_total"] = _account_total(venue)
     vb["note"] = None if not errors else f"주문 오류 {len(errors)}건 — 다음 점검에서 재시도"
     return {"fills": len(fills), "errors": errors, "cash": vb["cash"]}
 
+
+def _run_resting(venue, vb: dict, step: float, now: datetime) -> dict:
+    """Crypto path: seed/top-up marketable, then keep GTC limits at the levels."""
+    ladders: dict[str, dict] = vb.get("ladders") or {}
+    if not ladders:
+        vb["note"] = "사다리가 없습니다. 다시 시작하세요."
+        return {"skipped": vb["note"]}
+    syms = list(ladders)
+    prices = venue.prices(syms)
+    cash = venue.cash()
+    fills: list[dict] = []
+    errors: list[str] = []
+
+    # 0) Harvest resting fills BEFORE reconcile — the broker position already
+    # reflects the fill, and reconcile would otherwise drop the same rung twice.
+    for sym, ladder in ladders.items():
+        if not ladder.get("seeded"):
+            continue
+        harvested = _harvest_resting(venue, ladder, now)
+        for trade in harvested:
+            _record_trade(trade)
+            fills.append(trade)
+            side_ko = "매수" if trade["side"] == "buy" else "매도"
+            pl_txt = f" · 실현 {trade['pl']:+,.2f}" if trade.get("pl") is not None else ""
+            line = (f"{venue.label} {sym} 리밋 {side_ko} ${trade['dollars']:,.2f} "
+                    f"@ {_fmt_px(trade['price'])} "
+                    f"({trade['units_after']}/{ladder['max_units']}칸){pl_txt}")
+            log_activity("grid", line)
+            _notify(f"[v4 그리드] {line}")
+
+    try:
+        cash = venue.cash()
+    except Exception:
+        pass
+    positions = venue.positions()
+    _maybe_resize(venue, vb, ladders, cash)
+
+    # 1) Seed / top-up still need immediate marketable fills.
+    for sym, ladder in ladders.items():
+        px = prices.get(sym)
+        if not px:
+            ladder["last_error"] = "시세 없음"
+            continue
+        if ladder.get("seeded"):
+            note = grid.reconcile(ladder, positions.get(sym, 0.0), px)
+            if note:
+                log_activity("grid", note)
+        grid.observe(ladder, px)
+
+        action = None
+        if ladder.get("top_up"):
+            deficit = grid.top_up_deficit(ladder)
+            if deficit < grid.MIN_ORDER_DOLLARS:
+                ladder.pop("top_up", None)
+            else:
+                action = {"side": "buy", "dollars": deficit, "n_units": 0,
+                          "top_up": True, "reason": "칸 크기 보충"}
+        elif not ladder.get("seeded"):
+            action = grid.decide(ladder, px, step, cash)
+
+        if not action or action["side"] != "buy":
+            continue
+        if cash < float(action["dollars"]) * 0.999:
+            ladder["last_error"] = f"현금 부족 (${cash:,.2f})"
+            continue
+        _cancel_ladder_orders(venue, ladder)
+        r = venue.buy(sym, action["dollars"], px)
+        if not r.get("ok"):
+            ladder["last_error"] = r.get("error")
+            errors.append(f"{sym}: {r.get('error')}")
+            continue
+        if action.get("top_up"):
+            trade = grid.apply_top_up(ladder, qty=r["qty"], price=r["price"],
+                                      dollars=r["dollars"], at=now)
+        else:
+            trade = grid.apply_fill(
+                ladder, side="buy", qty=r["qty"], price=r["price"],
+                dollars=r["dollars"], n_units=int(action.get("n_units") or 1), at=now,
+            )
+        trade["reason"] = action.get("reason")
+        _record_trade(trade)
+        cash -= float(r["dollars"])
+        fills.append(trade)
+        line = (f"{venue.label} {sym} 매수 ${r['dollars']:,.2f} @ {_fmt_px(r['price'])} "
+                f"({trade['units_after']}/{ladder['max_units']}칸)")
+        log_activity("grid", line)
+        _notify(f"[v4 그리드] {line}")
+
+    # 2) (Re)place GTC limits at the current buy_at / sell_at.
+    try:
+        cash = venue.cash()
+    except Exception:
+        pass
+    for sym, ladder in ladders.items():
+        if not ladder.get("seeded"):
+            continue
+        spent, sync_errs = _sync_resting(venue, ladder, step, cash)
+        errors.extend(sync_errs)
+        cash = max(0.0, cash - spent)
+
+    pending = _pending_buy_dollars(ladders)
+    vb["cash"] = round(cash, 2)
+    vb["grid_value"] = round(sum(
+        grid.held_qty(l) * prices.get(s, l.get("last_price") or 0) for s, l in ladders.items()
+    ), 2)
+    vb["pending_buy"] = pending
+    vb["errors"] = errors
+    live = _account_total(venue)
+    vb["account_total"] = round(live + pending, 2) if live is not None else None
+    resting_n = sum(len(l.get("open_orders") or {}) for l in ladders.values())
+    if errors:
+        vb["note"] = f"주문 오류 {len(errors)}건 — 다음 점검에서 재시도"
+    elif resting_n:
+        vb["note"] = f"대기 리밋 {resting_n}건" + (f" · 잠긴 매수 ${pending:,.0f}" if pending else "")
+    else:
+        vb["note"] = None
+    return {"fills": len(fills), "errors": errors, "cash": vb["cash"],
+            "pending_buy": pending, "resting": resting_n}
 
 def _maybe_resize(venue, vb: dict, ladders: dict[str, dict], cash: float) -> str | None:
     """Grow the rungs when the venue holds materially more capital than the
@@ -720,10 +1042,12 @@ def status() -> dict:
         # status read; the tick-time copies are only a fallback.
         account_total = vb.get("account_total")
         cash = vb.get("cash")
+        pending_buy = _pending_buy_dollars(ladders)
         if configured:
             live_total = _account_total(v)
             if live_total is not None:
-                account_total = live_total
+                # BP excludes open buy limits; add them back for portfolio total.
+                account_total = round(live_total + pending_buy, 2)
             try:
                 cash = round(float(v.cash()), 2)
             except Exception as exc:
@@ -739,6 +1063,8 @@ def status() -> dict:
             "unit_dollars": vb.get("unit_dollars"),
             "account_total": account_total,
             "cash": cash,
+            "pending_buy": pending_buy or None,
+            "resting_limits": bool(getattr(v, "resting_limits", False)),
             "grid_value": vb.get("grid_value"),
             "realized_pl": realized,
             "unrealized_pl": round(sum(unreal), 2) if unreal else None,
