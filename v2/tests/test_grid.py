@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app import grid, grid_engine
+from app import dip, grid, grid_engine
 
 
 # --------------------------------------------------------------------------
@@ -510,7 +510,7 @@ def test_status_exposes_levels_and_pl(env):
     assert row["symbol"] == "AMD" and row["units"] == 3
     assert row["sell_at"] == pytest.approx(105.0)
     assert row["buy_at"] == pytest.approx(95.0)
-    assert st["settings"]["step"] == 0.05 and st["version"] == "v4"
+    assert st["settings"]["step"] == 0.05 and st["version"] == "v5"
 
 
 def test_equity_history_keeps_one_point_per_day_and_carries_missing_venues(env):
@@ -621,3 +621,194 @@ def test_crypto_resting_limits_sit_until_filled_then_reanchor(env):
     grid_engine.stop()
     assert not env.kv[grid_engine.BOOK_KEY]["robinhood"]["ladders"]["BTC/USD"]["open_orders"]
     assert v._cash == pytest.approx(cash_before_stop + locked)
+
+
+# --------------------------------------------------------------------------
+# v5 crypto: 24h dip buyer
+# --------------------------------------------------------------------------
+class DipFakeVenue(RestingFakeVenue):
+    strategy = "dip"
+
+    def __init__(self, *a, market=None, **kw):
+        super().__init__(*a, **kw)
+        self._market = list(market if market is not None else self.universe)
+        self.bootstrap: dict = {}
+
+    def market_universe(self):
+        return list(self._market)
+
+    def recent_hourly_highs(self, symbols):
+        return {s: list(self.bootstrap[s]) for s in symbols if s in self.bootstrap}
+
+
+def _dip_settings(pct=0.05, dollars=100.0):
+    grid_engine.set_dip(pct=pct, order_dollars=dollars)
+
+
+def test_dip_settings_have_defaults_and_clamp(env):
+    s = grid_engine.get_settings()
+    assert s["dip"] == {"pct": 0.05, "order_dollars": 1000.0}
+    grid_engine.set_dip(pct=0.5, order_dollars=1)
+    s = grid_engine.get_settings()
+    assert s["dip"]["pct"] == dip.MAX_DIP and s["dip"]["order_dollars"] == dip.MIN_ORDER_DOLLARS
+    grid_engine.set_dip(pct=0.08)
+    assert grid_engine.get_settings()["dip"] == {"pct": 0.08, "order_dollars": dip.MIN_ORDER_DOLLARS}
+
+
+def test_dip_buys_whole_market_coin_after_24h_drop_then_sells_at_target(env):
+    v = DipFakeVenue(
+        "robinhood", ["BTC/USD"], market=["BTC/USD", "AAVE/USD", "LINK/USD"],
+        prices={"BTC/USD": 100.0, "AAVE/USD": 200.0, "LINK/USD": 20.0}, cash=1000.0,
+    )
+    grid_engine.set_venues([v])
+    _dip_settings(0.05, 100.0)
+    grid_engine.start(run_now=False)
+    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
+    assert vb["phase"] == "adopting"
+
+    # Tick 1: nothing held, no history → just watching, no orders.
+    r = grid_engine.tick(NOW)["venues"]["robinhood"]
+    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
+    assert vb["phase"] == "running" and r["watch"] == 3 and r["fills"] == []
+    assert v.orders == []
+    hist = env.kv[grid_engine.PRICES_KEY]
+    assert set(hist) == {"BTC/USD", "AAVE/USD", "LINK/USD"}
+
+    # AAVE drops 6% from its 24h high (which is the sample we just took).
+    v._prices["AAVE/USD"] = 188.0
+    v._prices["LINK/USD"] = 19.5   # -2.5%: not enough
+    t1 = NOW + timedelta(hours=1)
+    r = grid_engine.tick(t1)["venues"]["robinhood"]
+    assert [f["symbol"] for f in r["fills"]] == ["AAVE/USD"]
+    buys = [o for o in v.orders if o[0] == "buy"]
+    assert buys == [("buy", "AAVE/USD", 100.0)]
+    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
+    lot = vb["lots"]["AAVE/USD"]
+    assert lot["price"] == pytest.approx(188.0) and lot["dollars"] == pytest.approx(100.0)
+    # A GTC sell is parked 5% above the fill.
+    so = lot["sell_order"]
+    assert so and so["limit_price"] == pytest.approx(188.0 * 1.05) and so["qty"] == pytest.approx(lot["qty"])
+    assert v._cash == pytest.approx(900.0)
+
+    # Falling further does NOT buy again (one lot per coin).
+    v._prices["AAVE/USD"] = 170.0
+    r = grid_engine.tick(t1 + timedelta(minutes=15))["venues"]["robinhood"]
+    assert r["fills"] == [] and len([o for o in v.orders if o[0] == "buy"]) == 1
+
+    # Fill the resting sell → lot closed with +5% realized, cash back.
+    v.fill_resting(so["id"])
+    t2 = t1 + timedelta(hours=2)
+    v._prices["AAVE/USD"] = 198.0
+    r = grid_engine.tick(t2)["venues"]["robinhood"]
+    assert [f["side"] for f in r["fills"]] == ["sell"]
+    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
+    assert "AAVE/USD" not in vb["lots"]
+    assert vb["realized_pl"] == pytest.approx(5.0)
+    trades = env.kv[grid_engine.TRADES_KEY]
+    assert trades[-1]["side"] == "sell" and trades[-1]["pl"] == pytest.approx(5.0)
+
+    # Status exposes the v5 shape for the dashboard.
+    st = grid_engine.status()["venues"]["robinhood"]
+    assert st["strategy"] == "dip" and st["dip"]["pct"] == 0.05
+    assert st["lots"] == [] and st["realized_pl"] == pytest.approx(5.0)
+    watch = {w["symbol"]: w for w in st["watch"]}
+    assert watch["AAVE/USD"]["high_24h"] == pytest.approx(200.0)
+    assert watch["AAVE/USD"]["trigger_at"] == pytest.approx(190.0)
+    assert watch["AAVE/USD"]["change"] == pytest.approx(198 / 200 - 1)
+
+
+def test_dip_rearms_after_sell_and_uses_rolling_24h_high(env):
+    v = DipFakeVenue("robinhood", ["SOL/USD"], market=["SOL/USD"],
+                     prices={"SOL/USD": 100.0}, cash=1000.0)
+    grid_engine.set_venues([v])
+    _dip_settings(0.05, 100.0)
+    grid_engine.start(run_now=False)
+    grid_engine.tick(NOW)
+    v._prices["SOL/USD"] = 94.0
+    grid_engine.tick(NOW + timedelta(hours=1))
+    lots = env.kv[grid_engine.BOOK_KEY]["robinhood"]["lots"]
+    so = lots["SOL/USD"]["sell_order"]
+    v.fill_resting(so["id"])
+    v._prices["SOL/USD"] = 99.0
+    grid_engine.tick(NOW + timedelta(hours=2))
+    assert env.kv[grid_engine.BOOK_KEY]["robinhood"]["lots"] == {}
+    # Old 100 high ages out after 24h; new high is 99 → trigger at 94.05.
+    v._prices["SOL/USD"] = 95.0
+    r = grid_engine.tick(NOW + timedelta(hours=25))["venues"]["robinhood"]
+    assert r["fills"] == []
+    v._prices["SOL/USD"] = 94.0
+    r = grid_engine.tick(NOW + timedelta(hours=25, minutes=15))["venues"]["robinhood"]
+    assert [f["symbol"] for f in r["fills"]] == ["SOL/USD"]
+
+
+def test_dip_bootstraps_24h_high_from_hourly_bars(env):
+    v = DipFakeVenue("robinhood", ["ETH/USD"], market=["ETH/USD"],
+                     prices={"ETH/USD": 94.0}, cash=1000.0)
+    v.bootstrap = {"ETH/USD": [[(NOW - timedelta(hours=h)).isoformat(), 100.0] for h in range(1, 6)]}
+    grid_engine.set_venues([v])
+    _dip_settings(0.05, 100.0)
+    grid_engine.start(run_now=False)
+    r = grid_engine.tick(NOW)["venues"]["robinhood"]
+    # Already 6% under the bootstrapped high on the very first tick.
+    assert [f["symbol"] for f in r["fills"]] == ["ETH/USD"]
+
+
+def test_dip_respects_cash_and_per_tick_cap(env):
+    syms = [f"C{i}/USD" for i in range(6)]
+    v = DipFakeVenue("robinhood", syms, market=syms, prices={s: 100.0 for s in syms}, cash=250.0)
+    grid_engine.set_venues([v])
+    _dip_settings(0.05, 100.0)
+    grid_engine.start(run_now=False)
+    grid_engine.tick(NOW)
+    for s in syms:
+        v._prices[s] = 90.0
+    r = grid_engine.tick(NOW + timedelta(hours=1))["venues"]["robinhood"]
+    # $250 buys two $100 lots; third is blocked by cash.
+    assert len(r["fills"]) == 2
+    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
+    assert "현금 부족" in vb["note"]
+    v._cash = 10_000.0
+    r = grid_engine.tick(NOW + timedelta(hours=1, minutes=15))["venues"]["robinhood"]
+    assert len(r["fills"]) == grid_engine.MAX_DIP_BUYS_PER_TICK
+
+
+def test_dip_adopts_v4_ladders_with_cost_basis_and_stop_cancels_sells(env):
+    v = DipFakeVenue("robinhood", ["BTC/USD"], market=["BTC/USD"],
+                     prices={"BTC/USD": 100.0}, positions={"BTC/USD": 2.0}, cash=500.0)
+    grid_engine.set_venues([v])
+    _dip_settings(0.05, 100.0)
+    # Pretend a v4 ladder is on the book: 2 units bought for $90 each.
+    ladder = grid.new_ladder("BTC/USD", "robinhood", 90.0)
+    grid.apply_fill(ladder, side="buy", qty=2.0, price=90.0, dollars=180.0, n_units=2, at=NOW)
+    ladder["open_orders"] = {"buy": {"id": "old", "limit_price": 85.0, "qty": 1, "dollars": 85.0}}
+    book = grid_engine.get_book()
+    book["robinhood"]["phase"] = "running"
+    book["robinhood"]["ladders"] = {"BTC/USD": ladder}
+    env.set(grid_engine.BOOK_KEY, book)
+    grid_engine._save_settings(enabled=True)
+
+    grid_engine.tick(NOW)
+    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
+    assert vb["ladders"] == {}
+    lot = vb["lots"]["BTC/USD"]
+    assert lot["source"] == "adopted" and lot["qty"] == pytest.approx(2.0)
+    assert lot["dollars"] == pytest.approx(180.0) and lot["price"] == pytest.approx(90.0)
+    # Sell parked at +5% over the *cost basis*, not the current price.
+    assert lot["sell_order"]["limit_price"] == pytest.approx(94.5)
+    assert v.orders == [("resting", "sell", "BTC/USD", 94.5, 2.0)]
+
+    grid_engine.stop()
+    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
+    assert vb["lots"]["BTC/USD"]["sell_order"] is None
+    assert v._resting == {}
+
+
+def test_dip_pure_helpers():
+    assert dip.is_stable("USDC/USD") and not dip.is_stable("BTC/USD")
+    hist = {"X/USD": [[(NOW - timedelta(hours=30)).isoformat(), 500.0],
+                      [(NOW - timedelta(hours=3)).isoformat(), 100.0]]}
+    assert dip.high_24h(hist["X/USD"], NOW) == 100.0
+    assert dip.should_buy(95.0, 100.0, 0.05) and not dip.should_buy(95.5, 100.0, 0.05)
+    assert dip.sell_target(188.0, 0.05) == pytest.approx(197.4)
+    trimmed = dip.append_samples(hist, {"X/USD": 97.0}, NOW)
+    assert len(trimmed["X/USD"]) == 2 and trimmed["X/USD"][-1][1] == 97.0

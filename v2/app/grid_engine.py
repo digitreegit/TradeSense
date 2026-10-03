@@ -1,4 +1,4 @@
-"""TradeSense v4 — grid engine: one tick every ~15 minutes for both venues.
+"""TradeSense v5 — engine: one tick every ~15 minutes for both venues.
 
 Venue adapters hide the broker APIs; everything strategy-related lives in
 `grid.py`. Per-venue lifecycle stored in `grid_book`:
@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
-from . import grid
+from . import dip, grid
 from .briefing import log_activity
 from .config import settings
 from .state import store
@@ -31,6 +31,8 @@ BOOK_KEY = "grid_book"
 TRADES_KEY = "grid_trades"
 TICK_KEY = "grid_last_tick"
 HISTORY_KEY = "grid_equity_history"
+PRICES_KEY = "v5_crypto_prices"   # {pair: [[iso, mid], ...]} rolling 26h
+MAX_DIP_BUYS_PER_TICK = 3          # a market-wide crash should not spend everything in one go
 MAX_TRADES_KEPT = 500
 MAX_HISTORY_DAYS = 400
 ORDER_WAIT_SECONDS = 20.0
@@ -49,9 +51,16 @@ def get_settings() -> dict:
     base = grid.clamp_step(raw.get("step", grid.DEFAULT_STEP))
     raw_steps = raw.get("steps") or {}
     steps = {v.name: grid.clamp_step(raw_steps.get(v.name, base)) for v in venues()}
+    raw_dip = raw.get("dip") or {}
     return {
         "step": base,
         "steps": steps,
+        # v5 crypto rule: buy `order_dollars` of any coin `pct` under its 24h
+        # high, sell `pct` above the fill.
+        "dip": {
+            "pct": dip.clamp_dip(raw_dip.get("pct", dip.DEFAULT_DIP)),
+            "order_dollars": dip.clamp_order(raw_dip.get("order_dollars", dip.DEFAULT_ORDER_DOLLARS)),
+        },
         "enabled": bool(raw.get("enabled", False)),
         "updated_at": raw.get("updated_at"),
     }
@@ -59,6 +68,22 @@ def get_settings() -> dict:
 
 def step_for(s: dict, venue_name: str) -> float:
     return float((s.get("steps") or {}).get(venue_name, s["step"]))
+
+
+def set_dip(*, pct: float | None = None, order_dollars: float | None = None) -> dict:
+    cur = get_settings()
+    d = dict(cur["dip"])
+    changed = []
+    if pct is not None:
+        d["pct"] = dip.clamp_dip(pct)
+        changed.append(f"하락 {d['pct']:.1%}")
+    if order_dollars is not None:
+        d["order_dollars"] = dip.clamp_order(order_dollars)
+        changed.append(f"매수 ${d['order_dollars']:,.0f}")
+    out = _save_settings(dip=d)
+    if changed:
+        log_activity("grid", "크립토 v5 설정 변경: " + " · ".join(changed))
+    return out
 
 
 def _save_settings(**changes) -> dict:
@@ -249,10 +274,12 @@ class AlpacaVenue:
 class RobinhoodVenue:
     name = "robinhood"
     label = "크립토 · Robinhood"
-    universe = grid.CRYPTO_UNIVERSE
+    universe = grid.CRYPTO_UNIVERSE  # v4 grid fallback; v5 watches the whole API market
     # Sit GTC limits at the next buy/sell levels instead of crossing the
     # spread on every tick. Seed / liquidate / top-up still go marketable.
     resting_limits = True
+    # v5: 24h-dip buyer across every API-tradable coin (see dip.py).
+    strategy = "dip"
 
     def __init__(self) -> None:
         self._client = None
@@ -333,6 +360,62 @@ class RobinhoodVenue:
         ok_map = self.client.api_tradable_map(*codes)
         return [s for s in symbols if ok_map.get(s.split("/")[0]) is True]
 
+    def market_universe(self) -> list[str]:
+        """Every USD pair the API may *buy*, minus stablecoins."""
+        from .robinhood_client import pair_allows_api_orders
+        rows = self.client.get_trading_pairs_v2()
+        out: list[str] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            sym = str(row.get("symbol") or "").upper()
+            if not sym.endswith("-USD"):
+                continue
+            if not pair_allows_api_orders(row, side="buy"):
+                continue
+            pair = self._pair(sym)
+            if dip.is_stable(pair):
+                continue
+            out.append(pair)
+        return sorted(set(out))
+
+    def recent_hourly_highs(self, symbols: list[str], hours: int = 25) -> dict[str, list]:
+        """Best-effort 24h bootstrap from Alpaca's free crypto bars so the dip
+        rule can act on day one. Missing symbols are simply skipped."""
+        if not symbols:
+            return {}
+        try:
+            from datetime import timedelta as _td
+
+            from alpaca.data.historical import CryptoHistoricalDataClient
+            from alpaca.data.requests import CryptoBarsRequest
+            from alpaca.data.timeframe import TimeFrame
+
+            client = CryptoHistoricalDataClient()
+            start = datetime.now(timezone.utc) - _td(hours=hours)
+            req = CryptoBarsRequest(symbol_or_symbols=list(symbols), timeframe=TimeFrame.Hour, start=start)
+            data = client.get_crypto_bars(req).data
+        except Exception as exc:
+            log.warning("alpaca crypto bars bootstrap failed: %s", exc)
+            return {}
+        out: dict[str, list] = {}
+        for sym in symbols:
+            bars = data.get(sym) if isinstance(data, dict) else None
+            if not bars:
+                continue
+            rows = []
+            for b in bars:
+                ts = getattr(b, "timestamp", None)
+                hi = getattr(b, "high", None)
+                if ts is None or hi is None:
+                    continue
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                rows.append([ts.isoformat(), float(hi)])
+            if rows:
+                out[sym] = rows
+        return out
+
     def _place(self, side: str, pair: str, dollars: float, ref_price: float) -> dict:
         from .robinhood_orders import place_market_dollars
         try:
@@ -404,9 +487,10 @@ def set_venues(items: list | None) -> None:
 # Book helpers
 # --------------------------------------------------------------------------
 def _empty_venue_book() -> dict:
-    return {"phase": "idle", "ladders": {}, "manual": [], "unit_dollars": None,
+    return {"phase": "idle", "ladders": {}, "lots": {}, "manual": [], "unit_dollars": None,
             "note": None, "errors": [], "started_at": None, "updated_at": None,
-            "cash": None, "grid_value": None, "account_total": None, "pending_buy": None}
+            "cash": None, "grid_value": None, "account_total": None, "pending_buy": None,
+            "realized_pl": 0.0}
 
 
 def _account_total(venue) -> float | None:
@@ -482,12 +566,21 @@ def _fmt_px(px: float) -> str:
 # Lifecycle
 # --------------------------------------------------------------------------
 def start(*, run_now: bool = True) -> dict:
-    """Liquidate everything API-tradable, then rebuild the ladders from cash."""
+    """Stocks: liquidate everything API-tradable, then rebuild the ladders
+    from cash. Crypto (v5): cancel open orders and adopt current holdings as
+    lots — nothing is sold."""
     book = get_book()
     for v in venues():
+        old = book.get(v.name) or {}
         vb = _empty_venue_book()
-        vb["phase"] = "liquidating"
-        vb["note"] = "보유 청산 후 사다리 구성 대기"
+        if _is_dip(v):
+            vb["phase"] = "adopting"
+            vb["note"] = "보유 인수 후 감시 시작 대기"
+            vb["ladders"] = old.get("ladders") or {}
+            vb["lots"] = old.get("lots") or {}
+        else:
+            vb["phase"] = "liquidating"
+            vb["note"] = "보유 청산 후 사다리 구성 대기"
         book[v.name] = vb
     store.set(BOOK_KEY, book)
     store.set(TRADES_KEY, [])
@@ -497,8 +590,8 @@ def start(*, run_now: bool = True) -> dict:
     except Exception:
         log.exception("v3 state reset failed")
     _save_settings(enabled=True)
-    log_activity("grid", "v4 그리드 시작 — 보유 청산 후 사다리 구성")
-    _notify("[v4 그리드] 시작 — API로 팔 수 있는 보유를 정리한 뒤 사다리를 구성합니다.")
+    log_activity("grid", "v5 시작 — 주식: 청산 후 사다리 구성 · 크립토: 보유 인수 후 하락 감시")
+    _notify("[v5] 시작 — 주식은 사다리를 새로 구성하고, 크립토는 보유를 그대로 둔 채 24h 하락 감시를 시작합니다.")
     if run_now:
         try:
             tick()
@@ -513,13 +606,13 @@ def stop() -> dict:
         _cancel_all_resting("자동매매 OFF — 대기 리밋 취소")
     except Exception:
         log.exception("cancel resting on stop failed")
-    _notify("[v4 그리드] 자동매매 OFF — 보유는 그대로 둡니다.")
+    _notify("[v5] 자동매매 OFF — 보유는 그대로 둡니다.")
     return status()
 
 
 def resume() -> dict:
     set_enabled(True)
-    _notify("[v4 그리드] 자동매매 ON")
+    _notify("[v5] 자동매매 ON")
     return status()
 
 
@@ -551,6 +644,10 @@ def _cancel_all_resting(reason: str) -> None:
             before = len(ladder.get("open_orders") or {})
             _cancel_ladder_orders(v, ladder)
             canceled += before
+        for lot in (vb.get("lots") or {}).values():
+            if (lot.get("sell_order") or {}).get("id"):
+                canceled += 1
+            _cancel_lot_order(v, lot)
         vb["pending_buy"] = 0.0
     if canceled:
         store.set(BOOK_KEY, book)
@@ -716,6 +813,16 @@ def _tick_venue(venue, vb: dict, step: float, now: datetime) -> dict:
     ok, why = venue.ready()
     if not ok:
         return {"skipped": why}
+    if _is_dip(venue):
+        if phase in ("liquidating", "adopting"):
+            adopted = _adopt_holdings(venue, vb, now)
+            vb["phase"] = "running"
+            vb["started_at"] = now.isoformat()
+            vb["note"] = None
+            msg = f"{venue.label} v5 감시 시작" + (f" · 보유 인수: {', '.join(adopted)}" if adopted else "")
+            log_activity("grid", msg)
+            _notify(f"[v5 크립토] {msg}")
+        return _run_dip(venue, vb, now)
     if phase == "liquidating":
         result = _liquidate(venue, vb, now)
         if vb.get("phase") != "running":
@@ -744,7 +851,7 @@ def _liquidate(venue, vb: dict, now: datetime) -> dict:
             _record_trade({
                 "at": now.isoformat(), "venue": venue.name, "symbol": sym, "side": "sell",
                 "qty": r["qty"], "price": r["price"], "dollars": r["dollars"],
-                "pl": None, "reason": "v4 시작 청산", "units_after": 0,
+                "pl": None, "reason": "v5 시작 청산", "units_after": 0,
             })
             log_activity("grid", f"{venue.label} {sym} 청산 ${r['dollars']:,.2f}")
         else:
@@ -774,14 +881,229 @@ def _liquidate(venue, vb: dict, now: datetime) -> dict:
     msg = (f"{venue.label} 사다리 구성: {', '.join(syms)} · 칸당 ${unit:,.2f} "
            f"× {grid.MAX_UNITS}칸 (현금 ${cash:,.2f})")
     log_activity("grid", msg)
-    _notify(f"[v4 그리드] {msg}")
+    _notify(f"[v5] {msg}")
     return {"seeded": syms, "unit_dollars": unit, "manual": manual}
 
 
 def _run(venue, vb: dict, step: float, now: datetime) -> dict:
+    if _is_dip(venue):
+        return _run_dip(venue, vb, now)
     if getattr(venue, "resting_limits", False):
         return _run_resting(venue, vb, step, now)
     return _run_marketable(venue, vb, step, now)
+
+
+# --------------------------------------------------------------------------
+# v5 crypto: 24h dip buyer
+# --------------------------------------------------------------------------
+def _is_dip(venue) -> bool:
+    return getattr(venue, "strategy", "grid") == "dip"
+
+
+def _lots(vb: dict) -> dict:
+    return vb.setdefault("lots", {})
+
+
+def _cancel_lot_order(venue, lot: dict) -> None:
+    so = lot.get("sell_order")
+    if so and so.get("id") and hasattr(venue, "cancel_resting"):
+        venue.cancel_resting(so)
+    lot["sell_order"] = None
+
+
+def _adopt_holdings(venue, vb: dict, now: datetime) -> list[str]:
+    """Turn whatever the account already holds (and the API can sell) into v5
+    lots at the current price — nothing is liquidated. Old v4 ladders carry
+    their cost basis over so realized P/L stays honest."""
+    ladders = vb.get("ladders") or {}
+    for ladder in ladders.values():
+        _cancel_ladder_orders(venue, ladder)
+    positions = {s: q for s, q in venue.positions().items() if q > 0}
+    tradable = set(venue.tradable(list(positions))) if positions else set()
+    prices = venue.prices(list(positions)) if positions else {}
+    lots = _lots(vb)
+    adopted, manual = [], []
+    for sym, qty in positions.items():
+        if sym not in tradable:
+            manual.append(sym)
+            continue
+        if sym in lots:
+            continue
+        px = prices.get(sym)
+        ladder = ladders.get(sym)
+        basis = None
+        if ladder:
+            held = grid.held_qty(ladder)
+            cost = sum(float(u.get("dollars") or 0) for u in (ladder.get("units") or []))
+            if held > 0 and cost > 0:
+                basis = cost * min(1.0, qty / held)
+        if basis is None:
+            if not px:
+                continue
+            basis = qty * px
+        price = basis / qty if qty > 0 else (px or 0)
+        if price <= 0:
+            continue
+        lots[sym] = dip.new_lot(sym, qty=qty, price=price, dollars=basis, at=now, source="adopted")
+        adopted.append(sym)
+    vb["ladders"] = {}
+    vb["manual"] = sorted(manual)
+    return adopted
+
+
+def _run_dip(venue, vb: dict, now: datetime) -> dict:
+    s = get_settings()
+    pct = float(s["dip"]["pct"])
+    order_dollars = float(s["dip"]["order_dollars"])
+    lots = _lots(vb)
+    if vb.get("ladders"):
+        # First v5 tick on a v4 book: keep the coins, drop the ladders.
+        adopted = _adopt_holdings(venue, vb, now)
+        if adopted:
+            log_activity("grid", f"{venue.label} v5 전환: {', '.join(adopted)} 보유분을 그대로 인수")
+
+    try:
+        universe = venue.market_universe()
+    except Exception as exc:
+        log.warning("%s universe failed: %s", venue.name, exc)
+        universe = list(venue.universe)
+    watch = sorted(set(universe) | set(lots))
+    prices = venue.prices(watch) if watch else {}
+
+    # Rolling 24h price memory; bootstrap from hourly bars for coins we have
+    # never seen so the rule can fire on day one.
+    history: dict = store.get(PRICES_KEY) or {}
+    fresh = [sym for sym in watch if len(history.get(sym) or []) < 2 and prices.get(sym)]
+    if fresh and hasattr(venue, "recent_hourly_highs"):
+        try:
+            for sym, rows in venue.recent_hourly_highs(fresh).items():
+                history[sym] = rows + (history.get(sym) or [])
+        except Exception as exc:
+            log.warning("history bootstrap failed: %s", exc)
+    history = dip.append_samples(history, prices, now)
+    store.set(PRICES_KEY, history)
+
+    positions = venue.positions()
+    cash = venue.cash()
+    errors: list[str] = []
+    fills: list[dict] = []
+
+    # 1) Harvest resting sells; drop lots the user sold by hand.
+    for sym, lot in list(lots.items()):
+        so = lot.get("sell_order")
+        if so and so.get("id"):
+            st = venue.resting_status(so)
+            if not st.get("ok"):
+                lot["last_error"] = st.get("error")
+                continue
+            qty = float(st.get("qty") or 0)
+            price = float(st.get("price") or 0)
+            if st.get("filled") or (qty > 0 and price > 0 and st.get("terminal") and not st.get("pending")):
+                dollars = float(st.get("dollars") or qty * price)
+                pl = dip.lot_pl(lot, price, qty)
+                trade = {
+                    "at": now.isoformat(), "venue": venue.name, "symbol": sym, "side": "sell",
+                    "qty": qty, "price": price, "dollars": round(dollars, 2), "pl": pl,
+                    "reason": f"{pct:.1%} 상승 목표 도달", "units_after": 0,
+                }
+                _record_trade(trade)
+                fills.append(trade)
+                vb["realized_pl"] = round(float(vb.get("realized_pl") or 0) + pl, 2)
+                lots.pop(sym, None)
+                cash += dollars
+                line = f"{venue.label} {sym} 매도 ${dollars:,.2f} @ {_fmt_px(price)} · 실현 {pl:+,.2f}"
+                log_activity("grid", line)
+                _notify(f"[v5 크립토] {line}")
+                continue
+            if st.get("terminal"):
+                lot["sell_order"] = None  # canceled outside; re-place below
+        held = float(positions.get(sym, 0) or 0)
+        if held < float(lot["qty"]) * 0.5:
+            _cancel_lot_order(venue, lot)
+            lots.pop(sym, None)
+            log_activity("grid", f"{venue.label} {sym} 보유가 사라져 v5 관리에서 제외 (수동 매도?)")
+            continue
+        if held < float(lot["qty"]):
+            lot["qty"] = held  # partial manual sell: track what is left
+
+    # 2) Buy anything that fell `pct` under its 24h high (most-fallen first).
+    rows = dip.watch_rows(history, prices, lots, pct, now)
+    bought = 0
+    skip_note = None
+    for row in rows:
+        if bought >= MAX_DIP_BUYS_PER_TICK:
+            break
+        if not row["armed"]:
+            continue
+        sym = row["symbol"]
+        if cash < order_dollars * 1.005:
+            skip_note = f"{sym} 매수 조건 충족 — 현금 부족 (${cash:,.2f} < ${order_dollars:,.0f})"
+            break
+        r = venue.buy(sym, order_dollars, row["price"])
+        if not r.get("ok"):
+            errors.append(f"{sym}: {r.get('error')}")
+            log_activity("grid", f"{venue.label} {sym} 매수 실패: {r.get('error')}")
+            continue
+        lot = dip.new_lot(sym, qty=r["qty"], price=r["price"], dollars=r["dollars"], at=now)
+        lots[sym] = lot
+        cash -= float(r["dollars"])
+        bought += 1
+        trade = {
+            "at": now.isoformat(), "venue": venue.name, "symbol": sym, "side": "buy",
+            "qty": r["qty"], "price": r["price"], "dollars": r["dollars"], "pl": None,
+            "reason": f"24h 고점 대비 {row['change']:+.1%}", "units_after": 1,
+        }
+        _record_trade(trade)
+        fills.append(trade)
+        line = (f"{venue.label} {sym} 매수 ${r['dollars']:,.2f} @ {_fmt_px(r['price'])} "
+                f"(24h 고점 대비 {row['change']:+.1%}) → 목표 {_fmt_px(dip.sell_target(r['price'], pct))}")
+        log_activity("grid", line)
+        _notify(f"[v5 크립토] {line}")
+
+    # 3) Every lot keeps one GTC sell parked `pct` above its buy price.
+    resting = 0
+    for sym, lot in lots.items():
+        target = dip.sell_target(lot["price"], pct)
+        qty = float(lot["qty"])
+        if _orders_match(lot.get("sell_order"), limit_price=target, qty=qty):
+            resting += 1
+            continue
+        _cancel_lot_order(venue, lot)
+        r = venue.place_resting("sell", sym, limit_price=target, qty=qty)
+        if not r.get("ok") or not r.get("rh_order_id"):
+            err = r.get("error") or "리밋 주문 실패"
+            lot["last_error"] = err
+            errors.append(f"{sym}: {err}")
+            continue
+        lot["sell_order"] = {
+            "id": r["rh_order_id"],
+            "api_version": r.get("rh_api_version") or "v1",
+            "limit_price": float(r.get("limit_price") or target),
+            "qty": float(r.get("qty") or qty),
+        }
+        lot["last_error"] = None
+        resting += 1
+
+    for sym, lot in lots.items():
+        if prices.get(sym):
+            lot["last_price"] = prices[sym]
+    vb["cash"] = round(cash, 2)
+    vb["grid_value"] = round(sum(float(l["qty"]) * prices.get(s, l.get("last_price") or 0)
+                                 for s, l in lots.items()), 2)
+    vb["pending_buy"] = 0.0
+    vb["errors"] = errors
+    vb["account_total"] = _account_total(venue)
+    vb["watch_count"] = len(universe)
+    armed = [r["symbol"] for r in rows if r["armed"]]
+    note = f"감시 {len(universe)}종목 · 보유 {len(lots)} · 매도 대기 {resting}건"
+    if armed:
+        note += f" · 조건 충족 대기 {len(armed)}종목"
+    if skip_note:
+        note += f" · {skip_note}"
+    if errors:
+        note += f" · 오류 {len(errors)}건"
+    vb["note"] = note
+    return {"fills": fills, "errors": errors, "watch": len(universe), "lots": len(lots)}
 
 
 def _run_marketable(venue, vb: dict, step: float, now: datetime) -> dict:
@@ -859,7 +1181,7 @@ def _run_marketable(venue, vb: dict, step: float, now: datetime) -> dict:
         line = (f"{venue.label} {sym} {side_ko} ${r['dollars']:,.2f} @ {_fmt_px(r['price'])} "
                 f"({trade['units_after']}/{ladder['max_units']}칸){pl_txt}")
         log_activity("grid", line)
-        _notify(f"[v4 그리드] {line}")
+        _notify(f"[v5] {line}")
 
     vb["cash"] = round(cash, 2)
     vb["grid_value"] = round(sum(
@@ -899,7 +1221,7 @@ def _run_resting(venue, vb: dict, step: float, now: datetime) -> dict:
                     f"@ {_fmt_px(trade['price'])} "
                     f"({trade['units_after']}/{ladder['max_units']}칸){pl_txt}")
             log_activity("grid", line)
-            _notify(f"[v4 그리드] {line}")
+            _notify(f"[v5] {line}")
 
     try:
         cash = venue.cash()
@@ -957,7 +1279,7 @@ def _run_resting(venue, vb: dict, step: float, now: datetime) -> dict:
         line = (f"{venue.label} {sym} 매수 ${r['dollars']:,.2f} @ {_fmt_px(r['price'])} "
                 f"({trade['units_after']}/{ladder['max_units']}칸)")
         log_activity("grid", line)
-        _notify(f"[v4 그리드] {line}")
+        _notify(f"[v5] {line}")
 
     # 2) (Re)place GTC limits at the current buy_at / sell_at.
     try:
@@ -1015,7 +1337,7 @@ def _maybe_resize(venue, vb: dict, ladders: dict[str, dict], cash: float) -> str
     msg = (f"{venue.label} 자본 ${capital:,.2f} 감지 — 칸당 ${unit_old:,.2f} → ${unit_new:,.2f}, "
            f"보유 칸 보충 매수")
     log_activity("grid", msg)
-    _notify(f"[v4 그리드] {msg}")
+    _notify(f"[v5] {msg}")
     return msg
 
 
@@ -1030,9 +1352,34 @@ def status() -> dict:
         vb = book.get(v.name) or _empty_venue_book()
         ladders = vb.get("ladders") or {}
         step = step_for(s, v.name)
-        rows = [grid.summary(l, step) for l in ladders.values()]
-        realized = round(sum(r["realized_pl"] for r in rows), 2)
-        unreal = [r["unrealized_pl"] for r in rows if r["unrealized_pl"] is not None]
+        is_dip = _is_dip(v)
+        if is_dip:
+            lots = vb.get("lots") or {}
+            pct = float(s["dip"]["pct"])
+            # Last tick's samples double as the watch-list prices; no quote
+            # burst on every dashboard refresh.
+            price_hist: dict = store.get(PRICES_KEY) or {}
+            last_prices = {sym: float(r[-1][1]) for sym, r in price_hist.items() if r}
+            for sym, l in lots.items():
+                if l.get("last_price"):
+                    last_prices.setdefault(sym, float(l["last_price"]))
+            rows = []
+            lot_rows = dip.lot_rows(lots, last_prices, pct)
+            # Age the window from the newest sample, not the wall clock, so
+            # a stalled cron shows the last known picture instead of blanks.
+            ref_iso = max((r[-1][0] for r in price_hist.values() if r), default=None)
+            ref_now = datetime.fromisoformat(ref_iso) if ref_iso else None
+            if ref_now is not None and ref_now.tzinfo is None:
+                ref_now = ref_now.replace(tzinfo=timezone.utc)
+            watch_rows = dip.watch_rows(price_hist, {k: v for k, v in last_prices.items() if k in price_hist},
+                                        lots, pct, ref_now)
+            realized = round(float(vb.get("realized_pl") or 0), 2)
+            unreal = [r["unrealized_pl"] for r in lot_rows if r["unrealized_pl"] is not None]
+        else:
+            lot_rows, watch_rows = [], []
+            rows = [grid.summary(l, step) for l in ladders.values()]
+            realized = round(sum(r["realized_pl"] for r in rows), 2)
+            unreal = [r["unrealized_pl"] for r in rows if r["unrealized_pl"] is not None]
         configured = False
         try:
             configured = v.configured()
@@ -1072,6 +1419,11 @@ def status() -> dict:
             "updated_at": vb.get("updated_at"),
             "ladders": rows,
             "universe": list(v.universe),
+            "strategy": "dip" if is_dip else "grid",
+            "dip": s["dip"] if is_dip else None,
+            "lots": lot_rows,
+            "watch": watch_rows,
+            "watch_count": vb.get("watch_count") or len(watch_rows),
         }
     live_totals = {k: o["account_total"] for k, o in out_venues.items() if o["configured"]}
     history: list[dict] = []
@@ -1080,7 +1432,7 @@ def status() -> dict:
     except Exception:
         log.exception("equity history update failed")
     return {
-        "version": "v4",
+        "version": "v5",
         "settings": s,
         "venues": out_venues,
         "history": history,

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>TradeSense v4 — Grid</title>
+<title>TradeSense v5</title>
 <link rel="icon" type="image/png" href="/favicon.png?v=4">
 <link rel="apple-touch-icon" href="/favicon.png?v=4">
 <style>
@@ -108,7 +108,7 @@
 <div class="wrap">
   <div class="topbar">
     <div>
-      <h1>TradeSense <span class="blue">v4</span> <span class="hint">· 그리드</span></h1>
+      <h1>TradeSense <span class="blue">v5</span> <span class="hint">· 주식 그리드 + 크립토 하락매수</span></h1>
       <div class="hint">x% 내리면 1칸 매수, x% 오르면 1칸 매도. 크립토 Robinhood · 주식 Alpaca · 전부 자동</div>
     </div>
     <div class="row">
@@ -212,9 +212,9 @@
 
     <div class="panel">
       <h3>그리드 초기화</h3>
-      <p class="hint">API로 팔 수 있는 보유를 모두 현금화한 뒤, 현재 자금으로 사다리를 처음부터 다시 구성합니다(종목별 5칸 중 3칸 매수).
-        이전 사다리와 체결 기록은 지워집니다. 자금이 늘어나면 자동으로 칸을 키우므로 평소에는 필요 없습니다.</p>
-      <button type="button" class="btn btn-danger btn-sm" id="btn-start">현금화 후 새로 구성</button>
+      <p class="hint">주식: API로 팔 수 있는 보유를 모두 현금화한 뒤 현재 자금으로 사다리를 다시 구성합니다(종목별 5칸 중 3칸 매수).
+        크립토(v5): 팔지 않고 현재 보유를 그대로 인수한 뒤 전체 시장 하락 감시를 시작합니다. 이전 사다리와 체결 기록은 지워집니다.</p>
+      <button type="button" class="btn btn-danger btn-sm" id="btn-start">초기화</button>
       <p class="msg" id="reset-msg"></p>
     </div>
 
@@ -349,6 +349,7 @@ function closeConfirm() { pendingConfirm = null; $('overlay-confirm').classList.
 const PHASE = {
   idle: ['idle', '시작 전'],
   liquidating: ['wait', '청산 중'],
+  adopting: ['wait', '보유 인수 대기'],
   running: ['on', '운영 중'],
 };
 
@@ -358,7 +359,111 @@ function rungs(n, max) {
   return h + '</span>';
 }
 
+function pctStr(x, digits = 1) {
+  if (x === null || x === undefined) return '—';
+  const n = Number(x) * 100;
+  return `${n >= 0 ? '+' : ''}${n.toFixed(digits)}%`;
+}
+
+// v5 crypto card: whole-market 24h dip buyer (one lot per coin).
+function renderDipVenue(key, v) {
+  const [cls, text] = PHASE[v.phase] || ['idle', v.phase];
+  const d = v.dip || {};
+  const pct = Number(d.pct ?? 0.05);
+  const pctIn = (pct * 100).toFixed(1).replace(/\.0$/, '');
+  const dollarsIn = Math.round(Number(d.order_dollars ?? 1000));
+  const lots = v.lots || [];
+  const watch = v.watch || [];
+  let body;
+  if (!v.configured) {
+    body = `<div class="empty">설정에서 API 키를 저장하세요.</div>`;
+  } else if (v.phase === 'idle') {
+    body = `<div class="empty">설정 탭의 “그리드 초기화”를 누르면 감시를 시작합니다. 크립토 보유는 팔지 않고 그대로 인수합니다.</div>`;
+  } else if (!lots.length) {
+    body = `<div class="empty">보유 없음 — 24시간 고점 대비 ${pctIn}% 내린 코인이 나오면 ${money(dollarsIn, false)}어치 삽니다.</div>`;
+  } else {
+    body = `<div class="table-scroll"><table>
+      <thead><tr>
+        <th>종목</th><th class="num">매수가</th><th class="num">현재가</th><th class="num">목표 매도</th>
+        <th class="num">투입</th><th class="num">평가</th><th class="num">미실현</th><th>상태</th>
+      </tr></thead><tbody>` +
+      lots.map(r => {
+        const prog = r.current && r.price ? r.current / r.price - 1 : null;
+        const status = r.last_error
+          ? `<span class="red" title="${esc(r.last_error)}">오류</span>`
+          : (r.resting ? `<span class="blue">매도 리밋 대기</span>` : `<span class="amber">리밋 미등록</span>`);
+        return `<tr>
+          <td><b>${esc(r.symbol)}</b><div class="hint">${r.source === 'adopted' ? '인수 · ' : ''}${when(r.at)}</div></td>
+          <td class="num">${px(r.price)}</td>
+          <td class="num">${px(r.current)}${prog === null ? '' : `<div class="hint ${prog >= 0 ? 'green' : 'red'}">${pctStr(prog)}</div>`}</td>
+          <td class="num red">${px(r.target)}</td>
+          <td class="num">${money(r.dollars)}</td>
+          <td class="num">${money(r.value)}</td>
+          <td class="num">${signed(r.unrealized_pl)}</td>
+          <td>${status}</td>
+        </tr>`;
+      }).join('') + '</tbody></table></div>';
+  }
+  const watchBody = watch.length ? `<div class="table-scroll"><table>
+      <thead><tr><th>종목</th><th class="num">현재가</th><th class="num">24h 고점</th><th class="num">고점 대비</th><th class="num">매수 트리거</th><th>상태</th></tr></thead><tbody>` +
+      watch.map(w => {
+        const chg = w.change;
+        const chgCls = chg === null || chg === undefined ? 'dim' : chg <= -pct ? 'red' : chg <= -pct / 2 ? 'amber' : 'dim';
+        const st = w.held ? '<span class="blue">보유 중</span>'
+          : w.armed ? '<span class="red">조건 충족</span>'
+          : (w.hours < 23 ? `<span class="dim">기록 ${w.hours}h</span>` : '<span class="dim">감시</span>');
+        return `<tr>
+          <td><b>${esc(w.symbol)}</b></td>
+          <td class="num">${px(w.price)}</td>
+          <td class="num">${px(w.high_24h)}</td>
+          <td class="num ${chgCls}">${pctStr(chg)}</td>
+          <td class="num">${px(w.trigger_at)}</td>
+          <td>${st}</td>
+        </tr>`;
+      }).join('') + '</tbody></table></div>'
+    : '<div class="empty">첫 점검 뒤 감시 목록이 채워집니다.</div>';
+  const manual = (v.manual || []).length
+    ? `<p class="hint" style="margin-top:8px">수동 보유(API 불가, 제외): <b>${v.manual.map(esc).join(', ')}</b></p>` : '';
+  const note = v.note && v.phase !== 'idle' ? `<p class="hint amber" style="margin-top:8px">${esc(v.note)}</p>` : '';
+  const errors = (v.errors || []).length
+    ? `<ul class="hint red" style="margin:8px 0 0 18px">${v.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul>` : '';
+  const hasBook = v.cash !== null && v.cash !== undefined;
+  const bookTotal = (v.cash ?? 0) + (v.grid_value ?? 0);
+  const outside = v.account_total != null && hasBook ? v.account_total - bookTotal : null;
+  const watchN = v.watch_count || watch.length;
+  return `<div class="panel">
+    <div class="row spread">
+      <h3>${esc(v.label)} <span class="pill ${cls}">${text}</span> <span class="pill idle">v5 하락매수</span></h3>
+      <div class="row">
+        <span class="hint">${v.updated_at ? when(v.updated_at) : ''}</span>
+        <label class="hint" for="dip-${key}">하락</label>
+        <input class="input short" id="dip-${key}" data-dip="${key}" type="number" min="1" max="30" step="0.5" inputmode="decimal" value="${pctIn}" aria-label="하락 %">
+        <span class="hint">%</span>
+        <label class="hint" for="dollars-${key}">매수</label>
+        <span class="hint">$</span>
+        <input class="input short" id="dollars-${key}" data-dip="${key}" type="number" min="5" step="50" inputmode="numeric" value="${dollarsIn}" aria-label="매수 금액 $" style="width:84px">
+        <button type="button" class="btn btn-sm btn-save-dip" data-venue="${key}">저장</button>
+      </div>
+    </div>
+    <p class="msg" id="step-msg-${key}" style="margin:0;min-height:0"></p>
+    <div class="stats">
+      <div class="stat"><div class="label">계좌 총액</div><div class="value">${money(v.account_total, false)}</div>${outside && Math.abs(outside) >= 1 ? `<div class="hint">관리 밖 ${money(outside, false)}</div>` : ''}</div>
+      <div class="stat"><div class="label">현금</div><div class="value">${money(v.cash, false)}</div><div class="hint">1회 ${money(dollarsIn, false)} · 최대 ${hasBook ? Math.floor((v.cash ?? 0) / Math.max(dollarsIn, 1)) : '—'}회</div></div>
+      <div class="stat"><div class="label">보유 평가</div><div class="value">${money(v.grid_value, false)}</div><div class="hint">${lots.length}종목</div></div>
+      <div class="stat"><div class="label">실현 손익</div><div class="value">${signed(v.realized_pl)}</div></div>
+      <div class="stat"><div class="label">미실현</div><div class="value">${signed(v.unrealized_pl)}</div></div>
+      <div class="stat"><div class="label">감시</div><div class="value">${watchN}</div><div class="hint">API 거래 가능 코인</div></div>
+    </div>
+    ${body}${manual}${note}${errors}
+    <details class="acc" style="margin-top:10px">
+      <summary>감시 목록 ${watchN ? `(${watchN}종목 · 많이 내린 순)` : ''}</summary>
+      ${watchBody}
+    </details>
+  </div>`;
+}
+
 function renderVenue(key, v, step) {
+  if (v.strategy === 'dip') return renderDipVenue(key, v);
   const [cls, text] = PHASE[v.phase] || ['idle', v.phase];
   const rows = v.ladders || [];
   let body;
@@ -567,14 +672,28 @@ async function saveStep(venue) {
   } catch (e) { setMsg(msgId, e.message, false); }
 }
 
+async function saveDip(venue) {
+  const pctIn = $(`dip-${venue}`), dolIn = $(`dollars-${venue}`);
+  const pct = parseFloat(pctIn.value), dollars = parseFloat(dolIn.value);
+  const msgId = `step-msg-${venue}`;
+  if (!(pct >= 1 && pct <= 30)) { setMsg(msgId, '하락 폭은 1%~30% 사이로 입력하세요.', false); return; }
+  if (!(dollars >= 5)) { setMsg(msgId, '매수 금액은 $5 이상으로 입력하세요.', false); return; }
+  pctIn.blur(); dolIn.blur();
+  try {
+    const d = await post('/api/grid/settings', {dip_pct: pct, order_dollars: dollars});
+    renderStatus(d);
+    setMsg(msgId, `저장. 24h 고점 대비 -${pct}%에 ${money(dollars, false)} 매수, 매수가 +${pct}%에 매도. 이미 걸린 매도 리밋은 다음 점검에서 새 목표로 옮깁니다.`, true);
+  } catch (e) { setMsg(msgId, e.message, false); }
+}
+
 async function startGrid() {
   const btn = $('btn-start');
   btn.disabled = true;
-  setMsg('reset-msg', '청산 주문을 내고 사다리를 구성합니다… (최대 1~2분)', true);
+  setMsg('reset-msg', '초기화 중… (최대 1~2분)', true);
   try {
     const d = await post('/api/grid/start');
     renderStatus(d);
-    setMsg('reset-msg', '초기화했습니다. 주식은 장중에만, 크립토는 바로 진행됩니다. 청산이 끝난 다음 점검에서 첫 매수가 들어갑니다. 그리드 탭에서 진행 상황을 확인하세요.', true);
+    setMsg('reset-msg', '초기화했습니다. 주식은 장중에 청산 후 사다리를 구성하고, 크립토는 보유를 인수한 채 바로 감시를 시작합니다. 그리드 탭에서 진행 상황을 확인하세요.', true);
   } catch (e) { setMsg('reset-msg', e.message, false); }
   btn.disabled = false;
 }
@@ -728,15 +847,19 @@ $('chart-legend').addEventListener('click', e => {
 });
 $('venues').addEventListener('click', e => {
   const btn = e.target.closest('.btn-save-step');
-  if (btn) saveStep(btn.dataset.venue);
+  if (btn) return saveStep(btn.dataset.venue);
+  const dipBtn = e.target.closest('.btn-save-dip');
+  if (dipBtn) saveDip(dipBtn.dataset.venue);
 });
 $('venues').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && e.target.matches('input[data-venue]')) saveStep(e.target.dataset.venue);
+  if (e.key !== 'Enter') return;
+  if (e.target.matches('input[data-venue]')) saveStep(e.target.dataset.venue);
+  else if (e.target.matches('input[data-dip]')) saveDip(e.target.dataset.dip);
 });
 $('btn-start').addEventListener('click', () => confirmThen(
-  '그리드를 초기화할까요?',
-  'API로 팔 수 있는 모든 보유(주식은 장중, 크립토는 즉시)를 현금화한 뒤, 종목별 현금을 5칸으로 나눠 3칸을 먼저 매수합니다. 이전 사다리와 체결 기록은 지워집니다.',
-  '현금화 후 새로 구성', startGrid,
+  '초기화할까요?',
+  '주식: API로 팔 수 있는 보유를 장중에 현금화한 뒤 종목별 현금을 5칸으로 나눠 3칸을 먼저 매수합니다. 크립토: 팔지 않고 현재 보유를 그대로 인수한 뒤 전체 시장 24h 하락 감시를 시작합니다. 이전 사다리와 체결 기록은 지워집니다.',
+  '초기화', startGrid,
 ));
 $('btn-toggle').addEventListener('click', toggleGrid);
 $('btn-tick').addEventListener('click', tickNow);

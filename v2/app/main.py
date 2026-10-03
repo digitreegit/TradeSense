@@ -1,4 +1,4 @@
-"""TradeSense v4 entrypoint — one-rule grid on Alpaca (stocks) and Robinhood (crypto).
+"""TradeSense v5 entrypoint — grid on Alpaca (stocks), 24h dip buyer on Robinhood (crypto).
 
 Local / Docker : APScheduler runs the grid tick in-process every 15 minutes.
 Vercel         : cron-job.org hits /api/cron/run every ~15 min.
@@ -30,7 +30,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("tradesense")
 
-VERSION = "v4"
+VERSION = "v5"
 
 JOBS = {
     "grid": grid_engine.tick,
@@ -200,8 +200,10 @@ def health():
 
 # ── Grid ────────────────────────────────────────────────────────────────────
 class GridSettingsBody(BaseModel):
-    step_pct: float  # percent, e.g. 5 for 5%
+    step_pct: float | None = None  # stock grid step, percent (5 → 5%)
     venue: str | None = None  # "alpaca" | "robinhood"; None applies to every venue
+    dip_pct: float | None = None  # v5 crypto: buy when ≥ this % under the 24h high, sell at +this %
+    order_dollars: float | None = None  # v5 crypto: dollars per buy
 
 
 @app.get("/api/grid/status")
@@ -215,19 +217,38 @@ def grid_status(request: Request):
 def grid_settings(body: GridSettingsBody, request: Request):
     if not _admin_authorized(request):
         return _unauthorized()
-    try:
+    dip = grid_engine.dip
+    if body.dip_pct is not None or body.order_dollars is not None:
+        pct = None
+        if body.dip_pct is not None:
+            pct = float(body.dip_pct) / 100.0
+            if not (dip.MIN_DIP <= pct <= dip.MAX_DIP):
+                return JSONResponse({
+                    "ok": False,
+                    "error": f"하락 폭은 {dip.MIN_DIP:.0%}~{dip.MAX_DIP:.0%} 사이여야 합니다.",
+                }, status_code=400)
+        dollars = None
+        if body.order_dollars is not None:
+            dollars = float(body.order_dollars)
+            if dollars < dip.MIN_ORDER_DOLLARS:
+                return JSONResponse({
+                    "ok": False,
+                    "error": f"매수 금액은 ${dip.MIN_ORDER_DOLLARS:.0f} 이상이어야 합니다.",
+                }, status_code=400)
+        grid_engine.set_dip(pct=pct, order_dollars=dollars)
+    if body.step_pct is not None:
         step = float(body.step_pct) / 100.0
-    except (TypeError, ValueError):
+        if not (grid_engine.grid.MIN_STEP <= step <= grid_engine.grid.MAX_STEP):
+            return JSONResponse({
+                "ok": False,
+                "error": f"간격은 {grid_engine.grid.MIN_STEP:.0%}~{grid_engine.grid.MAX_STEP:.0%} 사이여야 합니다.",
+            }, status_code=400)
+        try:
+            grid_engine.set_step(step, venue=body.venue)
+        except ValueError:
+            return JSONResponse({"ok": False, "error": "알 수 없는 시장입니다."}, status_code=400)
+    elif body.dip_pct is None and body.order_dollars is None:
         return JSONResponse({"ok": False, "error": "숫자를 입력하세요."}, status_code=400)
-    if not (grid_engine.grid.MIN_STEP <= step <= grid_engine.grid.MAX_STEP):
-        return JSONResponse({
-            "ok": False,
-            "error": f"간격은 {grid_engine.grid.MIN_STEP:.0%}~{grid_engine.grid.MAX_STEP:.0%} 사이여야 합니다.",
-        }, status_code=400)
-    try:
-        grid_engine.set_step(step, venue=body.venue)
-    except ValueError:
-        return JSONResponse({"ok": False, "error": "알 수 없는 시장입니다."}, status_code=400)
     return JSONResponse({"ok": True, **grid_engine.status()})
 
 
