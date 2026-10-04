@@ -15,6 +15,10 @@ MAX_DIP = 0.30
 DEFAULT_ORDER_DOLLARS = 1000.0
 MIN_ORDER_DOLLARS = 5.0
 LOOKBACK_HOURS = 24
+# Leftover fractions from old ladders (a few cents) can't be sold via the
+# API (Robinhood: qty >= 0.000001, ~$1 notional). Ignore them.
+DUST_DOLLARS = 1.0
+MIN_QTY = 0.000001
 # Keep a little more than the lookback so the window is always full.
 MAX_SAMPLE_AGE_HOURS = 26
 
@@ -39,6 +43,13 @@ def clamp_order(x) -> float:
     except (TypeError, ValueError):
         return DEFAULT_ORDER_DOLLARS
     return max(MIN_ORDER_DOLLARS, round(v, 2))
+
+
+def is_dust(qty: float, price: float | None) -> bool:
+    q = float(qty or 0)
+    if q <= 0 or q < MIN_QTY:
+        return True
+    return bool(price) and q * float(price) < DUST_DOLLARS
 
 
 def is_stable(pair: str) -> bool:

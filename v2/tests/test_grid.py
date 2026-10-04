@@ -812,3 +812,29 @@ def test_dip_pure_helpers():
     assert dip.sell_target(188.0, 0.05) == pytest.approx(197.4)
     trimmed = dip.append_samples(hist, {"X/USD": 97.0}, NOW)
     assert len(trimmed["X/USD"]) == 2 and trimmed["X/USD"][-1][1] == 97.0
+
+
+def test_dip_ignores_dust_leftovers_instead_of_erroring(env):
+    # $0.02 of BTC and $0.19 of SOL left over from old ladders: below the API
+    # minimum, so they must be skipped on adoption and purged if already a lot.
+    v = DipFakeVenue("robinhood", ["BTC/USD"], market=["BTC/USD", "SOL/USD", "LIT/USD"],
+                     prices={"BTC/USD": 85000.0, "SOL/USD": 120.0, "LIT/USD": 3.5},
+                     positions={"BTC/USD": 0.02 / 85000.0, "SOL/USD": 0.19 / 120.0, "LIT/USD": 285.0},
+                     cash=7000.0)
+    grid_engine.set_venues([v])
+    _dip_settings(0.05, 1000.0)
+    grid_engine.start(run_now=False)
+    grid_engine.tick(NOW)
+    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
+    assert list(vb["lots"]) == ["LIT/USD"]
+    assert vb["dust"] == ["BTC/USD", "SOL/USD"]
+    assert vb["errors"] == []
+    assert [o for o in v.orders if o[2] != "LIT/USD"] == []
+    # A lot that decays into dust (partial manual sell) is purged too.
+    vb["lots"]["LIT/USD"]["qty"] = 0.1
+    v._positions["LIT/USD"] = 0.1
+    env.set(grid_engine.BOOK_KEY, env.kv[grid_engine.BOOK_KEY])
+    grid_engine.tick(NOW + timedelta(minutes=15))
+    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
+    assert vb["lots"] == {} and "LIT/USD" in vb["dust"]
+    assert grid_engine.status()["venues"]["robinhood"]["dust"] == vb["dust"]

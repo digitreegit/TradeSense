@@ -424,6 +424,8 @@ function renderDipVenue(key, v) {
     : '<div class="empty">첫 점검 뒤 감시 목록이 채워집니다.</div>';
   const manual = (v.manual || []).length
     ? `<p class="hint" style="margin-top:8px">수동 보유(API 불가, 제외): <b>${v.manual.map(esc).join(', ')}</b></p>` : '';
+  const dust = (v.dust || []).length
+    ? `<p class="hint" style="margin-top:8px">잔량(1달러 미만, API로 못 팔아 제외): <b>${v.dust.map(esc).join(', ')}</b></p>` : '';
   const note = v.note && v.phase !== 'idle' ? `<p class="hint amber" style="margin-top:8px">${esc(v.note)}</p>` : '';
   const errors = (v.errors || []).length
     ? `<ul class="hint red" style="margin:8px 0 0 18px">${v.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul>` : '';
@@ -454,7 +456,7 @@ function renderDipVenue(key, v) {
       <div class="stat"><div class="label">미실현</div><div class="value">${signed(v.unrealized_pl)}</div></div>
       <div class="stat"><div class="label">감시</div><div class="value">${watchN}</div><div class="hint">API 거래 가능 코인</div></div>
     </div>
-    ${body}${manual}${note}${errors}
+    ${body}${manual}${dust}${note}${errors}
     <details class="acc" style="margin-top:10px">
       <summary>감시 목록 ${watchN ? `(${watchN}종목 · 많이 내린 순)` : ''}</summary>
       ${watchBody}

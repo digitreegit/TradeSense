@@ -922,7 +922,7 @@ def _adopt_holdings(venue, vb: dict, now: datetime) -> list[str]:
     tradable = set(venue.tradable(list(positions))) if positions else set()
     prices = venue.prices(list(positions)) if positions else {}
     lots = _lots(vb)
-    adopted, manual = [], []
+    adopted, manual, dust = [], [], []
     for sym, qty in positions.items():
         if sym not in tradable:
             manual.append(sym)
@@ -930,6 +930,9 @@ def _adopt_holdings(venue, vb: dict, now: datetime) -> list[str]:
         if sym in lots:
             continue
         px = prices.get(sym)
+        if dip.is_dust(qty, px):
+            dust.append(sym)
+            continue
         ladder = ladders.get(sym)
         basis = None
         if ladder:
@@ -948,6 +951,7 @@ def _adopt_holdings(venue, vb: dict, now: datetime) -> list[str]:
         adopted.append(sym)
     vb["ladders"] = {}
     vb["manual"] = sorted(manual)
+    vb["dust"] = sorted(dust)
     return adopted
 
 
@@ -1025,6 +1029,13 @@ def _run_dip(venue, vb: dict, now: datetime) -> dict:
             continue
         if held < float(lot["qty"]):
             lot["qty"] = held  # partial manual sell: track what is left
+        if dip.is_dust(lot["qty"], prices.get(sym) or lot.get("last_price")):
+            # Too small for the API to sell — leave it alone, stop erroring.
+            _cancel_lot_order(venue, lot)
+            lots.pop(sym, None)
+            vb["dust"] = sorted(set(vb.get("dust") or []) | {sym})
+            log_activity("grid", f"{venue.label} {sym} 잔량(${float(lot['qty']) * (prices.get(sym) or 0):.2f})은 API 최소 수량 미만 — 관리 제외")
+            continue
 
     # 2) Buy anything that fell `pct` under its 24h high (most-fallen first).
     rows = dip.watch_rows(history, prices, lots, pct, now)
@@ -1422,6 +1433,7 @@ def status() -> dict:
             "strategy": "dip" if is_dip else "grid",
             "dip": s["dip"] if is_dip else None,
             "lots": lot_rows,
+            "dust": vb.get("dust") or [],
             "watch": watch_rows,
             "watch_count": vb.get("watch_count") or len(watch_rows),
         }
