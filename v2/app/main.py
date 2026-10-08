@@ -1,4 +1,4 @@
-"""TradeSense v5 entrypoint — grid on Alpaca (stocks), 24h dip buyer on Robinhood (crypto).
+"""TradeSense v6 entrypoint — grid on Alpaca (stocks), 24h dip buyer on Robinhood (crypto).
 
 Local / Docker : APScheduler runs the grid tick in-process every 15 minutes.
 Vercel         : cron-job.org hits /api/cron/run every ~15 min.
@@ -30,7 +30,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("tradesense")
 
-VERSION = "v5"
+VERSION = "v6"
 
 JOBS = {
     "grid": grid_engine.tick,
@@ -258,12 +258,14 @@ def grid_settings(body: GridSettingsBody, request: Request):
 
 
 @app.post("/api/grid/start")
-def grid_start(request: Request):
-    """현금화 후 사다리를 새로 구성하고 자동매매를 켠다."""
+def grid_start(request: Request, venue: str | None = None):
+    """현금화 후 사다리를 새로 구성하고 자동매매를 켠다. `?venue=alpaca|robinhood`로 한 시장만."""
     if not _admin_authorized(request):
         return _unauthorized()
     try:
-        return JSONResponse({"ok": True, **grid_engine.start()})
+        return JSONResponse({"ok": True, **grid_engine.start(venue=venue)})
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "알 수 없는 시장입니다."}, status_code=400)
     except Exception as exc:
         log.exception("grid start failed")
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)

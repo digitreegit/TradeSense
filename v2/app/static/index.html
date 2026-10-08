@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>TradeSense v5</title>
+<title>TradeSense v6</title>
 <link rel="icon" type="image/png" href="/favicon.png?v=4">
 <link rel="apple-touch-icon" href="/favicon.png?v=4">
 <style>
@@ -108,7 +108,7 @@
 <div class="wrap">
   <div class="topbar">
     <div>
-      <h1>TradeSense <span class="blue">v5</span> <span class="hint">· 주식 그리드 + 크립토 하락매수</span></h1>
+      <h1>TradeSense <span class="blue">v6</span> <span class="hint">· 주식 그리드 + 크립토 하락매수</span></h1>
       <div class="hint">x% 내리면 1칸 매수, x% 오르면 1칸 매도. 크립토 Robinhood · 주식 Alpaca · 전부 자동</div>
     </div>
     <div class="row">
@@ -219,10 +219,14 @@
     </div>
 
     <div class="panel">
-      <h3>그리드 초기화</h3>
-      <p class="hint">주식: API로 팔 수 있는 보유를 모두 현금화한 뒤 현재 자금으로 사다리를 다시 구성합니다(종목별 5칸 중 3칸 매수).
-        크립토(v5): 팔지 않고 현재 보유를 그대로 인수한 뒤 전체 시장 하락 감시를 시작합니다. 이전 사다리와 체결 기록은 지워집니다.</p>
-      <button type="button" class="btn btn-danger btn-sm" id="btn-start">초기화</button>
+      <h3>초기화</h3>
+      <p class="hint">주식: API로 팔 수 있는 보유를 모두 현금화한 뒤(장중) 현재 자금으로 새 유니버스의 사다리를 구성합니다(종목별 5칸 중 3칸 매수).
+        크립토: 팔지 않고 현재 보유를 그대로 인수한 뒤 전체 시장 하락 감시를 다시 시작합니다. 사다리는 지워지지만 체결 기록과 채점표는 남습니다.</p>
+      <div class="row">
+        <button type="button" class="btn btn-danger btn-sm" id="btn-start-alpaca">주식만 초기화</button>
+        <button type="button" class="btn btn-sm" id="btn-start-robinhood">크립토만 다시 인수</button>
+        <button type="button" class="btn btn-danger btn-sm" id="btn-start">전체 초기화</button>
+      </div>
       <p class="msg" id="reset-msg"></p>
     </div>
 
@@ -395,7 +399,7 @@ function renderDipVenue(key, v) {
   } else if (v.phase === 'idle') {
     body = `<div class="empty">설정 탭의 “그리드 초기화”를 누르면 감시를 시작합니다. 크립토 보유는 팔지 않고 그대로 인수합니다.</div>`;
   } else if (!lots.length) {
-    body = `<div class="empty">보유 없음 — 24시간 고점 대비 ${pctIn}% 내린 코인이 나오면 ${money(dollarsIn, false)}어치 삽니다.</div>`;
+    body = `<div class="empty">보유 없음 — 24시간 고점 대비 ${pctIn}% 내린 코인이 나오면 ${money(dollarsIn, false)}어치 삽니다. 산 뒤 −10%가 되면 기준가를 거기로 재설정하고 새 기준 +${pctIn}%에 팝니다.</div>`;
   } else {
     body = `<div class="table-scroll"><table>
       <thead><tr>
@@ -409,7 +413,7 @@ function renderDipVenue(key, v) {
           : (r.resting ? `<span class="blue">매도 리밋 대기</span>` : `<span class="amber">리밋 미등록</span>`);
         return `<tr>
           <td><b>${esc(r.symbol)}</b><div class="hint">${r.source === 'adopted' ? '인수 · ' : ''}${when(r.at)}</div></td>
-          <td class="num">${px(r.price)}</td>
+          <td class="num">${px(r.price)}${r.reanchors ? `<div class="hint amber">기준 ${px(r.ref)} (재설정 ${r.reanchors}회)</div>` : ''}</td>
           <td class="num">${px(r.current)}${prog === null ? '' : `<div class="hint ${prog >= 0 ? 'green' : 'red'}">${pctStr(prog)}</div>`}</td>
           <td class="num red">${px(r.target)}</td>
           <td class="num">${money(r.dollars)}</td>
@@ -450,7 +454,7 @@ function renderDipVenue(key, v) {
   const watchN = v.watch_count || watch.length;
   return `<div class="panel">
     <div class="row spread">
-      <h3>${esc(v.label)} <span class="pill ${cls}">${text}</span> <span class="pill idle">v5 하락매수</span></h3>
+      <h3>${esc(v.label)} <span class="pill ${cls}">${text}</span> <span class="pill idle">하락매수 · −10% 재설정</span></h3>
       <div class="row">
         <span class="hint">${v.updated_at ? when(v.updated_at) : ''}</span>
         <label class="hint" for="dip-${key}">하락</label>
@@ -765,12 +769,12 @@ async function saveDip(venue) {
   } catch (e) { setMsg(msgId, e.message, false); }
 }
 
-async function startGrid() {
+async function startGrid(venue) {
   const btn = $('btn-start');
   btn.disabled = true;
   setMsg('reset-msg', '초기화 중… (최대 1~2분)', true);
   try {
-    const d = await post('/api/grid/start');
+    const d = await post('/api/grid/start' + (venue ? `?venue=${venue}` : ''));
     renderStatus(d);
     setMsg('reset-msg', '초기화했습니다. 주식은 장중에 청산 후 사다리를 구성하고, 크립토는 보유를 인수한 채 바로 감시를 시작합니다. 그리드 탭에서 진행 상황을 확인하세요.', true);
   } catch (e) { setMsg('reset-msg', e.message, false); }
@@ -936,9 +940,19 @@ $('venues').addEventListener('keydown', e => {
   else if (e.target.matches('input[data-dip]')) saveDip(e.target.dataset.dip);
 });
 $('btn-start').addEventListener('click', () => confirmThen(
-  '초기화할까요?',
-  '주식: API로 팔 수 있는 보유를 장중에 현금화한 뒤 종목별 현금을 5칸으로 나눠 3칸을 먼저 매수합니다. 크립토: 팔지 않고 현재 보유를 그대로 인수한 뒤 전체 시장 24h 하락 감시를 시작합니다. 이전 사다리와 체결 기록은 지워집니다.',
-  '초기화', startGrid,
+  '전체 초기화할까요?',
+  '주식: API로 팔 수 있는 보유를 장중에 현금화한 뒤 종목별 현금을 5칸으로 나눠 3칸을 먼저 매수합니다. 크립토: 팔지 않고 현재 보유를 그대로 인수한 뒤 전체 시장 24h 하락 감시를 시작합니다. 체결 기록은 남습니다.',
+  '전체 초기화', () => startGrid(),
+));
+$('btn-start-alpaca').addEventListener('click', () => confirmThen(
+  '주식만 초기화할까요?',
+  '현재 주식 보유를 장중에 현금화하고(당일 매도 1회 발생), 새 유니버스(AAPL/AMZN/AVGO/GOOGL/META/MSFT/NVDA/NFLX/TSLA/AMD)로 사다리를 다시 구성합니다. 크립토는 건드리지 않습니다.',
+  '주식 초기화', () => startGrid('alpaca'),
+));
+$('btn-start-robinhood').addEventListener('click', () => confirmThen(
+  '크립토를 다시 인수할까요?',
+  '팔지 않습니다. 대기 중인 매도 리밋을 취소하고 현재 보유를 다시 인수한 뒤 감시를 이어갑니다. 주식은 건드리지 않습니다.',
+  '다시 인수', () => startGrid('robinhood'),
 ));
 $('btn-toggle').addEventListener('click', toggleGrid);
 $('btn-tick').addEventListener('click', tickNow);

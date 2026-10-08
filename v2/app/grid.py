@@ -44,7 +44,10 @@ CASH_USE = 0.95
 FOLLOW_HIGH = False
 
 CRYPTO_UNIVERSE: tuple[str, ...] = ("BTC/USD", "ETH/USD", "SOL/USD")
-STOCK_UNIVERSE: tuple[str, ...] = ("AMD", "COIN", "MSTR", "SMCI", "PLTR", "TSLA")
+# v6 (2026-10-08): the old AMD/COIN/MSTR/SMCI/PLTR/TSLA set lost 9-11% on a
+# 365d grid replay at any step (COIN, MSTR -54%: crypto proxies, which the
+# crypto account already carries). Diversified large caps: +9.9% at 5%, maxDD -7%.
+STOCK_UNIVERSE: tuple[str, ...] = ("AAPL", "AMZN", "AVGO", "GOOGL", "META", "MSFT", "NVDA", "NFLX", "TSLA", "AMD")
 
 
 def clamp_step(step: float) -> float:

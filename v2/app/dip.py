@@ -11,6 +11,11 @@ from datetime import datetime, timedelta, timezone
 
 DEFAULT_DIP = 0.05
 MIN_DIP = 0.01
+# v6: when a lot sinks this far under its reference, give up on the old
+# target and measure the next +dip from here (coins stay). Engine constant —
+# replay 2026-10-08 (180d, 21 coins): all three segments positive, worst open
+# lot -12% instead of -25%, for ~9pp less total than "hold forever".
+REANCHOR_PCT = 0.10
 MAX_DIP = 0.30
 DEFAULT_ORDER_DOLLARS = 1000.0
 MIN_ORDER_DOLLARS = 5.0
@@ -108,8 +113,25 @@ def should_buy(price: float, high: float | None, dip: float) -> bool:
     return bool(t) and price > 0 and price <= t
 
 
-def sell_target(buy_price: float, dip: float) -> float:
-    return float(buy_price) * (1.0 + dip)
+def sell_target(ref_price: float, dip: float) -> float:
+    return float(ref_price) * (1.0 + dip)
+
+
+def lot_ref(lot: dict) -> float:
+    """Price the +dip target is measured from: the fill, or the last re-anchor."""
+    return float(lot.get("ref") or lot["price"])
+
+
+def should_reanchor(lot: dict, price: float, pct: float = REANCHOR_PCT) -> bool:
+    return bool(price) and price > 0 and price <= lot_ref(lot) * (1.0 - pct)
+
+
+def reanchor(lot: dict, price: float, at: datetime | None = None) -> dict:
+    at = at or datetime.now(timezone.utc)
+    lot["ref"] = float(price)
+    lot["reanchors"] = int(lot.get("reanchors") or 0) + 1
+    lot["reanchored_at"] = at.isoformat()
+    return lot
 
 
 def new_lot(symbol: str, *, qty: float, price: float, dollars: float,
@@ -122,6 +144,8 @@ def new_lot(symbol: str, *, qty: float, price: float, dollars: float,
         "dollars": round(float(dollars), 2),
         "at": at.isoformat(),
         "source": source,       # dip | adopted
+        "ref": float(price),    # target reference; moves down on re-anchor
+        "reanchors": 0,
         "sell_order": None,     # {id, api_version, limit_price, qty}
         "last_error": None,
     }
@@ -168,9 +192,11 @@ def lot_rows(lots: dict, prices: dict[str, float], dip: float) -> list[dict]:
             "symbol": sym,
             "qty": qty,
             "price": float(lot["price"]),
+            "ref": lot_ref(lot),
+            "reanchors": int(lot.get("reanchors") or 0),
             "dollars": float(lot["dollars"]),
             "current": px,
-            "target": sell_target(lot["price"], dip),
+            "target": sell_target(lot_ref(lot), dip),
             "value": round(value, 2) if value is not None else None,
             "unrealized_pl": round(value - float(lot["dollars"]), 2) if value is not None else None,
             "at": lot.get("at"),

@@ -510,7 +510,7 @@ def test_status_exposes_levels_and_pl(env):
     assert row["symbol"] == "AMD" and row["units"] == 3
     assert row["sell_at"] == pytest.approx(105.0)
     assert row["buy_at"] == pytest.approx(95.0)
-    assert st["settings"]["step"] == 0.05 and st["version"] == "v5"
+    assert st["settings"]["step"] == 0.05 and st["version"] == "v6"
 
 
 def test_equity_history_keeps_one_point_per_day_and_carries_missing_venues(env):
@@ -921,3 +921,79 @@ def test_change_log_carries_the_new_rev(env):
     grid_engine.set_dip(pct=0.07, reason="replay says so")
     entry = grid_engine.settings_log()[0]
     assert entry["rev"] == grid_engine.current_rev()
+
+
+# --------------------------------------------------------------------------
+# v6: re-anchor at -10%, per-venue reset, engine change log
+# --------------------------------------------------------------------------
+def test_dip_reanchors_sunk_lot_and_moves_the_sell_target(env):
+    v = DipFakeVenue("robinhood", ["SOL/USD"], market=["SOL/USD"],
+                     prices={"SOL/USD": 100.0}, cash=1000.0)
+    grid_engine.set_venues([v])
+    _dip_settings(0.05, 100.0)
+    grid_engine.start(run_now=False)
+    grid_engine.tick(NOW)
+    v._prices["SOL/USD"] = 94.0
+    grid_engine.tick(NOW + timedelta(hours=1))
+    lot = env.kv[grid_engine.BOOK_KEY]["robinhood"]["lots"]["SOL/USD"]
+    first_order = lot["sell_order"]["id"]
+    assert lot["ref"] == pytest.approx(94.0) and lot["sell_order"]["limit_price"] == pytest.approx(98.7)
+    # -9%: nothing happens.
+    v._prices["SOL/USD"] = 86.0
+    grid_engine.tick(NOW + timedelta(hours=2))
+    lot = env.kv[grid_engine.BOOK_KEY]["robinhood"]["lots"]["SOL/USD"]
+    assert lot["reanchors"] == 0 and lot["sell_order"]["id"] == first_order
+    # -10.6%: reference moves to 84, old sell canceled, new sell at 84*1.05.
+    v._prices["SOL/USD"] = 84.0
+    grid_engine.tick(NOW + timedelta(hours=3))
+    lot = env.kv[grid_engine.BOOK_KEY]["robinhood"]["lots"]["SOL/USD"]
+    assert lot["reanchors"] == 1 and lot["ref"] == pytest.approx(84.0)
+    assert lot["price"] == pytest.approx(94.0)  # cost basis untouched
+    assert lot["sell_order"]["id"] != first_order
+    assert lot["sell_order"]["limit_price"] == pytest.approx(88.2)
+    assert first_order not in v._resting
+    # The fill at the new target realizes the (smaller) loss honestly.
+    v.fill_resting(lot["sell_order"]["id"])
+    grid_engine.tick(NOW + timedelta(hours=4))
+    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
+    assert vb["realized_pl"] == pytest.approx(100 / 94 * 88.2 - 100, abs=0.01)
+    # Still 16% under the 24h high, so the coin re-arms as a fresh lot with a fresh reference.
+    lot = vb["lots"]["SOL/USD"]
+    assert lot["price"] == pytest.approx(84.0) and lot["ref"] == pytest.approx(84.0) and lot["reanchors"] == 0
+    row = grid_engine.status()["venues"]["robinhood"]["lots"][0]
+    assert row["ref"] == pytest.approx(84.0) and row["target"] == pytest.approx(88.2)
+
+
+def test_start_can_reset_one_venue_and_keeps_trade_history(env):
+    rh = DipFakeVenue("robinhood", ["BTC/USD"], market=["BTC/USD"], prices={"BTC/USD": 100.0}, cash=1000.0)
+    al = FakeVenue("alpaca", ["AMD"], prices={"AMD": 100.0}, cash=1000.0)
+    grid_engine.set_venues([rh, al])
+    grid_engine.start(run_now=False)
+    grid_engine.tick(NOW)
+    n_trades = len(env.kv[grid_engine.TRADES_KEY])
+    assert n_trades > 0
+    rh_vb_before = dict(env.kv[grid_engine.BOOK_KEY]["robinhood"])
+    grid_engine.start(run_now=False, venue="alpaca")
+    book = env.kv[grid_engine.BOOK_KEY]
+    assert book["alpaca"]["phase"] == "liquidating"
+    assert book["robinhood"]["phase"] == "running" and book["robinhood"] == rh_vb_before
+    assert len(env.kv[grid_engine.TRADES_KEY]) == n_trades
+    with pytest.raises(ValueError):
+        grid_engine.start(run_now=False, venue="nope")
+
+
+def test_engine_changes_are_logged_once_per_version(env):
+    v = FakeVenue("alpaca", ["AMD"], prices={"AMD": 100.0}, cash=1000.0)
+    grid_engine.set_venues([v])
+    grid_engine.start(run_now=False)
+    grid_engine.tick(NOW)
+    grid_engine.tick(NOW + timedelta(minutes=15))
+    log = [e for e in grid_engine.settings_log() if e["field"] == "engine"]
+    assert len(log) == len(grid_engine.ENGINE_CHANGES[grid_engine.ENGINE_VERSION])
+    assert all(e["reason"] and "replay" in e["reason"] for e in log)
+    assert env.kv[grid_engine.ENGINE_LOG_KEY] == "v6"
+
+
+def test_v6_stock_universe_is_diversified_large_caps():
+    assert "COIN" not in grid.STOCK_UNIVERSE and "MSTR" not in grid.STOCK_UNIVERSE
+    assert len(grid.STOCK_UNIVERSE) == 10 and "SPY" not in grid.STOCK_UNIVERSE
