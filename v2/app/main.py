@@ -204,6 +204,7 @@ class GridSettingsBody(BaseModel):
     venue: str | None = None  # "alpaca" | "robinhood"; None applies to every venue
     dip_pct: float | None = None  # v5 crypto: buy when ≥ this % under the 24h high, sell at +this %
     order_dollars: float | None = None  # v5 crypto: dollars per buy
+    reason: str | None = None  # required: the evidence behind the change (replay result, retro, ...)
 
 
 @app.get("/api/grid/status")
@@ -218,6 +219,10 @@ def grid_settings(body: GridSettingsBody, request: Request):
     if not _admin_authorized(request):
         return _unauthorized()
     dip = grid_engine.dip
+    reason = (body.reason or "").strip()
+    if len(reason) < 4:
+        return JSONResponse({"ok": False, "error": "변경 근거를 적어 주세요 (예: replay 180d 5%가 8%보다 +26%p)."},
+                            status_code=400)
     if body.dip_pct is not None or body.order_dollars is not None:
         pct = None
         if body.dip_pct is not None:
@@ -235,7 +240,7 @@ def grid_settings(body: GridSettingsBody, request: Request):
                     "ok": False,
                     "error": f"매수 금액은 ${dip.MIN_ORDER_DOLLARS:.0f} 이상이어야 합니다.",
                 }, status_code=400)
-        grid_engine.set_dip(pct=pct, order_dollars=dollars)
+        grid_engine.set_dip(pct=pct, order_dollars=dollars, reason=reason)
     if body.step_pct is not None:
         step = float(body.step_pct) / 100.0
         if not (grid_engine.grid.MIN_STEP <= step <= grid_engine.grid.MAX_STEP):
@@ -244,7 +249,7 @@ def grid_settings(body: GridSettingsBody, request: Request):
                 "error": f"간격은 {grid_engine.grid.MIN_STEP:.0%}~{grid_engine.grid.MAX_STEP:.0%} 사이여야 합니다.",
             }, status_code=400)
         try:
-            grid_engine.set_step(step, venue=body.venue)
+            grid_engine.set_step(step, venue=body.venue, reason=reason)
         except ValueError:
             return JSONResponse({"ok": False, "error": "알 수 없는 시장입니다."}, status_code=400)
     elif body.dip_pct is None and body.order_dollars is None:

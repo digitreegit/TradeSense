@@ -838,3 +838,86 @@ def test_dip_ignores_dust_leftovers_instead_of_erroring(env):
     vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
     assert vb["lots"] == {} and "LIT/USD" in vb["dust"]
     assert grid_engine.status()["venues"]["robinhood"]["dust"] == vb["dust"]
+
+
+# --------------------------------------------------------------------------
+# Scorecard, parameter revisions, change log (Phil-style honesty)
+# --------------------------------------------------------------------------
+from app import scorecard  # noqa: E402
+
+
+def test_settings_rev_changes_only_with_decision_parameters(env):
+    r0 = grid_engine.current_rev()
+    grid_engine.set_enabled(True)
+    assert grid_engine.current_rev() == r0  # on/off is not a strategy change
+    grid_engine.set_step(0.03, venue="alpaca", reason="grid_replay 365d large: 3% +8.3%")
+    r1 = grid_engine.current_rev()
+    assert r1 != r0
+    grid_engine.set_dip(pct=0.08, reason="test")
+    assert grid_engine.current_rev() not in (r0, r1)
+    log = grid_engine.settings_log()
+    assert [(e["field"], e["venue"]) for e in log] == [("dip_pct", "robinhood"), ("step", "alpaca")]
+    assert log[1]["old"] == pytest.approx(grid.DEFAULT_STEP) and log[1]["new"] == pytest.approx(0.03)
+    assert log[1]["reason"].startswith("grid_replay")
+    # No-op dip save logs nothing.
+    grid_engine.set_dip(pct=0.08, order_dollars=1000, reason="same")
+    assert len(grid_engine.settings_log()) == 2
+
+
+def test_trades_are_stamped_with_the_parameter_rev(env):
+    v = FakeVenue("alpaca", ["AMD"], prices={"AMD": 100.0}, cash=1000.0)
+    _running_book(env, v)
+    trades = env.kv[grid_engine.TRADES_KEY]
+    assert trades and all(t["rev"] == grid_engine.current_rev() for t in trades)
+    rev_before = grid_engine.current_rev()
+    grid_engine.set_step(0.03, venue="alpaca", reason="test change")
+    v._prices["AMD"] = 103.5
+    grid_engine.tick(NOW + timedelta(days=1))
+    trades = env.kv[grid_engine.TRADES_KEY]
+    assert trades[-1]["side"] == "sell" and trades[-1]["rev"] != rev_before
+    card = grid_engine.status()["scorecard"]["alpaca"]
+    revs = {r["rev"]: r for r in card["by_rev"]}
+    assert set(revs) == {rev_before, grid_engine.current_rev()}
+    assert revs[grid_engine.current_rev()]["closed"] == 1
+
+
+def test_scorecard_compares_strategy_with_buy_and_hold_and_flags_luck():
+    history = [
+        {"date": "2026-10-01", "robinhood": 8000.0, "bench": {"BTC/USD": 100000.0, "ETH/USD": 4000.0}},
+        {"date": "2026-10-02", "robinhood": 8200.0, "bench": {"BTC/USD": 104000.0}},
+        {"date": "2026-10-03", "robinhood": 7800.0, "bench": {"BTC/USD": 110000.0, "ETH/USD": 4200.0}},
+        {"date": "2026-10-04", "robinhood": 8400.0, "bench": {"BTC/USD": 105000.0, "ETH/USD": 4400.0}},
+    ]
+    trades = [
+        {"venue": "robinhood", "side": "buy", "pl": None, "rev": "aaa", "at": "2026-10-01T00:00:00+00:00"},
+        {"venue": "robinhood", "side": "sell", "pl": 300.0, "rev": "aaa", "at": "2026-10-02T00:00:00+00:00"},
+        {"venue": "robinhood", "side": "sell", "pl": 10.0, "rev": "bbb", "at": "2026-10-03T00:00:00+00:00"},
+        {"venue": "robinhood", "side": "sell", "pl": -20.0, "rev": "bbb", "at": "2026-10-04T00:00:00+00:00"},
+        {"venue": "alpaca", "side": "sell", "pl": 999.0, "rev": "aaa", "at": "2026-10-04T00:00:00+00:00"},
+    ]
+    c = scorecard.venue_scorecard("robinhood", history, trades)
+    assert c["strategy"] == pytest.approx(0.05)
+    assert c["bench"]["BTC/USD"] == pytest.approx(0.05) and c["bench"]["ETH/USD"] == pytest.approx(0.10)
+    assert c["vs_bench"]["ETH/USD"] == pytest.approx(-0.05)
+    assert c["maxdd"] == pytest.approx(7800 / 8200 - 1, abs=1e-4)
+    assert c["closed"] == 3 and c["win_rate"] == pytest.approx(2 / 3, abs=1e-3)
+    assert c["realized"] == pytest.approx(290.0)
+    assert c["luck_top2"] == pytest.approx(310 / 290, abs=1e-3)  # one jackpot carries it all
+    assert {r["rev"]: r["realized"] for r in c["by_rev"]} == {"aaa": 300.0, "bbb": -10.0}
+    # Window can start later than the history (venue restarted).
+    c2 = scorecard.venue_scorecard("robinhood", history, trades, since="2026-10-03")
+    assert c2["strategy"] == pytest.approx(8400 / 7800 - 1, abs=1e-4)
+    assert c2["bench"]["BTC/USD"] == pytest.approx(105000 / 110000 - 1, abs=1e-4)
+
+
+def test_record_equity_keeps_benchmark_prices_per_day(env):
+    grid_engine.record_equity({"robinhood": 100.0}, NOW, bench={"BTC/USD": 50000.0})
+    grid_engine.record_equity({"robinhood": 101.0}, NOW + timedelta(hours=1), bench={"ETH/USD": 3000.0})
+    pt = env.kv[grid_engine.HISTORY_KEY][-1]
+    assert pt["bench"] == {"BTC/USD": 50000.0, "ETH/USD": 3000.0} and pt["robinhood"] == 101.0
+
+
+def test_change_log_carries_the_new_rev(env):
+    grid_engine.set_dip(pct=0.07, reason="replay says so")
+    entry = grid_engine.settings_log()[0]
+    assert entry["rev"] == grid_engine.current_rev()

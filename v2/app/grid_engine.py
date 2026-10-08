@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
-from . import dip, grid
+from . import dip, grid, scorecard
 from .briefing import log_activity
 from .config import settings
 from .state import store
@@ -32,6 +32,8 @@ TRADES_KEY = "grid_trades"
 TICK_KEY = "grid_last_tick"
 HISTORY_KEY = "grid_equity_history"
 PRICES_KEY = "v5_crypto_prices"   # {pair: [[iso, mid], ...]} rolling 26h
+SETTINGS_LOG_KEY = "grid_settings_log"  # every parameter change with its reason
+MAX_SETTINGS_LOG = 200
 MAX_DIP_BUYS_PER_TICK = 3          # a market-wide crash should not spend everything in one go
 MAX_TRADES_KEPT = 500
 MAX_HISTORY_DAYS = 400
@@ -70,19 +72,25 @@ def step_for(s: dict, venue_name: str) -> float:
     return float((s.get("steps") or {}).get(venue_name, s["step"]))
 
 
-def set_dip(*, pct: float | None = None, order_dollars: float | None = None) -> dict:
+def set_dip(*, pct: float | None = None, order_dollars: float | None = None,
+            reason: str | None = None) -> dict:
     cur = get_settings()
     d = dict(cur["dip"])
-    changed = []
-    if pct is not None:
-        d["pct"] = dip.clamp_dip(pct)
-        changed.append(f"하락 {d['pct']:.1%}")
-    if order_dollars is not None:
-        d["order_dollars"] = dip.clamp_order(order_dollars)
-        changed.append(f"매수 ${d['order_dollars']:,.0f}")
+    changed, entries = [], []
+    if pct is not None and dip.clamp_dip(pct) != d["pct"]:
+        old, d["pct"] = d["pct"], dip.clamp_dip(pct)
+        entries.append(("dip_pct", old, d["pct"]))
+        changed.append(f"하락 {old:.1%} → {d['pct']:.1%}")
+    if order_dollars is not None and dip.clamp_order(order_dollars) != d["order_dollars"]:
+        old, d["order_dollars"] = d["order_dollars"], dip.clamp_order(order_dollars)
+        entries.append(("order_dollars", old, d["order_dollars"]))
+        changed.append(f"매수 ${old:,.0f} → ${d['order_dollars']:,.0f}")
     out = _save_settings(dip=d)
+    for field, old, new in entries:  # after save: rev is the new one
+        _log_change(field, "robinhood", old, new, reason)
     if changed:
-        log_activity("grid", "크립토 v5 설정 변경: " + " · ".join(changed))
+        why = f" — {reason.strip()}" if reason and reason.strip() else ""
+        log_activity("grid", "크립토 v5 설정 변경: " + " · ".join(changed) + why)
     return out
 
 
@@ -94,22 +102,48 @@ def _save_settings(**changes) -> dict:
     return cur
 
 
-def set_step(step: float, venue: str | None = None) -> dict:
+def current_rev() -> str:
+    return scorecard.settings_rev(get_settings())
+
+
+def settings_log(limit: int = 50) -> list[dict]:
+    return list(reversed((store.get(SETTINGS_LOG_KEY) or [])[-limit:]))
+
+
+def _log_change(field: str, venue: str | None, old, new, reason: str | None) -> None:
+    """Phil rule: a parameter never changes without the evidence written next
+    to it. The log is what lets the scorecard's by-rev split mean anything."""
+    rows = store.get(SETTINGS_LOG_KEY) or []
+    rows.append({
+        "at": datetime.now(timezone.utc).isoformat(),
+        "field": field, "venue": venue, "old": old, "new": new,
+        "reason": (reason or "").strip() or None,
+        "rev": current_rev(),
+    })
+    store.set(SETTINGS_LOG_KEY, rows[-MAX_SETTINGS_LOG:])
+
+
+def set_step(step: float, venue: str | None = None, *, reason: str | None = None) -> dict:
     """Set the grid step for one venue, or for every venue when `venue` is None."""
     s = grid.clamp_step(step)
     cur = get_settings()
     steps = dict(cur["steps"])
+    why = f" — {reason.strip()}" if reason and reason.strip() else ""
     if venue is None:
+        old = dict(steps)
         steps = {k: s for k in steps}
         out = _save_settings(step=s, steps=steps)
-        log_activity("grid", f"그리드 간격을 {s:.1%}로 변경 (전체)")
+        _log_change("step", None, old, s, reason)  # after save: rev is the new one
+        log_activity("grid", f"그리드 간격을 {s:.1%}로 변경 (전체){why}")
         return out
     if venue not in steps:
         raise ValueError(f"unknown venue {venue!r}")
+    old = steps[venue]
     steps[venue] = s
     out = _save_settings(steps=steps)
+    _log_change("step", venue, old, s, reason)
     label = next((v.label for v in venues() if v.name == venue), venue)
-    log_activity("grid", f"{label} 간격을 {s:.1%}로 변경")
+    log_activity("grid", f"{label} 간격을 {old:.1%} → {s:.1%}로 변경{why}")
     return out
 
 
@@ -513,6 +547,7 @@ def get_book() -> dict:
 
 
 def _record_trade(trade: dict) -> None:
+    trade.setdefault("rev", current_rev())
     trades = store.get(TRADES_KEY) or []
     trades.append(trade)
     store.set(TRADES_KEY, trades[-MAX_TRADES_KEPT:])
@@ -523,7 +558,8 @@ def recent_trades(limit: int = 100) -> list[dict]:
     return list(reversed(trades[-limit:]))
 
 
-def record_equity(totals: dict[str, float | None], now: datetime | None = None) -> list[dict]:
+def record_equity(totals: dict[str, float | None], now: datetime | None = None,
+                  bench: dict[str, float] | None = None) -> list[dict]:
     """Keep one point per local calendar day and venue: the latest account
     total seen that day. A venue that failed to report keeps its previous
     value for the day so the chart never dips to zero on a broker hiccup."""
@@ -540,6 +576,10 @@ def record_equity(totals: dict[str, float | None], now: datetime | None = None) 
             point[name] = round(float(total), 2)
     known = [float(point[k]) for k in totals if point.get(k) is not None]
     point["total"] = round(sum(known), 2) if known else None
+    if bench:
+        b = dict(point.get("bench") or {})
+        b.update({k: float(v) for k, v in bench.items() if v})
+        point["bench"] = b
     point["at"] = now.isoformat()
     history = history[-MAX_HISTORY_DAYS:]
     store.set(HISTORY_KEY, history)
@@ -798,9 +838,30 @@ def tick(now: datetime | None = None) -> dict:
         store.set(BOOK_KEY, book)  # persist per venue so one failure loses nothing
     store.set(TICK_KEY, out)
     try:
-        record_equity({v.name: (book.get(v.name) or {}).get("account_total") for v in venues()}, now)
+        record_equity({v.name: (book.get(v.name) or {}).get("account_total") for v in venues()}, now,
+                      bench=_benchmark_prices())
     except Exception:
         log.exception("equity history update failed")
+    return out
+
+
+def _benchmark_prices() -> dict[str, float]:
+    """Buy-and-hold reference prices for the scorecard: BTC/ETH from the
+    crypto samples already taken this tick, SPY from Alpaca if configured."""
+    out: dict[str, float] = {}
+    hist: dict = store.get(PRICES_KEY) or {}
+    for sym in scorecard.BENCHMARKS.get("robinhood", ()):
+        rows = hist.get(sym)
+        if rows:
+            out[sym] = float(rows[-1][1])
+    for v in venues():
+        if v.name != "alpaca":
+            continue
+        try:
+            if v.configured():
+                out.update(v.prices(list(scorecard.BENCHMARKS.get("alpaca", ()))))
+        except Exception as exc:
+            log.warning("benchmark price failed: %s", exc)
     return out
 
 
@@ -1443,9 +1504,21 @@ def status() -> dict:
         history = record_equity(live_totals) if live_totals else equity_history()
     except Exception:
         log.exception("equity history update failed")
+    trades_all = store.get(TRADES_KEY) or []
+    cards = {}
+    for v in venues():
+        try:
+            cards[v.name] = scorecard.venue_scorecard(
+                v.name, history, trades_all,
+                since=((book.get(v.name) or {}).get("started_at") or "")[:10] or None)
+        except Exception:
+            log.exception("scorecard %s failed", v.name)
     return {
         "version": "v5",
+        "rev": scorecard.settings_rev(s),
         "settings": s,
+        "settings_log": settings_log(30),
+        "scorecard": cards,
         "venues": out_venues,
         "history": history,
         "trades": recent_trades(60),
