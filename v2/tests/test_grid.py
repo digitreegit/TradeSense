@@ -1065,3 +1065,40 @@ def test_scorecard_since_uses_strategy_switch_not_v4_start(env):
     grid_engine.tick(NOW)
     assert env.kv[grid_engine.BOOK_KEY]["robinhood"]["strategy_since"] == (NOW - timedelta(days=3)).isoformat()
     assert grid_engine.status()["scorecard"]["robinhood"]["since"] == (NOW - timedelta(days=3)).isoformat()[:10]
+
+
+def test_cleanup_sell_waits_for_canceled_limit_to_release(env, monkeypatch):
+    """Robinhood frees the quantity only once the cancel is terminal."""
+    v = DipFakeVenue("robinhood", ["SOL/USD"], market=["SOL/USD", "LIT/USD"],
+                     prices={"SOL/USD": 100.0, "LIT/USD": 3.0}, cash=1000.0)
+    grid_engine.set_venues([v])
+    _dip_settings(0.05, 100.0)
+    grid_engine.start(run_now=False)
+    grid_engine.tick(NOW)
+    v._positions["LIT/USD"] = 25.0
+    book = env.kv[grid_engine.BOOK_KEY]
+    lot = dip.new_lot("LIT/USD", qty=25.0, price=4.0, dollars=100.0, at=NOW)
+    lot["sell_order"] = {"id": "slow-cancel", "api_version": "v1", "limit_price": 4.2, "qty": 25.0}
+    book["robinhood"]["lots"]["LIT/USD"] = lot
+    env.kv[grid_engine.BOOK_KEY] = book
+    # Cancel is accepted but the order stays "open" for two status polls.
+    polls = {"n": 0}
+    real_cancel, real_status = v.cancel_resting, v.resting_status
+
+    def cancel(meta):
+        return {"ok": True, "state": "pending_cancel"}
+
+    def status(meta):
+        if meta["id"] == "slow-cancel":
+            polls["n"] += 1
+            if polls["n"] < 3:
+                return {"ok": True, "state": "open", "terminal": False, "pending": True, "filled": False}
+            return {"ok": True, "state": "canceled", "terminal": True, "pending": False, "filled": False}
+        return real_status(meta)
+    v.cancel_resting, v.resting_status = cancel, status
+    slept = []
+    monkeypatch.setattr(grid_engine.time, "sleep", lambda s: slept.append(s))
+    grid_engine.tick(NOW + timedelta(minutes=15))
+    assert polls["n"] == 3 and slept == [1.0]  # harvest poll + wait poll (open) + sleep + poll (canceled)
+    assert ("sell", "LIT/USD", 25.0) in v.orders
+    assert "LIT/USD" not in env.kv[grid_engine.BOOK_KEY]["robinhood"]["lots"]

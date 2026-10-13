@@ -14,6 +14,7 @@ left alone and listed as "manual" in the status view.
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Protocol
@@ -1000,11 +1001,29 @@ def _lots(vb: dict) -> dict:
     return vb.setdefault("lots", {})
 
 
-def _cancel_lot_order(venue, lot: dict) -> None:
+def _cancel_lot_order(venue, lot: dict) -> dict | None:
+    """Cancel the parked sell; returns its meta so callers can wait for the
+    exchange to release the quantity before selling at market."""
     so = lot.get("sell_order")
     if so and so.get("id") and hasattr(venue, "cancel_resting"):
         venue.cancel_resting(so)
     lot["sell_order"] = None
+    return so if so and so.get("id") else None
+
+
+def _wait_for_release(venue, so: dict | None, *, timeout: float = 10.0) -> None:
+    """Robinhood keeps a coin locked until the canceled limit is terminal;
+    selling in the same second fails with '매도 가능 수량이 없습니다'."""
+    if not so or not hasattr(venue, "resting_status"):
+        return
+    deadline = time.monotonic() + timeout
+    while True:
+        st = venue.resting_status(so)
+        if not st.get("ok") or st.get("terminal") or st.get("filled"):
+            return
+        if time.monotonic() >= deadline:
+            return
+        time.sleep(1.0)
 
 
 def _adopt_holdings(venue, vb: dict, now: datetime) -> list[str]:
@@ -1140,7 +1159,8 @@ def _run_dip(venue, vb: dict, now: datetime) -> dict:
         if held < float(lot["qty"]):
             lot["qty"] = held  # partial manual sell: track what is left
         px_now = prices.get(sym)
-        if px_now and dip.should_reanchor(lot, px_now):
+        closing = lot.get("source") == "dip" and not dip.is_core(sym)  # closed in 1b
+        if px_now and not closing and dip.should_reanchor(lot, px_now):
             old_ref = dip.lot_ref(lot)
             dip.reanchor(lot, px_now, now)
             _cancel_lot_order(venue, lot)  # re-placed below at the new target
@@ -1163,7 +1183,7 @@ def _run_dip(venue, vb: dict, now: datetime) -> dict:
         if dip.is_core(sym) or lot.get("source") != "dip":
             continue
         px = prices.get(sym) or lot.get("last_price") or lot["price"]
-        _cancel_lot_order(venue, lot)
+        _wait_for_release(venue, _cancel_lot_order(venue, lot))
         r = venue.sell(sym, float(lot["qty"]), px)
         if not r.get("ok"):
             lot["sell_order"] = None
