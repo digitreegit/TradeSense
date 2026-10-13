@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
-from . import dip, grid, scorecard
+from . import dip, grid, intel, scorecard
 from .briefing import log_activity
 from .config import settings
 from .state import store
@@ -36,8 +36,13 @@ PRICES_KEY = "v5_crypto_prices"   # {pair: [[iso, mid], ...]} rolling 26h
 SETTINGS_LOG_KEY = "grid_settings_log"  # every parameter change with its reason
 MAX_SETTINGS_LOG = 200
 ENGINE_LOG_KEY = "grid_engine_logged"   # last engine version whose changes were written to the log
-ENGINE_VERSION = "v6.1"
+ENGINE_VERSION = "v6.2"
 ENGINE_CHANGES = {
+    "v6.2": [
+        ("engine", "robinhood", "가격 반응만", "뉴스 지능 레이어 (세기 50%)",
+         "매일 헤드라인 → LLM 점수(−1~+1) → 매수 조건 ×[0.7~1.3], 1회 금액 ×[0.6~1.3], 틱당 1~3회, 꼬리 위험 시 24h 매수 중단. "
+         "재생 불가(헤드라인 아카이브 없음) → 체결에 점수를 찍어 채점표 '판단별 결과'로 30일 뒤 검증. 세기 0%면 기존 규칙과 동일. 사용자 승인 2026-10-13"),
+    ],
     "v6.1": [
         ("engine", "robinhood", "API 거래쌍 첫 페이지(신규 상장 14종)", "재생 검증 20코인만 (dip.CORE_UNIVERSE)",
          "라이브 10/02→13: 거래쌍 목록 페이지네이션 누락으로 BTC/ETH 없이 밈코인만 매수 → −15%. dip_replay 같은 기간 메이저 20코인은 +0.3~+1.5%. 검증 밖 랏은 시장가 정리"),
@@ -69,6 +74,7 @@ def get_settings() -> dict:
     raw_steps = raw.get("steps") or {}
     steps = {v.name: grid.clamp_step(raw_steps.get(v.name, base)) for v in venues()}
     raw_dip = raw.get("dip") or {}
+    raw_intel = raw.get("intel") or {}
     return {
         "step": base,
         "steps": steps,
@@ -77,6 +83,11 @@ def get_settings() -> dict:
         "dip": {
             "pct": dip.clamp_dip(raw_dip.get("pct", dip.DEFAULT_DIP)),
             "order_dollars": dip.clamp_order(raw_dip.get("order_dollars", dip.DEFAULT_ORDER_DOLLARS)),
+        },
+        # v6.2 news intelligence: tilts the dip knobs within bounds (intel.py).
+        "intel": {
+            "enabled": bool(raw_intel.get("enabled", True)),
+            "strength": intel.clamp_strength(raw_intel.get("strength", intel.DEFAULT_STRENGTH)),
         },
         "enabled": bool(raw.get("enabled", False)),
         "updated_at": raw.get("updated_at"),
@@ -107,6 +118,39 @@ def set_dip(*, pct: float | None = None, order_dollars: float | None = None,
         why = f" — {reason.strip()}" if reason and reason.strip() else ""
         log_activity("grid", "크립토 설정 변경: " + " · ".join(changed) + why)
     return out
+
+
+def set_intel(*, enabled: bool | None = None, strength: float | None = None,
+              reason: str | None = None) -> dict:
+    cur = get_settings()
+    d = dict(cur["intel"])
+    changed, entries = [], []
+    if enabled is not None and bool(enabled) != d["enabled"]:
+        old, d["enabled"] = d["enabled"], bool(enabled)
+        entries.append(("intel_enabled", old, d["enabled"]))
+        changed.append(f"지능 {'ON' if d['enabled'] else 'OFF'}")
+    if strength is not None and intel.clamp_strength(strength) != d["strength"]:
+        old, d["strength"] = d["strength"], intel.clamp_strength(strength)
+        entries.append(("intel_strength", old, d["strength"]))
+        changed.append(f"세기 {old:.0%} → {d['strength']:.0%}")
+    out = _save_settings(intel=d)
+    for field, old, new in entries:
+        _log_change(field, "robinhood", old, new, reason)
+    if changed:
+        why = f" — {reason.strip()}" if reason and reason.strip() else ""
+        log_activity("grid", "시장 지능 설정 변경: " + " · ".join(changed) + why)
+    return out
+
+
+def run_intel(now: datetime | None = None) -> dict:
+    """Daily job + '지금 분석' button."""
+    result = intel.run(now, notify=_notify)
+    if result.get("error") and result.get("score") is None:
+        log_activity("grid", f"시장 지능 분석 실패: {result['error']}")
+    else:
+        log_activity("grid", f"시장 지능: {intel.BUCKET_KO[intel.bucket(result.get('score'))]} "
+                             f"{float(result.get('score') or 0):+.2f} · {result.get('summary') or ''}")
+    return result
 
 
 def _save_settings(**changes) -> dict:
@@ -1080,8 +1124,12 @@ def _first_dip_trade_at(venue_name: str) -> str | None:
 
 def _run_dip(venue, vb: dict, now: datetime) -> dict:
     s = get_settings()
-    pct = float(s["dip"]["pct"])
-    order_dollars = float(s["dip"]["order_dollars"])
+    pct = float(s["dip"]["pct"])  # sell target — never tilted
+    eff = intel.effective(s["dip"], intel.latest(), enabled=s["intel"]["enabled"],
+                          strength=s["intel"]["strength"], now=now)
+    vb["intel"] = eff
+    buy_pct = float(eff["pct"])
+    order_dollars = float(eff["order_dollars"])
     lots = _lots(vb)
     if vb.get("ladders"):
         # First v5 tick on a v4 book: keep the coins, drop the ladders.
@@ -1138,6 +1186,7 @@ def _run_dip(venue, vb: dict, now: datetime) -> dict:
                     "at": now.isoformat(), "venue": venue.name, "symbol": sym, "side": "sell",
                     "qty": qty, "price": price, "dollars": round(dollars, 2), "pl": pl,
                     "reason": f"{pct:.1%} 상승 목표 도달", "units_after": 0,
+                    "intel": lot.get("intel"),
                 }
                 _record_trade(trade)
                 fills.append(trade)
@@ -1196,6 +1245,7 @@ def _run_dip(venue, vb: dict, now: datetime) -> dict:
             "at": now.isoformat(), "venue": venue.name, "symbol": sym, "side": "sell",
             "qty": qty, "price": price, "dollars": round(dollars, 2), "pl": pl,
             "reason": "검증 유니버스 밖 코인 정리", "units_after": 0,
+            "intel": lot.get("intel"),
         }
         _record_trade(trade)
         fills.append(trade)
@@ -1210,15 +1260,20 @@ def _run_dip(venue, vb: dict, now: datetime) -> dict:
     # Only the validated universe (plus whatever is still held) is a row:
     # a coin just closed in 1b must not be re-bought in the same tick.
     allowed = set(universe) | set(lots)
-    rows = dip.watch_rows(history, {k: v for k, v in prices.items() if k in allowed}, lots, pct, now)
+    rows = dip.watch_rows(history, {k: v for k, v in prices.items() if k in allowed}, lots, buy_pct, now)
     bought = 0
     skip_note = None
+    max_buys = min(MAX_DIP_BUYS_PER_TICK, int(eff["max_buys"]))
+    tag = intel.stamp(eff)
     for row in rows:
-        if bought >= MAX_DIP_BUYS_PER_TICK:
+        if bought >= max_buys:
             break
         if not row["armed"]:
             continue
         sym = row["symbol"]
+        if eff["paused"]:
+            skip_note = f"{sym} 매수 조건 충족 — {eff['note']}"
+            break
         if cash < order_dollars * 1.005:
             skip_note = f"{sym} 매수 조건 충족 — 현금 부족 (${cash:,.2f} < ${order_dollars:,.0f})"
             break
@@ -1228,6 +1283,7 @@ def _run_dip(venue, vb: dict, now: datetime) -> dict:
             log_activity("grid", f"{venue.label} {sym} 매수 실패: {r.get('error')}")
             continue
         lot = dip.new_lot(sym, qty=r["qty"], price=r["price"], dollars=r["dollars"], at=now)
+        lot["intel"] = tag
         lots[sym] = lot
         cash -= float(r["dollars"])
         bought += 1
@@ -1235,6 +1291,7 @@ def _run_dip(venue, vb: dict, now: datetime) -> dict:
             "at": now.isoformat(), "venue": venue.name, "symbol": sym, "side": "buy",
             "qty": r["qty"], "price": r["price"], "dollars": r["dollars"], "pl": None,
             "reason": f"24h 고점 대비 {row['change']:+.1%}", "units_after": 1,
+            "intel": tag,
         }
         _record_trade(trade)
         fills.append(trade)
@@ -1612,6 +1669,7 @@ def status() -> dict:
             "watch": watch_rows,
             "watch_count": vb.get("watch_count") or len(watch_rows),
             "outside": vb.get("outside") or [],
+            "intel": vb.get("intel") if is_dip else None,
         }
     live_totals = {k: o["account_total"] for k, o in out_venues.items() if o["configured"]}
     history: list[dict] = []
@@ -1630,7 +1688,9 @@ def status() -> dict:
         except Exception:
             log.exception("scorecard %s failed", v.name)
     return {
-        "version": "v6.1",
+        "version": "v6.2",
+        "intel": intel.latest(),
+        "intel_history": intel.history(30),
         "rev": scorecard.settings_rev(s),
         "settings": s,
         "settings_log": settings_log(30),

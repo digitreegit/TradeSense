@@ -285,6 +285,8 @@ class RestingFakeVenue(FakeVenue):
 def env(monkeypatch):
     st = FakeStore()
     monkeypatch.setattr(grid_engine, "store", st)
+    from app import intel as _intel
+    monkeypatch.setattr(_intel, "store", st)
     monkeypatch.setattr(grid_engine, "log_activity", lambda *a, **k: None)
     monkeypatch.setattr(grid_engine, "_notify", lambda *a, **k: None)
     grid_engine.set_venues(None)
@@ -510,7 +512,7 @@ def test_status_exposes_levels_and_pl(env):
     assert row["symbol"] == "AMD" and row["units"] == 3
     assert row["sell_at"] == pytest.approx(105.0)
     assert row["buy_at"] == pytest.approx(95.0)
-    assert st["settings"]["step"] == 0.05 and st["version"] == "v6.1"
+    assert st["settings"]["step"] == 0.05 and st["version"] == "v6.2"
 
 
 def test_equity_history_keeps_one_point_per_day_and_carries_missing_venues(env):
@@ -990,7 +992,7 @@ def test_engine_changes_are_logged_once_per_version(env):
     grid_engine.tick(NOW + timedelta(minutes=15))
     log = [e for e in grid_engine.settings_log() if e["field"] == "engine"]
     assert len(log) == len(grid_engine.ENGINE_CHANGES[grid_engine.ENGINE_VERSION])
-    assert all(e["reason"] and "replay" in e["reason"] for e in log)
+    assert all(e["reason"] and len(e["reason"]) > 20 for e in log)  # evidence, or why none exists
     assert env.kv[grid_engine.ENGINE_LOG_KEY] == grid_engine.ENGINE_VERSION
 
 
@@ -1105,3 +1107,138 @@ def test_cleanup_sell_waits_for_canceled_limit_to_release(env, monkeypatch):
     assert polls["n"] == 3 and slept == [1.0]  # harvest poll + wait poll (open) + sleep + poll (canceled)
     assert ("sell", "LIT/USD", 25.0) in v.orders
     assert "LIT/USD" not in env.kv[grid_engine.BOOK_KEY]["robinhood"]["lots"]
+
+
+# --------------------------------------------------------------------------
+# v6.2: news intelligence tilts the dip knobs within bounds
+# --------------------------------------------------------------------------
+from app import intel  # noqa: E402
+
+BASE_DIP = {"pct": 0.05, "order_dollars": 1000.0}
+
+
+def _latest(score, conf=0.8, at=None):
+    return {"at": (at or NOW).isoformat(), "score": score, "confidence": conf}
+
+
+def test_intel_effective_is_identity_when_off_or_stale_or_missing():
+    plain = {"pct": 0.05, "order_dollars": 1000.0, "max_buys": 3, "paused": False}
+    for eff in (
+        intel.effective(BASE_DIP, None, enabled=True, strength=0.5, now=NOW),
+        intel.effective(BASE_DIP, _latest(0.9), enabled=False, strength=0.5, now=NOW),
+        intel.effective(BASE_DIP, _latest(0.9), enabled=True, strength=0.0, now=NOW),
+        intel.effective(BASE_DIP, _latest(0.9, at=NOW - timedelta(hours=40)), enabled=True, strength=1.0, now=NOW),
+    ):
+        assert {k: eff[k] for k in plain} == plain and not eff["active"]
+
+
+def test_intel_effective_tilts_within_bounds():
+    bull = intel.effective(BASE_DIP, _latest(1.0, 1.0), enabled=True, strength=1.0, now=NOW)
+    assert bull["pct"] == pytest.approx(0.035) and bull["order_dollars"] == pytest.approx(1300.0)
+    assert bull["max_buys"] == 3 and bull["bucket"] == "bull" and bull["active"]
+    bear = intel.effective(BASE_DIP, _latest(-1.0, 1.0), enabled=True, strength=1.0, now=NOW)
+    assert bear["pct"] == pytest.approx(0.065) and bear["order_dollars"] == pytest.approx(600.0)
+    assert bear["max_buys"] == 1 and bear["paused"] and bear["bucket"] == "bear"
+    half = intel.effective(BASE_DIP, _latest(1.0, 1.0), enabled=True, strength=0.5, now=NOW)
+    assert half["pct"] == pytest.approx(0.0425) and half["order_dollars"] == pytest.approx(1150.0)
+    # Low confidence shrinks the tilt and never pauses.
+    meh = intel.effective(BASE_DIP, _latest(-0.8, 0.3), enabled=True, strength=1.0, now=NOW)
+    assert not meh["paused"] and meh["w"] == pytest.approx(-0.24) and meh["max_buys"] == 2
+    # Pause expires after 24h even if the analysis is still fresh enough.
+    later = intel.effective(BASE_DIP, _latest(-1.0, 1.0, at=NOW - timedelta(hours=25)),
+                            enabled=True, strength=1.0, now=NOW)
+    assert not later["paused"] and later["active"]
+
+
+def test_dip_uses_intel_knobs_and_stamps_trades(env):
+    syms = ["BTC/USD", "ETH/USD", "SOL/USD"]
+    v = DipFakeVenue("robinhood", syms, market=syms, prices={s: 100.0 for s in syms}, cash=10_000.0)
+    grid_engine.set_venues([v])
+    _dip_settings(0.05, 100.0)
+    grid_engine.set_intel(enabled=True, strength=1.0, reason="test")
+    grid_engine.start(run_now=False)
+    grid_engine.tick(NOW)
+    # Bullish: a 4% drop is enough and lots are 30% bigger.
+    env.kv[intel.LATEST_KEY] = _latest(1.0, 1.0)
+    for s in syms:
+        v._prices[s] = 96.0
+    grid_engine.tick(NOW + timedelta(hours=1))
+    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
+    assert set(vb["lots"]) == set(syms)
+    lot = vb["lots"]["BTC/USD"]
+    assert lot["dollars"] == pytest.approx(130.0) and lot["intel"]["bucket"] == "bull"
+    # Sell target is still measured with the base 5%, not the tilted 3.5%.
+    assert lot["sell_order"]["limit_price"] == pytest.approx(96.0 * 1.05)
+    buys = [t for t in env.kv[grid_engine.TRADES_KEY] if t["side"] == "buy"]
+    assert all(t["intel"]["score"] == 1.0 for t in buys)
+    st = grid_engine.status()
+    assert st["venues"]["robinhood"]["intel"]["active"] and st["venues"]["robinhood"]["intel"]["pct"] == pytest.approx(0.035)
+    assert st["intel"]["score"] == 1.0
+    # Scorecard splits by bucket once sells carry the stamp.
+    v.fill_resting(lot["sell_order"]["id"])
+    grid_engine.tick(NOW + timedelta(hours=2))
+    card = grid_engine.status()["scorecard"]["robinhood"]
+    bull = next(r for r in card["by_intel"] if r["bucket"] == "bull")
+    assert bull["buys"] == 4 and bull["closed"] == 1 and bull["win_rate"] == 1.0  # BTC re-armed after the sell
+
+
+def test_dip_pauses_new_buys_on_tail_risk_but_keeps_sells(env):
+    syms = ["BTC/USD", "ETH/USD"]
+    v = DipFakeVenue("robinhood", syms, market=syms, prices={s: 100.0 for s in syms}, cash=10_000.0)
+    grid_engine.set_venues([v])
+    _dip_settings(0.05, 100.0)
+    grid_engine.set_intel(enabled=True, strength=0.5, reason="test")
+    grid_engine.start(run_now=False)
+    grid_engine.tick(NOW)
+    v._prices["BTC/USD"] = 90.0
+    grid_engine.tick(NOW + timedelta(hours=1))  # neutral: BTC bought
+    assert "BTC/USD" in env.kv[grid_engine.BOOK_KEY]["robinhood"]["lots"]
+    env.kv[intel.LATEST_KEY] = _latest(-0.9, 0.9, at=NOW + timedelta(hours=1))
+    v._prices["ETH/USD"] = 80.0
+    grid_engine.tick(NOW + timedelta(hours=2))
+    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
+    assert "ETH/USD" not in vb["lots"] and vb["intel"]["paused"]
+    assert "신규 매수 중단" in (vb.get("note") or "") or "신규 매수 중단" in vb["intel"]["note"]
+    # The parked BTC sell is untouched and still fills.
+    lot = vb["lots"]["BTC/USD"]
+    assert lot["sell_order"]["limit_price"] == pytest.approx(94.5)
+    v.fill_resting(lot["sell_order"]["id"])
+    grid_engine.tick(NOW + timedelta(hours=3))
+    assert "BTC/USD" not in env.kv[grid_engine.BOOK_KEY]["robinhood"]["lots"]
+
+
+def test_set_intel_logs_changes_and_is_part_of_rev(env):
+    rev0 = grid_engine.current_rev()
+    grid_engine.set_intel(strength=0.8, reason="30일 약세일 승률 비교 후 상향")
+    assert grid_engine.current_rev() != rev0
+    log = grid_engine.settings_log()
+    assert log[0]["field"] == "intel_strength" and log[0]["old"] == 0.5 and log[0]["new"] == 0.8
+    grid_engine.set_intel(enabled=False, reason="테스트 OFF")
+    assert grid_engine.get_settings()["intel"] == {"enabled": False, "strength": 0.8}
+    # No-op does not log.
+    n = len(grid_engine.settings_log())
+    grid_engine.set_intel(enabled=False, strength=0.8, reason="same")
+    assert len(grid_engine.settings_log()) == n
+
+
+def test_intel_run_stores_result_and_history(env, monkeypatch):
+    monkeypatch.setattr(intel, "fetch_headlines", lambda: [{"title": "Fed holds rates, signals cut in December", "source": "x"}])
+    monkeypatch.setattr(intel, "_ask_llm", lambda h: {
+        "score": 0.35, "confidence": 0.7, "factors": {"rates": 0.6, "crypto": 0.2},
+        "reasons": ["연준 동결 + 12월 인하 시사"], "key_headlines": ["Fed holds rates"], "summary": "완만한 강세",
+    })
+    sent = []
+    out = intel.run(NOW, notify=sent.append)
+    assert out["score"] == 0.35 and out["factors"]["rates"] == 0.6 and out["factors"]["geopolitics"] == 0.0
+    assert intel.latest()["summary"] == "완만한 강세" and len(intel.history()) == 1
+    assert sent and "강세" in sent[0]
+    # A failed run keeps the previous score and records the error.
+    monkeypatch.setattr(intel, "_ask_llm", lambda h: (_ for _ in ()).throw(RuntimeError("quota")))
+    out2 = intel.run(NOW + timedelta(days=1))
+    assert out2["score"] == 0.35 and "quota" in out2["error"]
+    assert len(intel.history()) == 1
+
+
+def test_intel_bucket_thresholds():
+    assert intel.bucket(None) == "none" and intel.bucket(-0.2) == "bear"
+    assert intel.bucket(0.19) == "neutral" and intel.bucket(0.2) == "bull"

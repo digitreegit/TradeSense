@@ -1112,10 +1112,13 @@ def test_entry_quality_rejects_losing_relative_winner_and_live_trend_break():
     assert not _entry_quality({**good, 'rsi14': 90})
 
 
-def test_v4_scheduler_only_runs_the_grid_tick_around_the_clock():
+def test_scheduler_runs_grid_tick_around_the_clock_and_intel_once_a_day():
     from app.main import GUARDS, JOBS
-    assert list(JOBS) == ['grid']
+    assert list(JOBS) == ['grid', 'intel']
     weekdays_only, window, daily = GUARDS['grid']
     assert not weekdays_only
     assert not daily
     assert all(window(hour, 15) for hour in range(24))
+    weekdays_only, window, daily = GUARDS['intel']
+    assert not weekdays_only and daily
+    assert not window(6, 45) and window(7, 0) and window(23, 0)

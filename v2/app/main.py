@@ -30,10 +30,11 @@ logging.basicConfig(
 )
 log = logging.getLogger("tradesense")
 
-VERSION = "v6.1"
+VERSION = "v6.2"
 
 JOBS = {
     "grid": grid_engine.tick,
+    "intel": grid_engine.run_intel,  # v6.2: daily headline scoring (see app/intel.py)
 }
 
 # (weekdays_only, time predicate, dedupe once per ET day)
@@ -41,6 +42,8 @@ JOBS = {
 # trades around the clock.
 GUARDS = {
     "grid": (False, lambda h, m: True, False),
+    # Once a day, first tick at/after 07:00 ET (before the US open, after Asia).
+    "intel": (False, lambda h, m: h >= 7, True),
 }
 
 
@@ -204,6 +207,8 @@ class GridSettingsBody(BaseModel):
     venue: str | None = None  # "alpaca" | "robinhood"; None applies to every venue
     dip_pct: float | None = None  # v5 crypto: buy when ≥ this % under the 24h high, sell at +this %
     order_dollars: float | None = None  # v5 crypto: dollars per buy
+    intel_enabled: bool | None = None  # v6.2: news intelligence on/off
+    intel_strength: float | None = None  # v6.2: 0..100 (%), how far the score may tilt the knobs
     reason: str | None = None  # required: the evidence behind the change (replay result, retro, ...)
 
 
@@ -252,9 +257,31 @@ def grid_settings(body: GridSettingsBody, request: Request):
             grid_engine.set_step(step, venue=body.venue, reason=reason)
         except ValueError:
             return JSONResponse({"ok": False, "error": "알 수 없는 시장입니다."}, status_code=400)
-    elif body.dip_pct is None and body.order_dollars is None:
+    if body.intel_enabled is not None or body.intel_strength is not None:
+        strength = None
+        if body.intel_strength is not None:
+            strength = float(body.intel_strength) / 100.0
+            if not (0.0 <= strength <= 1.0):
+                return JSONResponse({"ok": False, "error": "세기는 0~100% 사이여야 합니다."}, status_code=400)
+        grid_engine.set_intel(enabled=body.intel_enabled, strength=strength, reason=reason)
+    elif body.step_pct is None and body.dip_pct is None and body.order_dollars is None:
         return JSONResponse({"ok": False, "error": "숫자를 입력하세요."}, status_code=400)
     return JSONResponse({"ok": True, **grid_engine.status()})
+
+
+@app.post("/api/intel/run")
+def intel_run(request: Request):
+    """'지금 분석' — fetch headlines and re-score right away."""
+    if not _admin_authorized(request):
+        return _unauthorized()
+    try:
+        result = grid_engine.run_intel()
+    except Exception as exc:
+        log.exception("intel run failed")
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+    if result.get("error") and result.get("score") is None:
+        return JSONResponse({"ok": False, "error": result["error"]}, status_code=502)
+    return JSONResponse({"ok": True, "intel": result, **grid_engine.status()})
 
 
 @app.post("/api/grid/start")

@@ -21,6 +21,8 @@ def settings_rev(s: dict) -> str:
     core = {
         "steps": {k: round(float(v), 4) for k, v in sorted((s.get("steps") or {}).items())},
         "dip": {k: round(float(v), 4) for k, v in sorted((s.get("dip") or {}).items())},
+        "intel": {k: (round(float(v), 2) if isinstance(v, (int, float)) and not isinstance(v, bool) else bool(v))
+                  for k, v in sorted((s.get("intel") or {}).items())},
     }
     return hashlib.sha1(json.dumps(core, sort_keys=True).encode()).hexdigest()[:7]
 
@@ -80,6 +82,20 @@ def venue_scorecard(venue: str, history: list[dict], trades: list[dict],
     wins = sum(1 for t in sells if float(t["pl"]) > 0)
     gains = sorted((float(t["pl"]) for t in sells if float(t["pl"]) > 0), reverse=True)
     luck = round(sum(gains[:2]) / realized, 3) if realized > 0 and gains else None
+    # v6.2: did bearish/neutral/bullish news days actually trade differently?
+    by_intel: dict[str, dict] = {}
+    for t in vt:
+        tag = t.get("intel") or {}
+        b = tag.get("bucket") or "none"
+        row = by_intel.setdefault(b, {"bucket": b, "buys": 0, "closed": 0, "wins": 0, "realized": 0.0})
+        if t.get("side") == "buy":
+            row["buys"] += 1
+        elif t.get("side") == "sell" and t.get("pl") is not None:
+            row["closed"] += 1
+            row["wins"] += 1 if float(t["pl"]) > 0 else 0
+            row["realized"] = round(row["realized"] + float(t["pl"]), 2)
+    for row in by_intel.values():
+        row["win_rate"] = round(row["wins"] / row["closed"], 3) if row["closed"] else None
     by_rev: dict[str, dict] = {}
     for t in vt:
         rev = t.get("rev") or "—"
@@ -106,5 +122,6 @@ def venue_scorecard(venue: str, history: list[dict], trades: list[dict],
         "win_rate": round(wins / len(sells), 3) if sells else None,
         "realized": realized,
         "luck_top2": luck,
+        "by_intel": sorted(by_intel.values(), key=lambda r: ["bear", "neutral", "bull", "none"].index(r["bucket"])),
         "by_rev": sorted(by_rev.values(), key=lambda r: r["last"] or "", reverse=True),
     }
