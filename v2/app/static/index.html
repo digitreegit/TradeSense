@@ -708,7 +708,7 @@ function renderStatus(st) {
       if (r.error) return `${name}: 오류`;
       if (r.liquidated) return `${name}: 청산 ${r.liquidated.length}건`;
       if (r.seeded) return `${name}: 사다리 구성`;
-      return `${name}: 체결 ${r.fills ?? 0}건${(r.errors || []).length ? `, 오류 ${r.errors.length}` : ''}`;
+      return `${name}: 체결 ${Array.isArray(r.fills) ? r.fills.length : (r.fills ?? 0)}건${(r.errors || []).length ? `, 오류 ${r.errors.length}` : ''}`;
     }).join(' · ');
   }
   $('grid-tick').textContent = tickText;

@@ -1207,7 +1207,10 @@ def _run_dip(venue, vb: dict, now: datetime) -> dict:
         _notify(f"[v6 크립토] {line}")
 
     # 2) Buy anything that fell `pct` under its 24h high (most-fallen first).
-    rows = dip.watch_rows(history, prices, lots, pct, now)
+    # Only the validated universe (plus whatever is still held) is a row:
+    # a coin just closed in 1b must not be re-bought in the same tick.
+    allowed = set(universe) | set(lots)
+    rows = dip.watch_rows(history, {k: v for k, v in prices.items() if k in allowed}, lots, pct, now)
     bought = 0
     skip_note = None
     for row in rows:
@@ -1553,8 +1556,9 @@ def status() -> dict:
             ref_now = datetime.fromisoformat(ref_iso) if ref_iso else None
             if ref_now is not None and ref_now.tzinfo is None:
                 ref_now = ref_now.replace(tzinfo=timezone.utc)
-            watch_rows = dip.watch_rows(price_hist, {k: v for k, v in last_prices.items() if k in price_hist},
-                                        lots, pct, ref_now)
+            shown = {k: v for k, v in last_prices.items()
+                     if k in price_hist and (dip.is_core(k) or k in lots)}
+            watch_rows = dip.watch_rows(price_hist, shown, lots, pct, ref_now)
             realized = round(float(vb.get("realized_pl") or 0), 2)
             unreal = [r["unrealized_pl"] for r in lot_rows if r["unrealized_pl"] is not None]
         else:

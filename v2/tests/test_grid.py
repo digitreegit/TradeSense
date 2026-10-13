@@ -1044,6 +1044,9 @@ def test_dip_closes_rule_lots_outside_core_universe_but_keeps_adopted(env):
     assert ("sell", "LIT/USD", 25.0) in v.orders
     # The adopted outsider still gets its +5% sell parked.
     assert vb["lots"]["RE/USD"]["sell_order"] is not None
+    # LIT fell 25% from its 24h high, but it must not be re-bought after the cleanup.
+    assert ("buy", "LIT/USD") not in {(o[0], o[1]) for o in v.orders}
+    assert all(r["symbol"] != "LIT/USD" for r in grid_engine.status()["venues"]["robinhood"]["watch"])
 
 
 def test_scorecard_since_uses_strategy_switch_not_v4_start(env):
