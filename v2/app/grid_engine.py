@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
-from . import dip, grid, intel, scorecard
+from . import dip, grid, intel, paper, scorecard
 from .briefing import log_activity
 from .config import settings
 from .state import store
@@ -36,8 +36,12 @@ PRICES_KEY = "v5_crypto_prices"   # {pair: [[iso, mid], ...]} rolling 26h
 SETTINGS_LOG_KEY = "grid_settings_log"  # every parameter change with its reason
 MAX_SETTINGS_LOG = 200
 ENGINE_LOG_KEY = "grid_engine_logged"   # last engine version whose changes were written to the log
-ENGINE_VERSION = "v6.2"
+ENGINE_VERSION = "v6.3"
 ENGINE_CHANGES = {
+    "v6.3": [
+        ("engine", None, "실거래만", "시장별 테스트/실거래 스위치 (기본: 테스트)",
+         "같은 엔진·같은 규칙을 가상 현금으로 먼저 돌려 본 뒤 실전 투입을 결정한다. 테스트 전환 시 대기 실주문 취소·보유 유지, 실거래 복귀 시 이전 장부 복원. 사용자 요청 2026-10-13"),
+    ],
     "v6.2": [
         ("engine", "robinhood", "가격 반응만", "뉴스 지능 레이어 (세기 50%)",
          "매일 헤드라인 → LLM 점수(−1~+1) → 매수 조건 ×[0.7~1.3], 1회 금액 ×[0.6~1.3], 틱당 1~3회, 꼬리 위험 시 24h 매수 중단. "
@@ -75,8 +79,16 @@ def get_settings() -> dict:
     steps = {v.name: grid.clamp_step(raw_steps.get(v.name, base)) for v in venues()}
     raw_dip = raw.get("dip") or {}
     raw_intel = raw.get("intel") or {}
+    raw_modes = raw.get("modes") or {}
+    raw_pcash = raw.get("paper_cash") or {}
     return {
         "step": base,
+        # v6.3: per-venue paper ("테스트") vs live ("실거래"). New installs and
+        # the v6.3 upgrade start in paper; real orders only after an explicit switch.
+        "modes": {v.name: (raw_modes.get(v.name) if raw_modes.get(v.name) in paper.MODES else paper.DEFAULT_MODE)
+                  for v in venues()},
+        "paper_cash": {v.name: paper.clamp_cash(raw_pcash.get(v.name, paper.DEFAULT_CASH.get(v.name, 1000.0)))
+                       for v in venues()},
         "steps": steps,
         # v5 crypto rule: buy `order_dollars` of any coin `pct` under its 24h
         # high, sell `pct` above the fill.
@@ -140,6 +152,122 @@ def set_intel(*, enabled: bool | None = None, strength: float | None = None,
         why = f" — {reason.strip()}" if reason and reason.strip() else ""
         log_activity("grid", "시장 지능 설정 변경: " + " · ".join(changed) + why)
     return out
+
+
+def mode_of(venue_name: str) -> str:
+    return (get_settings()["modes"] or {}).get(venue_name, paper.DEFAULT_MODE)
+
+
+def trading_venues() -> list:
+    """Venues the engine actually trades on: paper wrappers where the mode says so."""
+    s = get_settings()
+    out = []
+    for v in venues():
+        if s["modes"].get(v.name) == "paper":
+            out.append(paper.PaperVenue(v, s["paper_cash"].get(v.name)))
+        else:
+            out.append(v)
+    return out
+
+
+def set_mode(venue: str, *, mode: str | None = None, paper_cash: float | None = None,
+             reason: str | None = None, now: datetime | None = None) -> dict:
+    """Switch one venue between paper and live, and/or set its paper start
+    cash. The book transition (cancel real resting orders, back up / restore
+    the live book, reset the paper book) runs right away."""
+    if venue not in {v.name for v in venues()}:
+        raise ValueError(f"unknown venue {venue!r}")
+    if mode is not None and mode not in paper.MODES:
+        raise ValueError(f"unknown mode {mode!r}")
+    cur = get_settings()
+    modes, pcash = dict(cur["modes"]), dict(cur["paper_cash"])
+    entries, changed = [], []
+    if mode is not None and mode != modes[venue]:
+        entries.append(("mode", modes[venue], mode)); modes[venue] = mode
+        changed.append("테스트 → 실거래" if mode == "live" else "실거래 → 테스트")
+    if paper_cash is not None and paper.clamp_cash(paper_cash) != pcash[venue]:
+        old, pcash[venue] = pcash[venue], paper.clamp_cash(paper_cash)
+        entries.append(("paper_cash", old, pcash[venue]))
+        changed.append(f"테스트 시작금 ${old:,.0f} → ${pcash[venue]:,.0f}")
+    out = _save_settings(modes=modes, paper_cash=pcash)
+    for field, old, new in entries:
+        _log_change(field, venue, old, new, reason)
+    label = next(v.label for v in venues() if v.name == venue)
+    if changed:
+        why = f" — {reason.strip()}" if reason and reason.strip() else ""
+        log_activity("grid", f"{label} 모드 변경: " + " · ".join(changed) + why)
+    # Paper cash changed while already in paper: restart the paper book from the new amount.
+    restart_paper = any(f == "paper_cash" for f, _, _ in entries) and modes[venue] == "paper" and not any(f == "mode" for f, _, _ in entries)
+    try:
+        book = get_book()
+        if restart_paper:
+            book[venue]["mode"] = "__restart__"
+        _apply_modes(book, now or datetime.now(timezone.utc))
+        store.set(BOOK_KEY, book)
+    except Exception:
+        log.exception("mode transition failed; the next tick retries")
+    return out
+
+
+def _apply_modes(book: dict, now: datetime) -> list[str]:
+    """Bring each venue book in line with its configured mode."""
+    s = get_settings()
+    changed = []
+    for v in venues():
+        want = s["modes"][v.name]
+        vb = book.setdefault(v.name, _empty_venue_book())
+        have = vb.get("mode") or "live"  # books from before v6.3 are live books
+        if have == want:
+            continue
+        label = v.label
+        if want == "paper":
+            if have == "live":
+                # Stop touching the real account: cancel resting orders, keep every holding.
+                for lot in (vb.get("lots") or {}).values():
+                    _cancel_lot_order(v, lot)
+                for ladder in (vb.get("ladders") or {}).values():
+                    _cancel_ladder_orders(v, ladder)
+                # Only park a book that actually has live state — don't wipe a
+                # previously parked backup with an empty/idle book.
+                if (vb.get("lots") or vb.get("ladders") or vb.get("realized_pl")
+                        or vb.get("started_at") or vb.get("phase") not in (None, "idle")):
+                    store.set(f"live_book:{v.name}", vb)
+            cash = s["paper_cash"][v.name]
+            paper.PaperVenue(v, cash).reset(cash, now)
+            nvb = _empty_venue_book()
+            nvb["mode"] = "paper"
+            nvb["phase"] = "adopting" if _is_dip(v) else "liquidating"
+            nvb["note"] = f"테스트 시작 — 가상 현금 ${cash:,.0f}"
+            nvb["strategy_since"] = now.isoformat()
+            book[v.name] = nvb
+            msg = f"{label} 테스트 모드 — 가상 현금 ${cash:,.0f}로 시작. 실계좌 주문 없음" + (
+                " (대기 중이던 실주문은 취소, 보유는 그대로)" if have == "live" else "")
+        else:
+            backup = store.get(f"live_book:{v.name}")
+            if backup:
+                nvb = dict(backup)
+                nvb["mode"] = "live"
+                if _is_dip(v):
+                    for lot in (nvb.get("lots") or {}).values():
+                        lot["sell_order"] = None  # canceled when we left; re-placed next tick
+                    nvb["phase"] = "adopting"
+                else:
+                    nvb["phase"] = "running" if nvb.get("ladders") else "liquidating"
+                nvb["note"] = "실거래 재개 — 이전 실계좌 장부 복원"
+                msg = f"{label} 실거래 모드 — 이전 실계좌 장부를 복원했습니다. 다음 점검부터 실주문이 나갑니다."
+            else:
+                nvb = _empty_venue_book()
+                nvb["mode"] = "live"
+                nvb["phase"] = "adopting" if _is_dip(v) else "liquidating"
+                nvb["strategy_since"] = now.isoformat()
+                nvb["note"] = "실거래 시작 대기"
+                msg = f"{label} 실거래 모드 — 다음 점검부터 실주문이 나갑니다" + (
+                    "" if _is_dip(v) else " (보유 청산 후 사다리 구성)")
+            book[v.name] = nvb
+        changed.append(v.name)
+        log_activity("grid", msg)
+        _notify(f"[v6] {msg}")
+    return changed
 
 
 def run_intel(now: datetime | None = None) -> dict:
@@ -618,6 +746,7 @@ def get_book() -> dict:
 
 def _record_trade(trade: dict) -> None:
     trade.setdefault("rev", current_rev())
+    trade.setdefault("mode", mode_of(trade.get("venue", "")))
     trades = store.get(TRADES_KEY) or []
     trades.append(trade)
     store.set(TRADES_KEY, trades[-MAX_TRADES_KEPT:])
@@ -660,6 +789,28 @@ def equity_history() -> list[dict]:
     return list(store.get(HISTORY_KEY) or [])
 
 
+def _hist_key(venue_name: str, mode: str) -> str:
+    return venue_name if mode == "live" else f"{venue_name}:paper"
+
+
+def history_view(modes: dict[str, str]) -> list[dict]:
+    """Daily history with each venue resolved to its current mode's series,
+    so the chart and scorecard show paper results while testing and the real
+    account otherwise. Points are copies; the store is untouched."""
+    out = []
+    for p in store.get(HISTORY_KEY) or []:
+        q = {k: v for k, v in p.items() if k in ("date", "at", "bench")}
+        known = []
+        for name, mode in modes.items():
+            v = p.get(_hist_key(name, mode))
+            if v is not None:
+                q[name] = v
+                known.append(float(v))
+        q["total"] = round(sum(known), 2) if known else None
+        out.append(q)
+    return out
+
+
 def _notify(text: str) -> None:
     try:
         from .notify import send
@@ -681,12 +832,18 @@ def start(*, run_now: bool = True, venue: str | None = None) -> dict:
     lots — nothing is sold. `venue` limits the reset to one market. Trade
     history is kept: the scorecard needs it across resets."""
     book = get_book()
-    targets = [v for v in venues() if venue is None or v.name == venue]
+    now = datetime.now(timezone.utc)
+    _apply_modes(book, now)
+    targets = [v for v in trading_venues() if venue is None or v.name == venue]
     if not targets:
         raise ValueError(f"unknown venue {venue!r}")
+    s = get_settings()
     for v in targets:
         old = book.get(v.name) or {}
+        if getattr(v, "paper", False):
+            v.reset(s["paper_cash"][v.name], now)
         vb = _empty_venue_book()
+        vb["mode"] = s["modes"][v.name]
         if _is_dip(v):
             vb["phase"] = "adopting"
             vb["note"] = "보유 인수 후 감시 시작 대기"
@@ -906,7 +1063,12 @@ def tick(now: datetime | None = None) -> dict:
         store.set(TICK_KEY, out)
         return out
     book = get_book()
-    for v in venues():
+    try:
+        if _apply_modes(book, now):
+            store.set(BOOK_KEY, book)
+    except Exception:
+        log.exception("mode transition failed")
+    for v in trading_venues():
         vb = book.setdefault(v.name, _empty_venue_book())
         try:
             out["venues"][v.name] = _tick_venue(v, vb, step_for(s, v.name), now)
@@ -918,8 +1080,8 @@ def tick(now: datetime | None = None) -> dict:
         store.set(BOOK_KEY, book)  # persist per venue so one failure loses nothing
     store.set(TICK_KEY, out)
     try:
-        record_equity({v.name: (book.get(v.name) or {}).get("account_total") for v in venues()}, now,
-                      bench=_benchmark_prices())
+        record_equity({_hist_key(v.name, s["modes"][v.name]): (book.get(v.name) or {}).get("account_total")
+                       for v in venues()}, now, bench=_benchmark_prices())
     except Exception:
         log.exception("equity history update failed")
     return out
@@ -1590,11 +1752,12 @@ def status() -> dict:
     s = get_settings()
     book = get_book()
     out_venues = {}
-    for v in venues():
+    for v in trading_venues():
         vb = book.get(v.name) or _empty_venue_book()
         ladders = vb.get("ladders") or {}
         step = step_for(s, v.name)
         is_dip = _is_dip(v)
+        mode = s["modes"][v.name]
         if is_dip:
             lots = vb.get("lots") or {}
             pct = float(s["dip"]["pct"])
@@ -1644,6 +1807,8 @@ def status() -> dict:
                 log.warning("%s cash failed: %s", v.name, exc)
         out_venues[v.name] = {
             "label": v.label,
+            "mode": mode,
+            "paper_cash": s["paper_cash"][v.name],
             "configured": configured,
             "step": step,
             "phase": vb.get("phase") or "idle",
@@ -1671,24 +1836,25 @@ def status() -> dict:
             "outside": vb.get("outside") or [],
             "intel": vb.get("intel") if is_dip else None,
         }
-    live_totals = {k: o["account_total"] for k, o in out_venues.items() if o["configured"]}
-    history: list[dict] = []
+    live_totals = {_hist_key(k, s["modes"][k]): o["account_total"] for k, o in out_venues.items() if o["configured"]}
     try:
-        history = record_equity(live_totals) if live_totals else equity_history()
+        if live_totals:
+            record_equity(live_totals)
     except Exception:
         log.exception("equity history update failed")
+    history = history_view(s["modes"])
     trades_all = store.get(TRADES_KEY) or []
     cards = {}
     for v in venues():
         try:
             cards[v.name] = scorecard.venue_scorecard(
-                v.name, history, trades_all,
+                v.name, history, trades_all, mode=s["modes"][v.name],
                 since=(((book.get(v.name) or {}).get("strategy_since")
                         or (book.get(v.name) or {}).get("started_at") or "")[:10] or None))
         except Exception:
             log.exception("scorecard %s failed", v.name)
     return {
-        "version": "v6.2",
+        "version": "v6.3",
         "intel": intel.latest(),
         "intel_history": intel.history(30),
         "rev": scorecard.settings_rev(s),

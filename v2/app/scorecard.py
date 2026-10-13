@@ -63,8 +63,9 @@ def _ret(series: list[tuple[str, float]]) -> float | None:
 
 
 def venue_scorecard(venue: str, history: list[dict], trades: list[dict],
-                    *, since: str | None = None) -> dict:
-    """Strategy vs baselines over the stored daily history, plus trade quality."""
+                    *, since: str | None = None, mode: str = "live") -> dict:
+    """Strategy vs baselines over the stored daily history, plus trade quality.
+    Only trades made in `mode` (paper/live) count; pre-v6.3 trades are live."""
     hist = [p for p in history if (since is None or p.get("date", "") >= since)]
     eq = _series(hist, venue)
     start = eq[0][0] if eq else None
@@ -76,7 +77,7 @@ def venue_scorecard(venue: str, history: list[dict], trades: list[dict],
         if r is not None:
             bench[sym] = r
     strat = _ret(eq)
-    vt = [t for t in trades if t.get("venue") == venue]
+    vt = [t for t in trades if t.get("venue") == venue and (t.get("mode") or "live") == mode]
     sells = [t for t in vt if t.get("side") == "sell" and t.get("pl") is not None]
     realized = round(sum(float(t["pl"]) for t in sells), 2)
     wins = sum(1 for t in sells if float(t["pl"]) > 0)
@@ -108,6 +109,7 @@ def venue_scorecard(venue: str, history: list[dict], trades: list[dict],
         row["first"] = min(row["first"] or t.get("at"), t.get("at") or row["first"])
         row["last"] = max(row["last"] or t.get("at"), t.get("at") or row["last"])
     return {
+        "mode": mode,
         "since": start,
         "days": len(eq),
         "start_equity": eq[0][1] if eq else None,

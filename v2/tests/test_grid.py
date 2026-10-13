@@ -284,9 +284,12 @@ class RestingFakeVenue(FakeVenue):
 @pytest.fixture
 def env(monkeypatch):
     st = FakeStore()
+    # Engine tests exercise the live path; paper mode has its own tests.
+    st.kv[grid_engine.SETTINGS_KEY] = {"modes": {"robinhood": "live", "alpaca": "live"}}
     monkeypatch.setattr(grid_engine, "store", st)
-    from app import intel as _intel
+    from app import intel as _intel, paper as _paper
     monkeypatch.setattr(_intel, "store", st)
+    monkeypatch.setattr(_paper, "store", st)
     monkeypatch.setattr(grid_engine, "log_activity", lambda *a, **k: None)
     monkeypatch.setattr(grid_engine, "_notify", lambda *a, **k: None)
     grid_engine.set_venues(None)
@@ -512,7 +515,7 @@ def test_status_exposes_levels_and_pl(env):
     assert row["symbol"] == "AMD" and row["units"] == 3
     assert row["sell_at"] == pytest.approx(105.0)
     assert row["buy_at"] == pytest.approx(95.0)
-    assert st["settings"]["step"] == 0.05 and st["version"] == "v6.2"
+    assert st["settings"]["step"] == 0.05 and st["version"] == "v6.3"
 
 
 def test_equity_history_keeps_one_point_per_day_and_carries_missing_venues(env):
@@ -547,7 +550,7 @@ def test_step_is_set_per_venue_and_legacy_single_step_is_the_fallback(env):
     al = FakeVenue("alpaca", ["AMD"], prices={"AMD": 100.0}, cash=1000.0)
     grid_engine.set_venues([rh, al])
     # A pre-v4.1 settings blob only carries one step: both venues inherit it.
-    env.kv[grid_engine.SETTINGS_KEY] = {"step": 0.03, "enabled": True}
+    env.kv[grid_engine.SETTINGS_KEY] = {"step": 0.03, "enabled": True, "modes": {"robinhood": "live", "alpaca": "live"}}
     s = grid_engine.get_settings()
     assert s["steps"] == {"robinhood": 0.03, "alpaca": 0.03}
 
@@ -1242,3 +1245,115 @@ def test_intel_run_stores_result_and_history(env, monkeypatch):
 def test_intel_bucket_thresholds():
     assert intel.bucket(None) == "none" and intel.bucket(-0.2) == "bear"
     assert intel.bucket(0.19) == "neutral" and intel.bucket(0.2) == "bull"
+
+
+# --------------------------------------------------------------------------
+# v6.3: paper (테스트) vs live (실거래) per venue
+# --------------------------------------------------------------------------
+from app import paper  # noqa: E402
+
+
+def test_upgrade_defaults_to_paper_and_live_book_is_parked_not_sold(env):
+    """A live v6.2 book meets v6.3: real resting sells are canceled, coins
+    stay, and the engine starts trading play money."""
+    env.kv[grid_engine.SETTINGS_KEY] = {}  # no modes yet → paper
+    v = DipFakeVenue("robinhood", ["BTC/USD"], market=["BTC/USD"], prices={"BTC/USD": 100.0},
+                     cash=500.0, positions={"BTC/USD": 2.0})
+    grid_engine.set_venues([v])
+    book = grid_engine.get_book()
+    lot = dip.new_lot("BTC/USD", qty=2.0, price=110.0, dollars=220.0, at=NOW)
+    so = v.place_resting("sell", "BTC/USD", limit_price=115.5, qty=2.0)
+    lot["sell_order"] = {"id": so["rh_order_id"], "api_version": "v1", "limit_price": 115.5, "qty": 2.0}
+    book["robinhood"].update({"phase": "running", "lots": {"BTC/USD": lot}, "realized_pl": -50.0})
+    env.kv[grid_engine.BOOK_KEY] = book
+    grid_engine._save_settings(enabled=True)
+    assert grid_engine.get_settings()["modes"]["robinhood"] == "paper"
+    real_orders_before = len(v.orders)
+    grid_engine.tick(NOW)
+    # Real account: resting sell canceled, 2 BTC still held, no market orders.
+    assert so["rh_order_id"] not in v._resting and v._positions["BTC/USD"] == 2.0
+    assert len(v.orders) == real_orders_before
+    # Live book parked for later; paper book running with the configured cash.
+    assert env.kv["live_book:robinhood"]["lots"]["BTC/USD"]["price"] == 110.0
+    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
+    assert vb["mode"] == "paper" and vb["phase"] == "running" and vb["lots"] == {}
+    assert env.kv[paper.book_key("robinhood")]["cash"] == paper.DEFAULT_CASH["robinhood"]
+    st = grid_engine.status()["venues"]["robinhood"]
+    assert st["mode"] == "paper" and "테스트" in st["label"] and st["cash"] == paper.DEFAULT_CASH["robinhood"]
+
+
+def test_paper_dip_cycle_touches_no_real_orders_and_tags_trades(env):
+    grid_engine.set_mode("robinhood", mode="paper", paper_cash=1000.0, reason="테스트")
+    v = DipFakeVenue("robinhood", ["SOL/USD"], market=["SOL/USD"], prices={"SOL/USD": 100.0}, cash=0.0)
+    grid_engine.set_venues([v])
+    _dip_settings(0.05, 100.0)
+    grid_engine.start(run_now=False)
+    grid_engine.tick(NOW)
+    v._prices["SOL/USD"] = 94.0
+    grid_engine.tick(NOW + timedelta(hours=1))
+    pb = env.kv[paper.book_key("robinhood")]
+    assert pb["cash"] == pytest.approx(900.0) and pb["positions"]["SOL/USD"] == pytest.approx(100 / (94 * 1.005))
+    assert v.orders == [] and v._resting == {}  # nothing reached the "broker"
+    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
+    lot = vb["lots"]["SOL/USD"]
+    assert lot["sell_order"]["api_version"] == "paper" and lot["sell_order"]["limit_price"] == pytest.approx(94 * 1.005 * 1.05)
+    # Price crosses the limit → the paper sell fills at the limit on the next status poll.
+    v._prices["SOL/USD"] = 100.0
+    grid_engine.tick(NOW + timedelta(hours=2))
+    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
+    assert "SOL/USD" not in vb["lots"] or vb["lots"]["SOL/USD"]["price"] == pytest.approx(100 * 1.005)
+    trades = [t for t in env.kv[grid_engine.TRADES_KEY] if t["venue"] == "robinhood"]
+    assert trades and all(t["mode"] == "paper" for t in trades)
+    sell = next(t for t in trades if t["side"] == "sell")
+    assert sell["pl"] == pytest.approx(100 * 1.05 - 100, abs=0.01)
+    card = grid_engine.status()["scorecard"]["robinhood"]
+    assert card["mode"] == "paper" and card["closed"] == 1
+
+
+def test_switch_back_to_live_restores_the_parked_book(env):
+    v = DipFakeVenue("robinhood", ["BTC/USD"], market=["BTC/USD"], prices={"BTC/USD": 100.0},
+                     cash=500.0, positions={"BTC/USD": 2.0})
+    grid_engine.set_venues([v])
+    env.kv["live_book:robinhood"] = {**grid_engine._empty_venue_book(), "mode": "live", "phase": "running",
+                                     "lots": {"BTC/USD": dip.new_lot("BTC/USD", qty=2.0, price=110.0, dollars=220.0, at=NOW)},
+                                     "realized_pl": -50.0, "strategy_since": (NOW - timedelta(days=5)).isoformat()}
+    grid_engine.set_mode("robinhood", mode="paper", reason="t")
+    grid_engine._save_settings(enabled=True)
+    grid_engine.tick(NOW)
+    grid_engine.set_mode("robinhood", mode="live", reason="테스트 2주 결과 양호")
+    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
+    assert vb["mode"] == "live" and vb["phase"] == "adopting" and vb["realized_pl"] == -50.0
+    assert vb["lots"]["BTC/USD"]["price"] == 110.0 and vb["lots"]["BTC/USD"]["sell_order"] is None
+    grid_engine.tick(NOW + timedelta(minutes=15))
+    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
+    assert vb["phase"] == "running"
+    # The real sell limit is parked again at the original cost basis +5%.
+    so = vb["lots"]["BTC/USD"]["sell_order"]
+    assert so and so["id"] in v._resting and so["limit_price"] == pytest.approx(115.5)
+    log = grid_engine.settings_log()
+    assert log[0]["field"] == "mode" and log[0]["old"] == "paper" and log[0]["new"] == "live"
+
+
+def test_paper_cash_change_restarts_paper_book(env):
+    grid_engine.set_mode("alpaca", mode="paper", paper_cash=1000.0, reason="t")
+    v = FakeVenue("alpaca", ["AMD"], prices={"AMD": 100.0}, cash=0.0)
+    grid_engine.set_venues([v])
+    grid_engine._save_settings(enabled=True)
+    grid_engine.tick(NOW)
+    assert env.kv[paper.book_key("alpaca")]["cash"] < 1000.0  # ladders seeded with play money
+    assert v.orders == []
+    grid_engine.set_mode("alpaca", paper_cash=5000.0, reason="더 큰 금액으로")
+    pb = env.kv[paper.book_key("alpaca")]
+    assert pb["cash"] == 5000.0 and pb["positions"] == {}
+    assert env.kv[grid_engine.BOOK_KEY]["alpaca"]["phase"] == "liquidating"
+    with pytest.raises(ValueError):
+        grid_engine.set_mode("alpaca", mode="demo", reason="x")
+
+
+def test_history_view_follows_mode(env):
+    grid_engine.record_equity({"robinhood": 7000.0, "alpaca:paper": 1000.0}, now=NOW - timedelta(days=1))
+    grid_engine.record_equity({"robinhood": 7100.0, "alpaca:paper": 1050.0}, now=NOW)
+    view = grid_engine.history_view({"robinhood": "live", "alpaca": "paper"})
+    assert view[-1]["robinhood"] == 7100.0 and view[-1]["alpaca"] == 1050.0 and view[-1]["total"] == 8150.0
+    view2 = grid_engine.history_view({"robinhood": "paper", "alpaca": "live"})
+    assert "robinhood" not in view2[-1] and view2[-1]["total"] is None

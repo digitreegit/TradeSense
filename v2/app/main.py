@@ -30,7 +30,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("tradesense")
 
-VERSION = "v6.2"
+VERSION = "v6.3"
 
 JOBS = {
     "grid": grid_engine.tick,
@@ -266,6 +266,35 @@ def grid_settings(body: GridSettingsBody, request: Request):
         grid_engine.set_intel(enabled=body.intel_enabled, strength=strength, reason=reason)
     elif body.step_pct is None and body.dip_pct is None and body.order_dollars is None:
         return JSONResponse({"ok": False, "error": "숫자를 입력하세요."}, status_code=400)
+    return JSONResponse({"ok": True, **grid_engine.status()})
+
+
+class ModeBody(BaseModel):
+    venue: str
+    mode: str | None = None  # "paper" | "live"
+    paper_cash: float | None = None  # starting virtual cash for paper mode
+    reason: str | None = None
+
+
+@app.post("/api/grid/mode")
+def grid_mode(body: ModeBody, request: Request):
+    """v6.3: switch a venue between 테스트(paper) and 실거래(live)."""
+    if not _admin_authorized(request):
+        return _unauthorized()
+    reason = (body.reason or "").strip()
+    if len(reason) < 2:
+        return JSONResponse({"ok": False, "error": "변경 이유를 적어 주세요."}, status_code=400)
+    if body.mode is None and body.paper_cash is None:
+        return JSONResponse({"ok": False, "error": "모드 또는 테스트 시작금을 지정하세요."}, status_code=400)
+    if body.paper_cash is not None and not (grid_engine.paper.MIN_CASH <= float(body.paper_cash) <= grid_engine.paper.MAX_CASH):
+        return JSONResponse({"ok": False, "error": f"테스트 시작금은 ${grid_engine.paper.MIN_CASH:,.0f} 이상이어야 합니다."}, status_code=400)
+    try:
+        grid_engine.set_mode(body.venue, mode=body.mode, paper_cash=body.paper_cash, reason=reason)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    except Exception as exc:
+        log.exception("mode switch failed")
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
     return JSONResponse({"ok": True, **grid_engine.status()})
 
 
