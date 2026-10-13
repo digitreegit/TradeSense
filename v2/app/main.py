@@ -30,7 +30,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("tradesense")
 
-VERSION = "v6"
+VERSION = "v6.1"
 
 JOBS = {
     "grid": grid_engine.tick,

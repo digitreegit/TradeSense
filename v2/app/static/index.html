@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>TradeSense v6</title>
+<title>TradeSense v6.1</title>
 <link rel="icon" type="image/png" href="/favicon.png?v=4">
 <link rel="apple-touch-icon" href="/favicon.png?v=4">
 <style>
@@ -108,7 +108,7 @@
 <div class="wrap">
   <div class="topbar">
     <div>
-      <h1>TradeSense <span class="blue">v6</span> <span class="hint">· 주식 그리드 + 크립토 하락매수</span></h1>
+      <h1>TradeSense <span class="blue">v6.1</span> <span class="hint">· 주식 그리드 + 크립토 하락매수</span></h1>
       <div class="hint">x% 내리면 1칸 매수, x% 오르면 1칸 매도. 크립토 Robinhood · 주식 Alpaca · 전부 자동</div>
     </div>
     <div class="row">
@@ -474,7 +474,7 @@ function renderDipVenue(key, v) {
       <div class="stat"><div class="label">보유 평가</div><div class="value">${money(v.grid_value, false)}</div><div class="hint">${lots.length}종목</div></div>
       <div class="stat"><div class="label">실현 손익</div><div class="value">${signed(v.realized_pl)}</div></div>
       <div class="stat"><div class="label">미실현</div><div class="value">${signed(v.unrealized_pl)}</div></div>
-      <div class="stat"><div class="label">감시</div><div class="value">${watchN}</div><div class="hint">API 거래 가능 코인</div></div>
+      <div class="stat"><div class="label">감시</div><div class="value">${watchN}</div><div class="hint">재생 검증 코인${(v.outside || []).length ? ` · 제외 ${v.outside.length}종` : ''}</div></div>
     </div>
     ${body}${manual}${dust}${note}${errors}
     <details class="acc" style="margin-top:10px">

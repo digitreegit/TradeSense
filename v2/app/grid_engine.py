@@ -35,8 +35,12 @@ PRICES_KEY = "v5_crypto_prices"   # {pair: [[iso, mid], ...]} rolling 26h
 SETTINGS_LOG_KEY = "grid_settings_log"  # every parameter change with its reason
 MAX_SETTINGS_LOG = 200
 ENGINE_LOG_KEY = "grid_engine_logged"   # last engine version whose changes were written to the log
-ENGINE_VERSION = "v6"
+ENGINE_VERSION = "v6.1"
 ENGINE_CHANGES = {
+    "v6.1": [
+        ("engine", "robinhood", "API 거래쌍 첫 페이지(신규 상장 14종)", "재생 검증 20코인만 (dip.CORE_UNIVERSE)",
+         "라이브 10/02→13: 거래쌍 목록 페이지네이션 누락으로 BTC/ETH 없이 밈코인만 매수 → −15%. dip_replay 같은 기간 메이저 20코인은 +0.3~+1.5%. 검증 밖 랏은 시장가 정리"),
+    ],
     "v6": [
         ("engine", "robinhood", "물린 랏 보유", "−10%면 기준가 재설정 (reanchor10)",
          "dip_replay 180d 21코인: 세 구간 모두 + (+5/+17/+20), 미결 최악 −12% (보유 −25%), 총 +47% vs +56%"),
@@ -644,6 +648,7 @@ def start(*, run_now: bool = True, venue: str | None = None) -> dict:
             vb["ladders"] = old.get("ladders") or {}
             vb["lots"] = old.get("lots") or {}
             vb["realized_pl"] = old.get("realized_pl") or 0.0
+            vb["strategy_since"] = old.get("strategy_since")
         else:
             vb["phase"] = "liquidating"
             vb["note"] = "보유 청산 후 사다리 구성 대기"
@@ -1046,6 +1051,14 @@ def _adopt_holdings(venue, vb: dict, now: datetime) -> list[str]:
     return adopted
 
 
+def _first_dip_trade_at(venue_name: str) -> str | None:
+    """When the dip rule first traded on this venue (scorecard start)."""
+    for t in store.get(TRADES_KEY) or []:
+        if t.get("venue") == venue_name and str(t.get("reason") or "").startswith("24h 고점"):
+            return t.get("at")
+    return None
+
+
 def _run_dip(venue, vb: dict, now: datetime) -> dict:
     s = get_settings()
     pct = float(s["dip"]["pct"])
@@ -1058,10 +1071,16 @@ def _run_dip(venue, vb: dict, now: datetime) -> dict:
             log_activity("grid", f"{venue.label} v5 전환: {', '.join(adopted)} 보유분을 그대로 인수")
 
     try:
-        universe = venue.market_universe()
+        market = venue.market_universe()
     except Exception as exc:
         log.warning("%s universe failed: %s", venue.name, exc)
-        universe = list(venue.universe)
+        market = list(venue.universe)
+    # Only coins the replay was run on. Everything else the API lists is
+    # visible in the status (`outside`) but never bought.
+    universe = [sym for sym in market if dip.is_core(sym)]
+    vb["outside"] = sorted(sym for sym in market if not dip.is_core(sym))
+    if not vb.get("strategy_since"):
+        vb["strategy_since"] = _first_dip_trade_at(venue.name) or now.isoformat()
     watch = sorted(set(universe) | set(lots))
     prices = venue.prices(watch) if watch else {}
 
@@ -1137,6 +1156,36 @@ def _run_dip(venue, vb: dict, now: datetime) -> dict:
             log_activity("grid", f"{venue.label} {sym} 잔량(${float(lot['qty']) * (prices.get(sym) or 0):.2f})은 API 최소 수량 미만 — 관리 제외")
             continue
 
+    # 1b) Lots the rule bought outside the validated universe (v6.0 bug:
+    # un-paginated pair list) are closed at market — no replay evidence, no
+    # reason to hold. Adopted (user-held) coins are left alone.
+    for sym, lot in list(lots.items()):
+        if dip.is_core(sym) or lot.get("source") != "dip":
+            continue
+        px = prices.get(sym) or lot.get("last_price") or lot["price"]
+        _cancel_lot_order(venue, lot)
+        r = venue.sell(sym, float(lot["qty"]), px)
+        if not r.get("ok"):
+            lot["sell_order"] = None
+            lot["last_error"] = f"유니버스 밖 정리 실패: {r.get('error')}"
+            errors.append(f"{sym}: {lot['last_error']}")
+            continue
+        qty, price, dollars = float(r["qty"]), float(r["price"]), float(r["dollars"])
+        pl = dip.lot_pl(lot, price, qty)
+        trade = {
+            "at": now.isoformat(), "venue": venue.name, "symbol": sym, "side": "sell",
+            "qty": qty, "price": price, "dollars": round(dollars, 2), "pl": pl,
+            "reason": "검증 유니버스 밖 코인 정리", "units_after": 0,
+        }
+        _record_trade(trade)
+        fills.append(trade)
+        vb["realized_pl"] = round(float(vb.get("realized_pl") or 0) + pl, 2)
+        lots.pop(sym, None)
+        cash += dollars
+        line = f"{venue.label} {sym} 정리 매도 ${dollars:,.2f} @ {_fmt_px(price)} · 실현 {pl:+,.2f} (재생 검증 밖 코인)"
+        log_activity("grid", line)
+        _notify(f"[v6 크립토] {line}")
+
     # 2) Buy anything that fell `pct` under its 24h high (most-fallen first).
     rows = dip.watch_rows(history, prices, lots, pct, now)
     bought = 0
@@ -1174,6 +1223,8 @@ def _run_dip(venue, vb: dict, now: datetime) -> dict:
     # 3) Every lot keeps one GTC sell parked `pct` above its buy price.
     resting = 0
     for sym, lot in lots.items():
+        if lot.get("source") == "dip" and not dip.is_core(sym):
+            continue  # being closed at market above; don't park a new limit
         target = dip.sell_target(dip.lot_ref(lot), pct)
         qty = float(lot["qty"])
         if _orders_match(lot.get("sell_order"), limit_price=target, qty=qty):
@@ -1536,6 +1587,7 @@ def status() -> dict:
             "dust": vb.get("dust") or [],
             "watch": watch_rows,
             "watch_count": vb.get("watch_count") or len(watch_rows),
+            "outside": vb.get("outside") or [],
         }
     live_totals = {k: o["account_total"] for k, o in out_venues.items() if o["configured"]}
     history: list[dict] = []
@@ -1549,11 +1601,12 @@ def status() -> dict:
         try:
             cards[v.name] = scorecard.venue_scorecard(
                 v.name, history, trades_all,
-                since=((book.get(v.name) or {}).get("started_at") or "")[:10] or None)
+                since=(((book.get(v.name) or {}).get("strategy_since")
+                        or (book.get(v.name) or {}).get("started_at") or "")[:10] or None))
         except Exception:
             log.exception("scorecard %s failed", v.name)
     return {
-        "version": "v6",
+        "version": "v6.1",
         "rev": scorecard.settings_rev(s),
         "settings": s,
         "settings_log": settings_log(30),

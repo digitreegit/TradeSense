@@ -28,6 +28,16 @@ MIN_QTY = 0.000001
 MAX_SAMPLE_AGE_HOURS = 26
 
 # Pegged assets never move 5%; a 5% "dip" there is a broken peg, not a buy.
+# v6.1: the rule may only trade coins the replay (scripts/dip_replay.py) was
+# run on. Live 2026-10-02→13 bought nothing but freshly listed micro-caps
+# (LIT, RE, CASHCAT, ...) because the pair list was read one page at a time;
+# those coins have no hourly history to replay, so no evidence either way.
+CORE_UNIVERSE = frozenset({
+    "BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD", "DOGE/USD", "LINK/USD", "AVAX/USD",
+    "LTC/USD", "BCH/USD", "UNI/USD", "AAVE/USD", "DOT/USD", "SHIB/USD", "PEPE/USD",
+    "CRV/USD", "SUSHI/USD", "GRT/USD", "XTZ/USD", "YFI/USD", "BAT/USD",
+})
+
 STABLECOINS = frozenset({
     "USDC", "USDT", "DAI", "PYUSD", "USDP", "TUSD", "BUSD", "FDUSD",
     "RLUSD", "USD1", "GUSD", "EURC", "USDS", "USDE",
@@ -55,6 +65,10 @@ def is_dust(qty: float, price: float | None) -> bool:
     if q <= 0 or q < MIN_QTY:
         return True
     return bool(price) and q * float(price) < DUST_DOLLARS
+
+
+def is_core(pair: str) -> bool:
+    return str(pair).upper() in CORE_UNIVERSE
 
 
 def is_stable(pair: str) -> bool:

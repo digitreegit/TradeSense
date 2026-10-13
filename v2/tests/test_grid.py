@@ -510,7 +510,7 @@ def test_status_exposes_levels_and_pl(env):
     assert row["symbol"] == "AMD" and row["units"] == 3
     assert row["sell_at"] == pytest.approx(105.0)
     assert row["buy_at"] == pytest.approx(95.0)
-    assert st["settings"]["step"] == 0.05 and st["version"] == "v6"
+    assert st["settings"]["step"] == 0.05 and st["version"] == "v6.1"
 
 
 def test_equity_history_keeps_one_point_per_day_and_carries_missing_venues(env):
@@ -754,7 +754,7 @@ def test_dip_bootstraps_24h_high_from_hourly_bars(env):
 
 
 def test_dip_respects_cash_and_per_tick_cap(env):
-    syms = [f"C{i}/USD" for i in range(6)]
+    syms = ["BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD", "DOGE/USD", "LINK/USD"]
     v = DipFakeVenue("robinhood", syms, market=syms, prices={s: 100.0 for s in syms}, cash=250.0)
     grid_engine.set_venues([v])
     _dip_settings(0.05, 100.0)
@@ -991,9 +991,77 @@ def test_engine_changes_are_logged_once_per_version(env):
     log = [e for e in grid_engine.settings_log() if e["field"] == "engine"]
     assert len(log) == len(grid_engine.ENGINE_CHANGES[grid_engine.ENGINE_VERSION])
     assert all(e["reason"] and "replay" in e["reason"] for e in log)
-    assert env.kv[grid_engine.ENGINE_LOG_KEY] == "v6"
+    assert env.kv[grid_engine.ENGINE_LOG_KEY] == grid_engine.ENGINE_VERSION
 
 
 def test_v6_stock_universe_is_diversified_large_caps():
     assert "COIN" not in grid.STOCK_UNIVERSE and "MSTR" not in grid.STOCK_UNIVERSE
     assert len(grid.STOCK_UNIVERSE) == 10 and "SPY" not in grid.STOCK_UNIVERSE
+
+
+# --------------------------------------------------------------------------
+# v6.1: validated universe only; stray micro-cap lots are closed
+# --------------------------------------------------------------------------
+def test_dip_only_buys_core_universe_and_reports_outsiders(env):
+    v = DipFakeVenue("robinhood", ["SOL/USD"], market=["SOL/USD", "CASHCAT/USD", "LIT/USD"],
+                     prices={"SOL/USD": 100.0, "CASHCAT/USD": 1.0, "LIT/USD": 4.0}, cash=1000.0)
+    grid_engine.set_venues([v])
+    _dip_settings(0.05, 100.0)
+    grid_engine.start(run_now=False)
+    grid_engine.tick(NOW)
+    # Every coin falls 20%: only SOL is bought.
+    for sym in v._prices:
+        v._prices[sym] *= 0.8
+    grid_engine.tick(NOW + timedelta(hours=1))
+    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
+    assert list(vb["lots"]) == ["SOL/USD"]
+    st = grid_engine.status()["venues"]["robinhood"]
+    assert st["outside"] == ["CASHCAT/USD", "LIT/USD"] and st["watch_count"] == 1
+    assert vb["strategy_since"] == NOW.isoformat()
+
+
+def test_dip_closes_rule_lots_outside_core_universe_but_keeps_adopted(env):
+    v = DipFakeVenue("robinhood", ["SOL/USD"], market=["SOL/USD", "LIT/USD", "RE/USD"],
+                     prices={"SOL/USD": 100.0, "LIT/USD": 3.0, "RE/USD": 0.4}, cash=1000.0)
+    grid_engine.set_venues([v])
+    _dip_settings(0.05, 100.0)
+    grid_engine.start(run_now=False)
+    grid_engine.tick(NOW)
+    # Pretend v6.0 bought LIT (rule) and the user holds RE themselves (adopted).
+    v._positions["LIT/USD"] = 25.0
+    v._positions["RE/USD"] = 1000.0
+    book = env.kv[grid_engine.BOOK_KEY]
+    book["robinhood"]["lots"]["LIT/USD"] = dip.new_lot("LIT/USD", qty=25.0, price=4.0, dollars=100.0, at=NOW)
+    book["robinhood"]["lots"]["RE/USD"] = dip.new_lot("RE/USD", qty=1000.0, price=0.5, dollars=500.0, at=NOW, source="adopted")
+    env.kv[grid_engine.BOOK_KEY] = book
+    grid_engine.tick(NOW + timedelta(minutes=15))
+    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
+    assert "LIT/USD" not in vb["lots"] and "RE/USD" in vb["lots"]
+    assert vb["realized_pl"] == pytest.approx(25 * 3.0 - 100.0)
+    sells = [t for t in env.kv[grid_engine.TRADES_KEY] if t["side"] == "sell"]
+    assert sells[-1]["symbol"] == "LIT/USD" and sells[-1]["reason"] == "검증 유니버스 밖 코인 정리"
+    assert sells[-1]["pl"] == pytest.approx(-25.0)
+    assert ("sell", "LIT/USD", 25.0) in v.orders
+    # The adopted outsider still gets its +5% sell parked.
+    assert vb["lots"]["RE/USD"]["sell_order"] is not None
+
+
+def test_scorecard_since_uses_strategy_switch_not_v4_start(env):
+    v = DipFakeVenue("robinhood", ["SOL/USD"], market=["SOL/USD"], prices={"SOL/USD": 100.0}, cash=1000.0)
+    grid_engine.set_venues([v])
+    _dip_settings(0.05, 100.0)
+    grid_engine.start(run_now=False)
+    book = env.kv[grid_engine.BOOK_KEY]
+    book["robinhood"]["started_at"] = (NOW - timedelta(days=20)).isoformat()
+    env.kv[grid_engine.BOOK_KEY] = book
+    env.kv[grid_engine.TRADES_KEY] = [{
+        "at": (NOW - timedelta(days=3)).isoformat(), "venue": "robinhood", "symbol": "SOL/USD",
+        "side": "buy", "qty": 1, "price": 100, "dollars": 100, "pl": None, "reason": "24h 고점 대비 -6.0%",
+    }]
+    # Daily equity exists for the whole v4 period too; the scorecard must start at the switch.
+    for d in range(21, -1, -1):
+        day = NOW - timedelta(days=d)
+        grid_engine.record_equity({"robinhood": 1000.0 + d}, now=day)
+    grid_engine.tick(NOW)
+    assert env.kv[grid_engine.BOOK_KEY]["robinhood"]["strategy_since"] == (NOW - timedelta(days=3)).isoformat()
+    assert grid_engine.status()["scorecard"]["robinhood"]["since"] == (NOW - timedelta(days=3)).isoformat()[:10]

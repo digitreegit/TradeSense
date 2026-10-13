@@ -164,22 +164,32 @@ class RobinhoodCryptoClient:
             raise last_error
         return {}
 
+    def _all_pages(self, path: str, max_pages: int = 50) -> list[dict]:
+        """Follow `next` links. Trading pairs are paginated like holdings —
+        the first page alone is mostly new listings, not the market."""
+        out: list[dict] = []
+        pages = 0
+        while path and pages < max_pages:
+            data = self.request("GET", path)
+            if not isinstance(data, dict):
+                break
+            out.extend(data.get("results") or [])
+            pages += 1
+            nxt = data.get("next") or ""
+            if not nxt:
+                break
+            parsed = urlparse(nxt)
+            path = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+        return out
+
     def get_trading_pairs(self, *symbols: str) -> list[dict]:
         query = self._query_params("symbol", *symbols) if symbols else ""
-        path = f"/api/v1/crypto/trading/trading_pairs/{query}"
-        data = self.request("GET", path)
-        if isinstance(data, dict):
-            return list(data.get("results") or [])
-        return []
+        return self._all_pages(f"/api/v1/crypto/trading/trading_pairs/{query}")
 
     def get_trading_pairs_v2(self, *symbols: str) -> list[dict]:
         """v2 pairs include is_api_tradable; v1 does not."""
         query = self._query_params("symbol", *symbols) if symbols else ""
-        path = f"/api/v2/crypto/trading/trading_pairs/{query}"
-        data = self.request("GET", path)
-        if isinstance(data, dict):
-            return list(data.get("results") or [])
-        return []
+        return self._all_pages(f"/api/v2/crypto/trading/trading_pairs/{query}")
 
     def _trading_pair(self, rh_symbol: str) -> dict | None:
         sym = rh_symbol.upper()
