@@ -1,4 +1,4 @@
-"""TradeSense v7 — engine: one tick every ~15 minutes for both venues.
+"""TradeSense v8 — engine: one tick every ~15 minutes for both venues.
 
 Venue adapters hide the broker APIs; everything strategy-related lives in
 `grid.py`. Per-venue lifecycle stored in `grid_book`:
@@ -36,8 +36,15 @@ PRICES_KEY = "v5_crypto_prices"   # {pair: [[iso, mid], ...]} rolling 26h
 SETTINGS_LOG_KEY = "grid_settings_log"  # every parameter change with its reason
 MAX_SETTINGS_LOG = 200
 ENGINE_LOG_KEY = "grid_engine_logged"   # last engine version whose changes were written to the log
-ENGINE_VERSION = "v7"
+ENGINE_VERSION = "v8"
 ENGINE_CHANGES = {
+    "v8": [
+        ("engine", "robinhood", "24h 딥 + SMA7 현금대기 + 35% 캡",
+         "메이저 그리드 5% (내릴 때 1칸·오를 때 1칸) · 현금 85% · 시드 3칸",
+         "v7은 6개월 3건으로 +0.9%. 같은 메이저 일봉 그리드 5%는 2024-07→2026-09 +34% (보유 −14%), 시간봉 최근 180d −1.5% vs 보유 −17%. 사용자 요청 2026-11-24: 매일 왕복"),
+        ("engine", "alpaca", "8%·현금 55%·시드 2칸", "5%·현금 85%·시드 3칸",
+         "대형주 일봉 365d: 5%/85%/3칸 +9.1% maxDD −4.5% (은행 4–5%를 넘김). 8%/55%/2칸은 +4.1%로 예금과 비슷."),
+    ],
     "v7": [
         ("engine", "robinhood", "알트 20종·현금 풀투입·하락장에도 매수",
          "BTC/ETH/SOL + BTC 7일선 위만 매수 + 투입 35% 상한 + $500 + 틱당 1건",
@@ -327,33 +334,44 @@ def _log_engine_changes_once() -> None:
         _log_change(field, venue, old, new, reason)
     store.set(ENGINE_LOG_KEY, ENGINE_VERSION)
     try:
-        _apply_v7_migration()
+        _apply_v8_migration()
     except Exception:
-        log.exception("v7 migration failed")
+        log.exception("v8 migration failed")
 
 
-def _apply_v7_migration() -> None:
-    """Force both venues into paper and adopt the replay-backed lot size.
+def _apply_v8_migration() -> None:
+    """Force paper, 5% grids on both venues, and drop leftover dip lots.
     Idempotent via ENGINE_LOG_KEY — only runs when the version stamp flips."""
     cur = get_settings()
     modes = {v.name: "paper" for v in venues()}
-    d = dict(cur["dip"])
-    d["order_dollars"] = dip.clamp_order(dip.DEFAULT_ORDER_DOLLARS)
-    steps = dict(cur["steps"])
-    if "alpaca" in steps:
-        steps["alpaca"] = grid.clamp_step(0.08)
+    steps = dict(cur.get("steps") or {})
+    for v in venues():
+        steps[v.name] = grid.clamp_step(grid.DEFAULT_STEP)
     for vname, prev in (cur.get("modes") or {}).items():
         if prev != "paper":
-            _log_change("mode", vname, prev, "paper", "v7: 손실 구간 실전 중단 — 테스트로 규칙 검증 후 재투입")
-    _save_settings(modes=modes, dip=d, steps=steps, enabled=True)
+            _log_change("mode", vname, prev, "paper",
+                        "v8: 왕복 그리드 검증 — 테스트로 곡선 확인 후 재투입")
+    _save_settings(modes=modes, steps=steps, step=grid.DEFAULT_STEP, enabled=True)
+    now = datetime.now(timezone.utc)
+    s = get_settings()
     book = get_book()
-    _apply_modes(book, datetime.now(timezone.utc))
+    _apply_modes(book, now)
+    for v in venues():
+        paper.PaperVenue(v, s["paper_cash"][v.name]).reset(s["paper_cash"][v.name], now)
+        vb = book.setdefault(v.name, _empty_venue_book())
+        for lot in (vb.get("lots") or {}).values():
+            if (s["modes"].get(v.name) == "live"):
+                _cancel_lot_order(v, lot)
+        vb.clear()
+        vb.update(_empty_venue_book())
+        vb["mode"] = "paper"
+        vb["phase"] = "liquidating"
+        vb["note"] = "v8 왕복 그리드 — 사다리 구성 대기"
     store.set(BOOK_KEY, book)
-    msg = ("v7 적용 — 크립토·주식 모두 테스트 모드. "
-           "크립토: BTC/ETH/SOL · BTC 7일선 위만 매수 · 투입 35% · $500 · 틱당 1건. "
-           "주식: 현금 55%·시드 2칸.")
+    msg = ("v8 적용 — 크립토·주식 모두 테스트 모드. "
+           "둘 다 5% 그리드(내릴 때 1칸, 오를 때 1칸) · 현금 85% · 시드 3칸 · 메이저만.")
     log_activity("grid", msg)
-    _notify(f"[v7] {msg}")
+    _notify(f"[v8] {msg}")
 
 
 def set_step(step: float, venue: str | None = None, *, reason: str | None = None) -> dict:
@@ -541,12 +559,11 @@ class AlpacaVenue:
 class RobinhoodVenue:
     name = "robinhood"
     label = "크립토 · Robinhood"
-    universe = grid.CRYPTO_UNIVERSE  # v4 grid fallback; v5 watches the whole API market
+    universe = grid.CRYPTO_UNIVERSE  # v8: same 5% grid as stocks, majors only
     # Sit GTC limits at the next buy/sell levels instead of crossing the
     # spread on every tick. Seed / liquidate / top-up still go marketable.
     resting_limits = True
-    # v5: 24h-dip buyer across every API-tradable coin (see dip.py).
-    strategy = "dip"
+    strategy = "grid"
 
     def __init__(self) -> None:
         self._client = None
@@ -886,10 +903,9 @@ def _fmt_px(px: float) -> str:
 # Lifecycle
 # --------------------------------------------------------------------------
 def start(*, run_now: bool = True, venue: str | None = None) -> dict:
-    """Stocks: liquidate everything API-tradable, then rebuild the ladders
-    from cash. Crypto: cancel open orders and adopt current holdings as
-    lots — nothing is sold. `venue` limits the reset to one market. Trade
-    history is kept: the scorecard needs it across resets."""
+    """Both venues: liquidate API-tradable holdings, then rebuild the ladders
+    from cash. (DipFakeVenue in tests still adopts instead of selling.)
+    `venue` limits the reset to one market. Trade history is kept."""
     book = get_book()
     now = datetime.now(timezone.utc)
     _apply_modes(book, now)
@@ -1950,7 +1966,7 @@ def status() -> dict:
         except Exception:
             log.exception("scorecard %s failed", v.name)
     return {
-        "version": "v7",
+        "version": ENGINE_VERSION,
         "intel": intel.latest(),
         "intel_history": intel.history(30),
         "rev": scorecard.settings_rev(s),

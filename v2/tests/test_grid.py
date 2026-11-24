@@ -82,10 +82,10 @@ def test_sell_out_waits_at_last_sale_price_by_default():
     # Price runs away: the reference stays at the last sale, we stay in cash.
     grid.observe(l, 150.0)
     grid.observe(l, 160.0)
-    assert l["hwm"] == pytest.approx(110.25)
-    assert grid.levels(l, 0.05)["buy_at"] == pytest.approx(110.25 * 0.95)
+    last = l["hwm"]
+    assert grid.levels(l, 0.05)["buy_at"] == pytest.approx(last * 0.95)
     assert grid.decide(l, 152.0, 0.05, cash=10_000) is None
-    a = grid.decide(l, 104.0, 0.05, cash=10_000)
+    a = grid.decide(l, last * 0.95, 0.05, cash=10_000)
     assert a and a["side"] == "buy" and a["n_units"] == 1
 
 
@@ -112,11 +112,11 @@ def test_partial_sell_fill_leaves_smaller_top_unit():
 
 def test_reconcile_trims_after_manual_sell_and_adopts_manual_buy():
     l = _seed(_ladder())
-    note = grid.reconcile(l, broker_qty=1.0, price=100.0)
-    assert note and len(l["units"]) == 1
-    assert grid.reconcile(l, broker_qty=1.0, price=100.0) is None
-    note = grid.reconcile(l, broker_qty=2.0, price=120.0)
+    note = grid.reconcile(l, broker_qty=2.0, price=100.0)
     assert note and len(l["units"]) == 2
+    assert grid.reconcile(l, broker_qty=2.0, price=100.0) is None
+    note = grid.reconcile(l, broker_qty=3.0, price=120.0)
+    assert note and len(l["units"]) == 3
     assert l["units"][-1]["price"] == 120.0 and l["anchor"] == 120.0
 
 
@@ -287,7 +287,7 @@ class RestingFakeVenue(FakeVenue):
 def env(monkeypatch):
     st = FakeStore()
     # Engine tests exercise the live path; paper mode has its own tests.
-    # Skip the one-shot v7 migration (forces paper + $500) so unit tests stay deterministic.
+    # Skip the one-shot v8 migration (forces paper + 5% grid) so unit tests stay deterministic.
     st.kv[grid_engine.SETTINGS_KEY] = {"modes": {"robinhood": "live", "alpaca": "live"}}
     st.kv[grid_engine.ENGINE_LOG_KEY] = grid_engine.ENGINE_VERSION
     monkeypatch.setattr(grid_engine, "store", st)
@@ -519,7 +519,7 @@ def test_status_exposes_levels_and_pl(env):
     assert row["symbol"] == "AMD" and row["units"] == grid.START_UNITS
     assert row["sell_at"] == pytest.approx(105.0)
     assert row["buy_at"] == pytest.approx(95.0)
-    assert st["settings"]["step"] == 0.05 and st["version"] == "v7"
+    assert st["settings"]["step"] == 0.05 and st["version"] == "v8"
 
 
 def test_equity_history_keeps_one_point_per_day_and_carries_missing_venues(env):
@@ -1383,6 +1383,14 @@ def test_v7_regime_cap_breadth_helpers():
     assert dip.breadth_ok([{"armed": True}])  # too few to measure a cascade
     rows = [{"armed": True}, {"armed": True}, {"armed": False}, {"armed": False}, {"armed": False}]
     assert dip.breadth_ok(rows) and not dip.breadth_ok(rows + [{"armed": True}, {"armed": True}])
+
+
+def test_v8_crypto_and_stocks_share_the_five_percent_grid():
+    assert grid_engine.RobinhoodVenue.strategy == "grid"
+    assert grid.DEFAULT_STEP == pytest.approx(0.05)
+    assert grid.CASH_USE == pytest.approx(0.85)
+    assert grid.START_UNITS == 3
+    assert grid.CRYPTO_UNIVERSE == ("BTC/USD", "ETH/USD", "SOL/USD")
 
 
 def test_v7_skips_buys_when_btc_below_sma(env):

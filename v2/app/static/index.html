@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>TradeSense v7</title>
+<title>TradeSense v8</title>
 <link rel="icon" type="image/png" href="/favicon.png?v=4">
 <link rel="apple-touch-icon" href="/favicon.png?v=4">
 <style>
@@ -108,8 +108,8 @@
 <div class="wrap">
   <div class="topbar">
     <div>
-      <h1>TradeSense <span class="blue">v7</span> <span class="hint">· 주식 그리드 + 크립토 하락매수</span></h1>
-      <div class="hint">x% 내리면 1칸 매수, x% 오르면 1칸 매도. 크립토 Robinhood · 주식 Alpaca · 전부 자동</div>
+      <h1>TradeSense <span class="blue">v8</span> <span class="hint">· 주식·크립토 5% 왕복 그리드</span></h1>
+      <div class="hint">내릴 때 1칸 사고 오를 때 1칸 판다. 매일 그 왕복을 쌓는다. 크립토 Robinhood · 주식 Alpaca · 전부 자동</div>
     </div>
     <div class="row">
       <nav class="tabs" role="tablist">
@@ -581,7 +581,7 @@ function renderVenue(key, v, step) {
   const stepStr = (step * 100).toFixed(1).replace(/\.0$/, '');
   return `<div class="panel">
     <div class="row spread">
-      <h3>${esc(v.label)} <span class="pill ${cls}">${text}</span>${modePill(v)}${v.resting_limits ? ' <span class="pill idle">리밋대기</span>' : ''}</h3>
+      <h3>${esc(v.label)} <span class="pill ${cls}">${text}</span>${modePill(v)} <span class="pill idle">${stepStr}% 왕복</span>${v.resting_limits ? ' <span class="pill idle">리밋대기</span>' : ''}</h3>
       <div class="row">
         <span class="hint">${v.unit_dollars ? `칸당 ${money(v.unit_dollars)}` : ''}${v.updated_at ? ` · ${when(v.updated_at)}` : ''}</span>
         <label class="hint" for="step-${key}">간격</label>

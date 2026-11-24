@@ -1,4 +1,7 @@
-"""v7 crypto rule — pure logic, no broker calls.
+"""v5–v7 crypto dip rule — pure logic, no broker calls.
+
+v8 live engine runs a 5% grid on majors instead (see app/grid.py). This
+module stays for DipFakeVenue tests and the offline dip_replay.py sweep.
 
 Watch every coin Robinhood lets the API buy. When a coin trades `dip`
 below its rolling 24-hour high, buy a fixed dollar amount; park a GTC sell

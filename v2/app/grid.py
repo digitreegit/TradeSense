@@ -24,8 +24,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 MAX_UNITS = 5
-START_UNITS = 2  # v7: leave more dry powder (was 3)
-DEFAULT_STEP = 0.08  # replay: 8-10% beat 3-5% on both venues after costs
+START_UNITS = 3  # v8: inventory to sell into the first bounce (v7 sat on 2)
+DEFAULT_STEP = 0.05  # v8 daily grind: each ±5% is one round trip (cost 1% crypto / 0.1% stocks)
 MIN_STEP = 0.01
 MAX_STEP = 0.25
 # Alpaca fractional orders need >= $1; Robinhood crypto also has a small
@@ -33,7 +33,7 @@ MAX_STEP = 0.25
 MIN_ORDER_DOLLARS = 5.0
 # Share of venue cash the grid may allocate at start; the rest absorbs fees
 # and marketable-limit slippage so the last rung never fails on cash.
-CASH_USE = 0.55  # v7: was 0.95 — full deployment is how grids bleed in bears
+CASH_USE = 0.85  # v8: 55% left too much idle; 95% left no fee buffer. Replay: 85% ≈ 95% return, smaller DD.
 
 # While flat, the re-entry reference either follows the running high (True)
 # or stays at the last sale price until the market comes back to it (False,
