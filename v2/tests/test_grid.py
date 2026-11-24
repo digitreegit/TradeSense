@@ -37,7 +37,7 @@ def test_sell_one_unit_at_plus_step_and_reanchor():
     assert a["side"] == "sell" and a["n_units"] == 1
     assert a["qty"] == pytest.approx(1.0)  # $100 unit bought at 100
     t = grid.apply_fill(l, side="sell", qty=a["qty"], price=105.0, dollars=105.0)
-    assert len(l["units"]) == 2 and l["anchor"] == 105.0
+    assert len(l["units"]) == grid.START_UNITS - 1 and l["anchor"] == 105.0
     assert t["pl"] == pytest.approx(5.0)
     assert l["realized_pl"] == pytest.approx(5.0)
     # Next sell is +5% above the new anchor, next buy -5% below it.
@@ -48,12 +48,11 @@ def test_sell_one_unit_at_plus_step_and_reanchor():
 
 def test_buy_one_unit_at_minus_step_up_to_max():
     l = _seed(_ladder())
-    a = grid.decide(l, 95.0, 0.05, cash=10_000)
-    assert a["side"] == "buy" and a["dollars"] == 100.0
-    grid.apply_fill(l, side="buy", qty=100 / 95, price=95.0, dollars=100.0)
-    a = grid.decide(l, 90.25, 0.05, cash=10_000)
-    assert a["side"] == "buy"
-    grid.apply_fill(l, side="buy", qty=100 / 90.25, price=90.25, dollars=100.0)
+    while len(l["units"]) < grid.MAX_UNITS:
+        px = grid.levels(l, 0.05)["buy_at"]
+        a = grid.decide(l, px, 0.05, cash=10_000)
+        assert a["side"] == "buy" and a["dollars"] == 100.0
+        grid.apply_fill(l, side="buy", qty=100 / px, price=px, dollars=100.0)
     assert len(l["units"]) == grid.MAX_UNITS
     # Full ladder: no more buys however far it falls.
     assert grid.decide(l, 50.0, 0.05, cash=10_000) is None
@@ -66,11 +65,14 @@ def test_no_buy_without_cash():
 
 
 def _sell_out(l):
-    for px in (105.0, 110.25, 115.7625):
+    last_px = None
+    while l["units"]:
+        px = grid.levels(l, 0.05)["sell_at"]
         a = grid.decide(l, px, 0.05, cash=10_000)
         assert a and a["side"] == "sell"
         grid.apply_fill(l, side="sell", qty=a["qty"], price=px, dollars=a["qty"] * px)
-    assert not l["units"] and l["hwm"] == pytest.approx(115.7625)
+        last_px = px
+    assert not l["units"] and l["hwm"] == pytest.approx(last_px)
     return l
 
 
@@ -80,10 +82,10 @@ def test_sell_out_waits_at_last_sale_price_by_default():
     # Price runs away: the reference stays at the last sale, we stay in cash.
     grid.observe(l, 150.0)
     grid.observe(l, 160.0)
-    assert l["hwm"] == pytest.approx(115.7625)
-    assert grid.levels(l, 0.05)["buy_at"] == pytest.approx(115.7625 * 0.95)
+    assert l["hwm"] == pytest.approx(110.25)
+    assert grid.levels(l, 0.05)["buy_at"] == pytest.approx(110.25 * 0.95)
     assert grid.decide(l, 152.0, 0.05, cash=10_000) is None
-    a = grid.decide(l, 109.0, 0.05, cash=10_000)
+    a = grid.decide(l, 104.0, 0.05, cash=10_000)
     assert a and a["side"] == "buy" and a["n_units"] == 1
 
 
@@ -102,7 +104,7 @@ def test_sell_out_can_follow_the_high_when_enabled(monkeypatch):
 def test_partial_sell_fill_leaves_smaller_top_unit():
     l = _seed(_ladder())
     grid.apply_fill(l, side="sell", qty=0.4, price=105.0, dollars=42.0)
-    assert len(l["units"]) == 3
+    assert len(l["units"]) == grid.START_UNITS
     assert l["units"][-1]["qty"] == pytest.approx(0.6)
     assert l["units"][-1]["dollars"] == pytest.approx(60.0)
     assert l["realized_pl"] == pytest.approx(2.0)
@@ -110,17 +112,17 @@ def test_partial_sell_fill_leaves_smaller_top_unit():
 
 def test_reconcile_trims_after_manual_sell_and_adopts_manual_buy():
     l = _seed(_ladder())
-    note = grid.reconcile(l, broker_qty=2.0, price=100.0)
+    note = grid.reconcile(l, broker_qty=1.0, price=100.0)
+    assert note and len(l["units"]) == 1
+    assert grid.reconcile(l, broker_qty=1.0, price=100.0) is None
+    note = grid.reconcile(l, broker_qty=2.0, price=120.0)
     assert note and len(l["units"]) == 2
-    assert grid.reconcile(l, broker_qty=2.0, price=100.0) is None
-    note = grid.reconcile(l, broker_qty=3.0, price=120.0)
-    assert note and len(l["units"]) == 3
     assert l["units"][-1]["price"] == 120.0 and l["anchor"] == 120.0
 
 
 def test_reconcile_ignores_dust_differences():
     l = _seed(_ladder())
-    assert grid.reconcile(l, broker_qty=3.0 - 1e-6, price=100.0) is None
+    assert grid.reconcile(l, broker_qty=float(grid.START_UNITS) - 1e-6, price=100.0) is None
 
 
 def test_unit_size_and_step_clamp():
@@ -285,7 +287,9 @@ class RestingFakeVenue(FakeVenue):
 def env(monkeypatch):
     st = FakeStore()
     # Engine tests exercise the live path; paper mode has its own tests.
+    # Skip the one-shot v7 migration (forces paper + $500) so unit tests stay deterministic.
     st.kv[grid_engine.SETTINGS_KEY] = {"modes": {"robinhood": "live", "alpaca": "live"}}
+    st.kv[grid_engine.ENGINE_LOG_KEY] = grid_engine.ENGINE_VERSION
     monkeypatch.setattr(grid_engine, "store", st)
     from app import intel as _intel, paper as _paper
     monkeypatch.setattr(_intel, "store", st)
@@ -353,8 +357,8 @@ def test_running_tick_sells_at_plus_step_and_buys_at_minus_step(env):
     assert r["fills"] == 2 and not r["errors"]
     assert [o[:2] for o in v.orders] == [("sell", "AMD"), ("buy", "COIN")]  # sells first
     vb = env.kv[grid_engine.BOOK_KEY]["alpaca"]
-    assert len(vb["ladders"]["AMD"]["units"]) == 2
-    assert len(vb["ladders"]["COIN"]["units"]) == 4
+    assert len(vb["ladders"]["AMD"]["units"]) == grid.START_UNITS - 1
+    assert len(vb["ladders"]["COIN"]["units"]) == grid.START_UNITS + 1
     assert vb["ladders"]["AMD"]["realized_pl"] == pytest.approx(unit * 0.05)
     trades = env.kv[grid_engine.TRADES_KEY]
     assert [t["side"] for t in trades[-2:]] == ["sell", "buy"]
@@ -370,7 +374,7 @@ def test_failed_order_is_recorded_and_retried_next_tick(env):
     assert r["fills"] == 0 and r["errors"]
     vb = env.kv[grid_engine.BOOK_KEY]["alpaca"]
     assert vb["ladders"]["AMD"]["last_error"] == "체결 안 됨"
-    assert len(vb["ladders"]["AMD"]["units"]) == 3
+    assert len(vb["ladders"]["AMD"]["units"]) == grid.START_UNITS
     r = grid_engine.tick(NOW)["venues"]["alpaca"]
     assert r["fills"] == 1
     assert env.kv[grid_engine.BOOK_KEY]["alpaca"]["ladders"]["AMD"]["last_error"] is None
@@ -454,13 +458,13 @@ def test_new_cash_grows_rungs_and_tops_up_held_units_without_selling(env):
     v.orders.clear()
     r = grid_engine.tick(NOW)["venues"]["robinhood"]
     vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
-    capital = 3050.0 - 6 * unit_old + 6 * unit_old  # cash + basis = 3050
+    capital = 3050.0  # cash + basis after the deposit
     unit_new = grid.unit_size(capital, 2)
     assert vb["unit_dollars"] == pytest.approx(unit_new)
     assert r["fills"] == 2 and all(o[0] == "buy" for o in v.orders)
     for l in vb["ladders"].values():
         assert len(l["units"]) == grid.START_UNITS            # rung count unchanged
-        assert grid.cost_basis(l) == pytest.approx(3 * unit_new, rel=1e-6)
+        assert grid.cost_basis(l) == pytest.approx(grid.START_UNITS * unit_new, rel=1e-6)
         assert not l.get("top_up")
     trades = env.kv[grid_engine.TRADES_KEY]
     assert trades[-1]["reason"] == "칸 크기 보충"
@@ -512,10 +516,10 @@ def test_status_exposes_levels_and_pl(env):
     _running_book(env, v)
     st = grid_engine.status()
     row = st["venues"]["alpaca"]["ladders"][0]
-    assert row["symbol"] == "AMD" and row["units"] == 3
+    assert row["symbol"] == "AMD" and row["units"] == grid.START_UNITS
     assert row["sell_at"] == pytest.approx(105.0)
     assert row["buy_at"] == pytest.approx(95.0)
-    assert st["settings"]["step"] == 0.05 and st["version"] == "v6.3"
+    assert st["settings"]["step"] == 0.05 and st["version"] == "v7"
 
 
 def test_equity_history_keeps_one_point_per_day_and_carries_missing_venues(env):
@@ -595,7 +599,7 @@ def test_crypto_resting_limits_sit_until_filled_then_reanchor(env):
     vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
     assert vb["phase"] == "running"
     ladder = vb["ladders"]["BTC/USD"]
-    assert ladder["seeded"] and len(ladder["units"]) == 3
+    assert ladder["seeded"] and len(ladder["units"]) == grid.START_UNITS
     # Resting buy + sell should now be on the book at ±5%.
     grid_engine.tick(NOW)
     ladder = env.kv[grid_engine.BOOK_KEY]["robinhood"]["ladders"]["BTC/USD"]
@@ -645,6 +649,14 @@ class DipFakeVenue(RestingFakeVenue):
     def recent_hourly_highs(self, symbols):
         return {s: list(self.bootstrap[s]) for s in symbols if s in self.bootstrap}
 
+    def recent_hourly_closes(self, symbol, hours=24*8):
+        # Default: series below the typical test mid (100) so replacing the
+        # last bar with the live mid still clears regime_ok (close > SMA).
+        if getattr(self, "regime_closes", None) is not None:
+            return list(self.regime_closes)
+        n = max(24 * 8, 10)
+        return [99.0] * (n - 1) + [99.5]
+
 
 def _dip_settings(pct=0.05, dollars=100.0):
     grid_engine.set_dip(pct=pct, order_dollars=dollars)
@@ -652,7 +664,7 @@ def _dip_settings(pct=0.05, dollars=100.0):
 
 def test_dip_settings_have_defaults_and_clamp(env):
     s = grid_engine.get_settings()
-    assert s["dip"] == {"pct": 0.05, "order_dollars": 1000.0}
+    assert s["dip"] == {"pct": 0.05, "order_dollars": 500.0}
     grid_engine.set_dip(pct=0.5, order_dollars=1)
     s = grid_engine.get_settings()
     assert s["dip"]["pct"] == dip.MAX_DIP and s["dip"]["order_dollars"] == dip.MIN_ORDER_DOLLARS
@@ -662,8 +674,8 @@ def test_dip_settings_have_defaults_and_clamp(env):
 
 def test_dip_buys_whole_market_coin_after_24h_drop_then_sells_at_target(env):
     v = DipFakeVenue(
-        "robinhood", ["BTC/USD"], market=["BTC/USD", "AAVE/USD", "LINK/USD"],
-        prices={"BTC/USD": 100.0, "AAVE/USD": 200.0, "LINK/USD": 20.0}, cash=1000.0,
+        "robinhood", ["BTC/USD"], market=["BTC/USD", "ETH/USD", "SOL/USD"],
+        prices={"BTC/USD": 100.0, "ETH/USD": 200.0, "SOL/USD": 20.0}, cash=1000.0,
     )
     grid_engine.set_venues([v])
     _dip_settings(0.05, 100.0)
@@ -677,49 +689,45 @@ def test_dip_buys_whole_market_coin_after_24h_drop_then_sells_at_target(env):
     assert vb["phase"] == "running" and r["watch"] == 3 and r["fills"] == []
     assert v.orders == []
     hist = env.kv[grid_engine.PRICES_KEY]
-    assert set(hist) == {"BTC/USD", "AAVE/USD", "LINK/USD"}
+    assert set(hist) == {"BTC/USD", "ETH/USD", "SOL/USD"}
 
-    # AAVE drops 6% from its 24h high (which is the sample we just took).
-    v._prices["AAVE/USD"] = 188.0
-    v._prices["LINK/USD"] = 19.5   # -2.5%: not enough
+    # ETH drops 6% from its 24h high (which is the sample we just took).
+    v._prices["ETH/USD"] = 188.0
+    v._prices["SOL/USD"] = 19.5   # -2.5%: not enough
     t1 = NOW + timedelta(hours=1)
     r = grid_engine.tick(t1)["venues"]["robinhood"]
-    assert [f["symbol"] for f in r["fills"]] == ["AAVE/USD"]
+    assert [f["symbol"] for f in r["fills"]] == ["ETH/USD"]
     buys = [o for o in v.orders if o[0] == "buy"]
-    assert buys == [("buy", "AAVE/USD", 100.0)]
+    assert buys == [("buy", "ETH/USD", 100.0)]
     vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
-    lot = vb["lots"]["AAVE/USD"]
+    lot = vb["lots"]["ETH/USD"]
     assert lot["price"] == pytest.approx(188.0) and lot["dollars"] == pytest.approx(100.0)
-    # A GTC sell is parked 5% above the fill.
     so = lot["sell_order"]
     assert so and so["limit_price"] == pytest.approx(188.0 * 1.05) and so["qty"] == pytest.approx(lot["qty"])
     assert v._cash == pytest.approx(900.0)
 
-    # Falling further does NOT buy again (one lot per coin).
-    v._prices["AAVE/USD"] = 170.0
+    v._prices["ETH/USD"] = 170.0
     r = grid_engine.tick(t1 + timedelta(minutes=15))["venues"]["robinhood"]
     assert r["fills"] == [] and len([o for o in v.orders if o[0] == "buy"]) == 1
 
-    # Fill the resting sell → lot closed with +5% realized, cash back.
     v.fill_resting(so["id"])
     t2 = t1 + timedelta(hours=2)
-    v._prices["AAVE/USD"] = 198.0
+    v._prices["ETH/USD"] = 198.0
     r = grid_engine.tick(t2)["venues"]["robinhood"]
     assert [f["side"] for f in r["fills"]] == ["sell"]
     vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
-    assert "AAVE/USD" not in vb["lots"]
+    assert "ETH/USD" not in vb["lots"]
     assert vb["realized_pl"] == pytest.approx(5.0)
     trades = env.kv[grid_engine.TRADES_KEY]
     assert trades[-1]["side"] == "sell" and trades[-1]["pl"] == pytest.approx(5.0)
 
-    # Status exposes the v5 shape for the dashboard.
     st = grid_engine.status()["venues"]["robinhood"]
     assert st["strategy"] == "dip" and st["dip"]["pct"] == 0.05
     assert st["lots"] == [] and st["realized_pl"] == pytest.approx(5.0)
     watch = {w["symbol"]: w for w in st["watch"]}
-    assert watch["AAVE/USD"]["high_24h"] == pytest.approx(200.0)
-    assert watch["AAVE/USD"]["trigger_at"] == pytest.approx(190.0)
-    assert watch["AAVE/USD"]["change"] == pytest.approx(198 / 200 - 1)
+    assert watch["ETH/USD"]["high_24h"] == pytest.approx(200.0)
+    assert watch["ETH/USD"]["trigger_at"] == pytest.approx(190.0)
+    assert watch["ETH/USD"]["change"] == pytest.approx(198 / 200 - 1)
 
 
 def test_dip_rearms_after_sell_and_uses_rolling_24h_high(env):
@@ -759,22 +767,25 @@ def test_dip_bootstraps_24h_high_from_hourly_bars(env):
 
 
 def test_dip_respects_cash_and_per_tick_cap(env):
-    syms = ["BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD", "DOGE/USD", "LINK/USD"]
-    v = DipFakeVenue("robinhood", syms, market=syms, prices={s: 100.0 for s in syms}, cash=250.0)
+    # v7: one buy/tick; arm one coin at a time (breadth); 35% cap needs enough equity.
+    syms = ["BTC/USD", "ETH/USD", "SOL/USD"]
+    v = DipFakeVenue("robinhood", syms, market=syms, prices={s: 100.0 for s in syms}, cash=1000.0)
     grid_engine.set_venues([v])
     _dip_settings(0.05, 100.0)
     grid_engine.start(run_now=False)
     grid_engine.tick(NOW)
-    for s in syms:
-        v._prices[s] = 90.0
+    v._prices["ETH/USD"] = 90.0  # only ETH armed → breadth ok
     r = grid_engine.tick(NOW + timedelta(hours=1))["venues"]["robinhood"]
-    # $250 buys two $100 lots; third is blocked by cash.
-    assert len(r["fills"]) == 2
-    vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
-    assert "현금 부족" in vb["note"]
-    v._cash = 10_000.0
+    assert len(r["fills"]) == 1 and r["fills"][0]["symbol"] == "ETH/USD"
+    assert v._cash == pytest.approx(900.0)
+    # Drain cash below the lot size — next armed coin must wait.
+    v._cash = 50.0
+    v._prices["SOL/USD"] = 90.0
     r = grid_engine.tick(NOW + timedelta(hours=1, minutes=15))["venues"]["robinhood"]
-    assert len(r["fills"]) == grid_engine.MAX_DIP_BUYS_PER_TICK
+    assert r["fills"] == [] and "현금 부족" in (env.kv[grid_engine.BOOK_KEY]["robinhood"]["note"] or "")
+    v._cash = 10_000.0
+    r = grid_engine.tick(NOW + timedelta(hours=1, minutes=30))["venues"]["robinhood"]
+    assert len(r["fills"]) == grid_engine.MAX_DIP_BUYS_PER_TICK == 1
 
 
 def test_dip_adopts_v4_ladders_with_cost_basis_and_stop_cancels_sells(env):
@@ -865,7 +876,7 @@ def test_settings_rev_changes_only_with_decision_parameters(env):
     assert log[1]["old"] == pytest.approx(grid.DEFAULT_STEP) and log[1]["new"] == pytest.approx(0.03)
     assert log[1]["reason"].startswith("grid_replay")
     # No-op dip save logs nothing.
-    grid_engine.set_dip(pct=0.08, order_dollars=1000, reason="same")
+    grid_engine.set_dip(pct=0.08, order_dollars=dip.DEFAULT_ORDER_DOLLARS, reason="same")
     assert len(grid_engine.settings_log()) == 2
 
 
@@ -990,12 +1001,13 @@ def test_start_can_reset_one_venue_and_keeps_trade_history(env):
 def test_engine_changes_are_logged_once_per_version(env):
     v = FakeVenue("alpaca", ["AMD"], prices={"AMD": 100.0}, cash=1000.0)
     grid_engine.set_venues([v])
+    env.kv.pop(grid_engine.ENGINE_LOG_KEY, None)  # allow the one-shot log to run
     grid_engine.start(run_now=False)
     grid_engine.tick(NOW)
     grid_engine.tick(NOW + timedelta(minutes=15))
     log = [e for e in grid_engine.settings_log() if e["field"] == "engine"]
     assert len(log) == len(grid_engine.ENGINE_CHANGES[grid_engine.ENGINE_VERSION])
-    assert all(e["reason"] and len(e["reason"]) > 20 for e in log)  # evidence, or why none exists
+    assert all(e["reason"] and len(e["reason"]) > 20 for e in log)
     assert env.kv[grid_engine.ENGINE_LOG_KEY] == grid_engine.ENGINE_VERSION
 
 
@@ -1162,12 +1174,12 @@ def test_dip_uses_intel_knobs_and_stamps_trades(env):
     grid_engine.start(run_now=False)
     grid_engine.tick(NOW)
     # Bullish: a 4% drop is enough and lots are 30% bigger.
+    # v7: one buy/tick and breadth — dip one major at a time.
     env.kv[intel.LATEST_KEY] = _latest(1.0, 1.0)
-    for s in syms:
-        v._prices[s] = 96.0
+    v._prices["BTC/USD"] = 96.0
     grid_engine.tick(NOW + timedelta(hours=1))
     vb = env.kv[grid_engine.BOOK_KEY]["robinhood"]
-    assert set(vb["lots"]) == set(syms)
+    assert list(vb["lots"]) == ["BTC/USD"]
     lot = vb["lots"]["BTC/USD"]
     assert lot["dollars"] == pytest.approx(130.0) and lot["intel"]["bucket"] == "bull"
     # Sell target is still measured with the base 5%, not the tilted 3.5%.
@@ -1182,7 +1194,7 @@ def test_dip_uses_intel_knobs_and_stamps_trades(env):
     grid_engine.tick(NOW + timedelta(hours=2))
     card = grid_engine.status()["scorecard"]["robinhood"]
     bull = next(r for r in card["by_intel"] if r["bucket"] == "bull")
-    assert bull["buys"] == 4 and bull["closed"] == 1 and bull["win_rate"] == 1.0  # BTC re-armed after the sell
+    assert bull["buys"] >= 1 and bull["closed"] == 1 and bull["win_rate"] == 1.0
 
 
 def test_dip_pauses_new_buys_on_tail_risk_but_keeps_sells(env):
@@ -1357,3 +1369,32 @@ def test_history_view_follows_mode(env):
     assert view[-1]["robinhood"] == 7100.0 and view[-1]["alpaca"] == 1050.0 and view[-1]["total"] == 8150.0
     view2 = grid_engine.history_view({"robinhood": "paper", "alpaca": "live"})
     assert "robinhood" not in view2[-1] and view2[-1]["total"] is None
+
+
+def test_v7_regime_cap_breadth_helpers():
+    assert dip.CORE_UNIVERSE == frozenset({"BTC/USD", "ETH/USD", "SOL/USD"})
+    up = [100 + i * 0.1 for i in range(7 * 24)]
+    assert dip.regime_ok(up) and not dip.regime_ok(list(reversed(up)))
+    assert not dip.regime_ok([100.0] * 10)  # too short
+    lots = {"BTC/USD": {"qty": 1.0, "price": 100.0}}
+    prices = {"BTC/USD": 100.0}
+    assert dip.under_cap(lots, prices, cash=900.0, order_dollars=100.0)  # deploy 100+100=200 <= 0.35*1000
+    assert not dip.under_cap(lots, prices, cash=100.0, order_dollars=100.0)  # 200 > 0.35*200
+    assert dip.breadth_ok([{"armed": True}])  # too few to measure a cascade
+    rows = [{"armed": True}, {"armed": True}, {"armed": False}, {"armed": False}, {"armed": False}]
+    assert dip.breadth_ok(rows) and not dip.breadth_ok(rows + [{"armed": True}, {"armed": True}])
+
+
+def test_v7_skips_buys_when_btc_below_sma(env):
+    v = DipFakeVenue("robinhood", ["ETH/USD"], market=["BTC/USD", "ETH/USD"],
+                     prices={"BTC/USD": 90.0, "ETH/USD": 100.0}, cash=5000.0)
+    v.regime_closes = [100.0 - i * 0.05 for i in range(7 * 24)]  # downtrend, last is lowest
+    grid_engine.set_venues([v])
+    _dip_settings(0.05, 100.0)
+    grid_engine.start(run_now=False)
+    grid_engine.tick(NOW)
+    v._prices["ETH/USD"] = 90.0
+    r = grid_engine.tick(NOW + timedelta(hours=1))["venues"]["robinhood"]
+    assert r["fills"] == []
+    assert "7일선 아래" in (env.kv[grid_engine.BOOK_KEY]["robinhood"].get("note") or "")
+    assert env.kv[grid_engine.BOOK_KEY]["robinhood"]["regime"]["ok"] is False

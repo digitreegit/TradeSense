@@ -1,4 +1,4 @@
-"""TradeSense v6 entrypoint — grid on Alpaca (stocks), 24h dip buyer on Robinhood (crypto).
+"""TradeSense v7 entrypoint — grid on Alpaca (stocks), 24h dip buyer on Robinhood (crypto).
 
 Local / Docker : APScheduler runs the grid tick in-process every 15 minutes.
 Vercel         : cron-job.org hits /api/cron/run every ~15 min.
@@ -30,7 +30,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("tradesense")
 
-VERSION = "v6.3"
+VERSION = "v7"
 
 JOBS = {
     "grid": grid_engine.tick,

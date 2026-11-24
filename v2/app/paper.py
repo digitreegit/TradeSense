@@ -104,7 +104,7 @@ class PaperVenue:
 
     def __getattr__(self, item):
         # market_universe, recent_hourly_highs, ... — read-only helpers of the real venue.
-        if item in ("market_universe", "recent_hourly_highs"):
+        if item in ("market_universe", "recent_hourly_highs", "recent_hourly_closes"):
             return getattr(self.real, item)
         raise AttributeError(item)
 

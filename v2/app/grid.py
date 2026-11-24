@@ -24,7 +24,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 MAX_UNITS = 5
-START_UNITS = 3
+START_UNITS = 2  # v7: leave more dry powder (was 3)
 DEFAULT_STEP = 0.08  # replay: 8-10% beat 3-5% on both venues after costs
 MIN_STEP = 0.01
 MAX_STEP = 0.25
@@ -33,7 +33,7 @@ MAX_STEP = 0.25
 MIN_ORDER_DOLLARS = 5.0
 # Share of venue cash the grid may allocate at start; the rest absorbs fees
 # and marketable-limit slippage so the last rung never fails on cash.
-CASH_USE = 0.95
+CASH_USE = 0.55  # v7: was 0.95 — full deployment is how grids bleed in bears
 
 # While flat, the re-entry reference either follows the running high (True)
 # or stays at the last sale price until the market comes back to it (False,

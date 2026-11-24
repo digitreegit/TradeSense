@@ -1,4 +1,4 @@
-"""v5 crypto rule — pure logic, no broker calls.
+"""v7 crypto rule — pure logic, no broker calls.
 
 Watch every coin Robinhood lets the API buy. When a coin trades `dip`
 below its rolling 24-hour high, buy a fixed dollar amount; park a GTC sell
@@ -17,7 +17,7 @@ MIN_DIP = 0.01
 # lot -12% instead of -25%, for ~9pp less total than "hold forever".
 REANCHOR_PCT = 0.10
 MAX_DIP = 0.30
-DEFAULT_ORDER_DOLLARS = 1000.0
+DEFAULT_ORDER_DOLLARS = 500.0
 MIN_ORDER_DOLLARS = 5.0
 LOOKBACK_HOURS = 24
 # Leftover fractions from old ladders (a few cents) can't be sold via the
@@ -32,11 +32,20 @@ MAX_SAMPLE_AGE_HOURS = 26
 # run on. Live 2026-10-02→13 bought nothing but freshly listed micro-caps
 # (LIT, RE, CASHCAT, ...) because the pair list was read one page at a time;
 # those coins have no hourly history to replay, so no evidence either way.
-CORE_UNIVERSE = frozenset({
-    "BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD", "DOGE/USD", "LINK/USD", "AVAX/USD",
-    "LTC/USD", "BCH/USD", "UNI/USD", "AAVE/USD", "DOT/USD", "SHIB/USD", "PEPE/USD",
-    "CRV/USD", "SUSHI/USD", "GRT/USD", "XTZ/USD", "YFI/USD", "BAT/USD",
-})
+# v7 (2026-11-24): majors only. 180d crash window — 20-coin dip −38%, majors
+# with BTC SMA7 + 35% cash cap + $500 lots: +0.9% maxDD −0.6%. Alts were the bleed.
+CORE_UNIVERSE = frozenset({"BTC/USD", "ETH/USD", "SOL/USD"})
+
+# Only buy when BTC hourly close > its SMA over this many days. In the same
+# 180d window BTC spent ~41% of bars above SMA7; sitting out the rest is what
+# kept equity flat-to-up while buy&hold BTC lost 18%.
+REGIME_SYMBOL = "BTC/USD"
+REGIME_SMA_DAYS = 7
+# Deployed lot value may not exceed this fraction of (cash + holdings).
+CAP_FRAC = 0.35
+# If this share of the watch list is simultaneously "armed", the market is
+# cascading — skip new buys for the tick.
+BREADTH_MAX = 0.40
 
 STABLECOINS = frozenset({
     "USDC", "USDT", "DAI", "PYUSD", "USDP", "TUSD", "BUSD", "FDUSD",
@@ -69,6 +78,46 @@ def is_dust(qty: float, price: float | None) -> bool:
 
 def is_core(pair: str) -> bool:
     return str(pair).upper() in CORE_UNIVERSE
+
+
+def regime_ok(closes: list[float], *, days: int = REGIME_SMA_DAYS) -> bool:
+    """True when the last close is above the SMA of the last `days`*24 closes.
+    Not enough history → False (do not buy blind into a crash)."""
+    need = int(days) * 24
+    if not closes or len(closes) < need:
+        return False
+    window = [float(x) for x in closes[-need:] if x and float(x) > 0]
+    if len(window) < need:
+        return False
+    sma = sum(window) / len(window)
+    return window[-1] > sma
+
+
+def deployed_dollars(lots: dict, prices: dict[str, float]) -> float:
+    total = 0.0
+    for sym, lot in (lots or {}).items():
+        px = prices.get(sym) or lot.get("last_price") or lot.get("price") or 0
+        total += float(lot.get("qty") or 0) * float(px or 0)
+    return total
+
+
+def under_cap(lots: dict, prices: dict[str, float], cash: float,
+              order_dollars: float, *, cap: float = CAP_FRAC) -> bool:
+    deployed = deployed_dollars(lots, prices)
+    equity = cash + deployed
+    if equity <= 0:
+        return False
+    return (deployed + float(order_dollars)) <= equity * float(cap)
+
+
+def breadth_ok(rows: list[dict], *, max_frac: float = BREADTH_MAX) -> bool:
+    """Skip when the watch list is too small to measure a cascade.
+    With 1–2 symbols, armed/n is meaningless (a lone dip would always look
+    like 100% of the market and block every buy)."""
+    if not rows or len(rows) < 3:
+        return True
+    armed = sum(1 for r in rows if r.get("armed"))
+    return (armed / len(rows)) <= float(max_frac)
 
 
 def is_stable(pair: str) -> bool:

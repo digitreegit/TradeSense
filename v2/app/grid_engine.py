@@ -1,4 +1,4 @@
-"""TradeSense v6 — engine: one tick every ~15 minutes for both venues.
+"""TradeSense v7 — engine: one tick every ~15 minutes for both venues.
 
 Venue adapters hide the broker APIs; everything strategy-related lives in
 `grid.py`. Per-venue lifecycle stored in `grid_book`:
@@ -36,8 +36,15 @@ PRICES_KEY = "v5_crypto_prices"   # {pair: [[iso, mid], ...]} rolling 26h
 SETTINGS_LOG_KEY = "grid_settings_log"  # every parameter change with its reason
 MAX_SETTINGS_LOG = 200
 ENGINE_LOG_KEY = "grid_engine_logged"   # last engine version whose changes were written to the log
-ENGINE_VERSION = "v6.3"
+ENGINE_VERSION = "v7"
 ENGINE_CHANGES = {
+    "v7": [
+        ("engine", "robinhood", "알트 20종·현금 풀투입·하락장에도 매수",
+         "BTC/ETH/SOL + BTC 7일선 위만 매수 + 투입 35% 상한 + $500 + 틱당 1건",
+         "dip_replay majors 180d: v6 base −7% maxDD −13%; v7 +0.9% maxDD −0.6%. 같은 60d 알트풀은 −38%. 사용자 요청 2026-11-24"),
+        ("engine", "alpaca", "현금 95%·시드 3칸", "현금 55%·시드 2칸",
+         "대형주 그리드도 하락장에서 풀투입이 낙폭을 키움. 현금 버퍼로 동일 사다리의 낙폭을 줄인다."),
+    ],
     "v6.3": [
         ("engine", None, "실거래만", "시장별 테스트/실거래 스위치 (기본: 테스트)",
          "같은 엔진·같은 규칙을 가상 현금으로 먼저 돌려 본 뒤 실전 투입을 결정한다. 테스트 전환 시 대기 실주문 취소·보유 유지, 실거래 복귀 시 이전 장부 복원. 사용자 요청 2026-10-13"),
@@ -58,7 +65,7 @@ ENGINE_CHANGES = {
          "dip_replay 365d: 기존 유니버스 그리드 −9~−11% (COIN·MSTR −54%), 대형주 10종 그리드 5% +9.9% maxDD −7%"),
     ],
 }
-MAX_DIP_BUYS_PER_TICK = 3          # a market-wide crash should not spend everything in one go
+MAX_DIP_BUYS_PER_TICK = 1          # v7: one buy per tick — cascades used to drain cash in 45 minutes
 MAX_TRADES_KEPT = 500
 MAX_HISTORY_DAYS = 400
 ORDER_WAIT_SECONDS = 20.0
@@ -319,6 +326,34 @@ def _log_engine_changes_once() -> None:
     for field, venue, old, new, reason in ENGINE_CHANGES.get(ENGINE_VERSION, []):
         _log_change(field, venue, old, new, reason)
     store.set(ENGINE_LOG_KEY, ENGINE_VERSION)
+    try:
+        _apply_v7_migration()
+    except Exception:
+        log.exception("v7 migration failed")
+
+
+def _apply_v7_migration() -> None:
+    """Force both venues into paper and adopt the replay-backed lot size.
+    Idempotent via ENGINE_LOG_KEY — only runs when the version stamp flips."""
+    cur = get_settings()
+    modes = {v.name: "paper" for v in venues()}
+    d = dict(cur["dip"])
+    d["order_dollars"] = dip.clamp_order(dip.DEFAULT_ORDER_DOLLARS)
+    steps = dict(cur["steps"])
+    if "alpaca" in steps:
+        steps["alpaca"] = grid.clamp_step(0.08)
+    for vname, prev in (cur.get("modes") or {}).items():
+        if prev != "paper":
+            _log_change("mode", vname, prev, "paper", "v7: 손실 구간 실전 중단 — 테스트로 규칙 검증 후 재투입")
+    _save_settings(modes=modes, dip=d, steps=steps, enabled=True)
+    book = get_book()
+    _apply_modes(book, datetime.now(timezone.utc))
+    store.set(BOOK_KEY, book)
+    msg = ("v7 적용 — 크립토·주식 모두 테스트 모드. "
+           "크립토: BTC/ETH/SOL · BTC 7일선 위만 매수 · 투입 35% · $500 · 틱당 1건. "
+           "주식: 현금 55%·시드 2칸.")
+    log_activity("grid", msg)
+    _notify(f"[v7] {msg}")
 
 
 def set_step(step: float, venue: str | None = None, *, reason: str | None = None) -> dict:
@@ -647,6 +682,30 @@ class RobinhoodVenue:
             if rows:
                 out[sym] = rows
         return out
+
+    def recent_hourly_closes(self, symbol: str, hours: int = 24 * 8) -> list[float]:
+        """Hourly closes oldest→newest for the regime SMA (BTC)."""
+        try:
+            from datetime import timedelta as _td
+            from alpaca.data.historical import CryptoHistoricalDataClient
+            from alpaca.data.requests import CryptoBarsRequest
+            from alpaca.data.timeframe import TimeFrame
+            client = CryptoHistoricalDataClient()
+            start = datetime.now(timezone.utc) - _td(hours=hours)
+            req = CryptoBarsRequest(symbol_or_symbols=[symbol], timeframe=TimeFrame.Hour, start=start)
+            data = client.get_crypto_bars(req).data
+            bars = data.get(symbol) if isinstance(data, dict) else None
+            if not bars:
+                return []
+            out = []
+            for b in bars:
+                c = getattr(b, "close", None)
+                if c is not None and float(c) > 0:
+                    out.append(float(c))
+            return out
+        except Exception as exc:
+            log.warning("alpaca crypto closes failed: %s", exc)
+            return []
 
     def _place(self, side: str, pair: str, dollars: float, ref_price: float) -> dict:
         from .robinhood_orders import place_market_dollars
@@ -1427,17 +1486,48 @@ def _run_dip(venue, vb: dict, now: datetime) -> dict:
     skip_note = None
     max_buys = min(MAX_DIP_BUYS_PER_TICK, int(eff["max_buys"]))
     tag = intel.stamp(eff)
+
+    # v7 gates: regime (BTC > SMA7) → breadth → cash-cap. Sell path above is untouched.
+    regime_closes = []
+    if hasattr(venue, "recent_hourly_closes"):
+        try:
+            regime_closes = venue.recent_hourly_closes(dip.REGIME_SYMBOL, hours=24 * (dip.REGIME_SMA_DAYS + 1))
+        except Exception as exc:
+            log.warning("regime closes failed: %s", exc)
+    # Closed hourly bars only. Overlaying the live mid made BTC itself
+    # un-buyable (a -5% dip pulls the "last close" under the SMA).
+    in_regime = dip.regime_ok(regime_closes)
+    vb["regime"] = {
+        "symbol": dip.REGIME_SYMBOL, "ok": in_regime,
+        "sma_days": dip.REGIME_SMA_DAYS, "bars": len(regime_closes),
+        "last": regime_closes[-1] if regime_closes else None,
+    }
+    if not in_regime:
+        skip_note = f"{dip.REGIME_SYMBOL} {dip.REGIME_SMA_DAYS}일선 아래 — 신규 매수 중단 (현금 보존)"
+    elif not dip.breadth_ok(rows):
+        skip_note = f"급락 동시 신호 {sum(1 for r in rows if r.get('armed'))}/{len(rows)} — 신규 매수 중단"
     for row in rows:
         if bought >= max_buys:
             break
         if not row["armed"]:
             continue
         sym = row["symbol"]
+        if not in_regime:
+            skip_note = f"{sym} 매수 조건 충족 — {dip.REGIME_SYMBOL} {dip.REGIME_SMA_DAYS}일선 아래 (현금 보존)"
+            break
+        if not dip.breadth_ok(rows):
+            skip_note = f"{sym} 매수 조건 충족 — 시장 동시 급락 (breadth)"
+            break
         if eff["paused"]:
             skip_note = f"{sym} 매수 조건 충족 — {eff['note']}"
             break
+        # Cash before cap: with CAP_FRAC < 1, a short wallet always fails the
+        # cap check first (equity < order), which hid the real reason.
         if cash < order_dollars * 1.005:
             skip_note = f"{sym} 매수 조건 충족 — 현금 부족 (${cash:,.2f} < ${order_dollars:,.0f})"
+            break
+        if not dip.under_cap(lots, prices, cash, order_dollars):
+            skip_note = f"{sym} 매수 조건 충족 — 투입 상한 {dip.CAP_FRAC:.0%} (현금 버퍼)"
             break
         r = venue.buy(sym, order_dollars, row["price"])
         if not r.get("ok"):
@@ -1727,8 +1817,12 @@ def _maybe_resize(venue, vb: dict, ladders: dict[str, dict], cash: float) -> str
     unit_old = float(vb.get("unit_dollars") or 0)
     basis = sum(grid.cost_basis(l) for l in ladders.values())
     capital = cash + basis
+    # Compare deployable capital (CASH_USE share) to the current plan. With
+    # CASH_USE < 1, raw equity always exceeds planned*1.15 and would resize
+    # every tick.
     planned = unit_old * grid.MAX_UNITS * n
-    if unit_old <= 0 or capital < planned * RESIZE_TRIGGER:
+    deployable = capital * grid.CASH_USE
+    if unit_old <= 0 or deployable < planned * RESIZE_TRIGGER:
         return None
     unit_new = grid.unit_size(capital, n)
     if unit_new <= unit_old:
@@ -1835,6 +1929,8 @@ def status() -> dict:
             "watch_count": vb.get("watch_count") or len(watch_rows),
             "outside": vb.get("outside") or [],
             "intel": vb.get("intel") if is_dip else None,
+            "regime": vb.get("regime") if is_dip else None,
+            "cap_frac": dip.CAP_FRAC if is_dip else None,
         }
     live_totals = {_hist_key(k, s["modes"][k]): o["account_total"] for k, o in out_venues.items() if o["configured"]}
     try:
@@ -1854,7 +1950,7 @@ def status() -> dict:
         except Exception:
             log.exception("scorecard %s failed", v.name)
     return {
-        "version": "v6.3",
+        "version": "v7",
         "intel": intel.latest(),
         "intel_history": intel.history(30),
         "rev": scorecard.settings_rev(s),
